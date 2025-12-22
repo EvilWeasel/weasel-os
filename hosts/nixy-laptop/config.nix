@@ -206,6 +206,14 @@ in
             sha256 = "sha256-Vq+E2F2Ym5JdzjpCusRMDXd6uuAhhjAehyD/tO3omdY=";
           };
         };
+        NiriWindows = {
+          src = pkgs.fetchFromGitHub {
+            owner = "rochacbruno";
+            repo = "DankNiriWindows";
+            rev = "b845277";
+            sha256 = "sha256-rdZAnkRyfycI2a2wjSiepQwRI49zKbwoRzpz1+c6ZJA=";
+          };
+        };
       };
     };
     gamescope = {
@@ -325,6 +333,8 @@ in
   ];
 
   environment.systemPackages = with pkgs; [
+    dsearch
+    dgop
     xwayland-satellite
     # Dank Linux Deps
     cava
