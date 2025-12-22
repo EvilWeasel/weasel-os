@@ -22,6 +22,8 @@ in
     ../../modules/local-hardware-clock.nix
   ];
 
+
+
   boot = {
     # Kernel
     kernelPackages = pkgs.linuxPackages_zen;
@@ -58,7 +60,7 @@ in
   # Styling Options
   stylix = {
     enable = true;
-    image = ../../config/wallpapers/beautifulmountainscape.jpg;
+    image = ../../pictures/wallpapers/beautifulmountainscape.jpg;
     # base16Scheme = {
     #   base00 = "232136";
     #   base01 = "2a273f";
@@ -148,7 +150,75 @@ in
   };
 
   programs = {
+    xwayland.enable = true;
+    dms-shell = {
+      enable = true;
+
+      systemd = {
+        enable = true;
+        restartIfChanged = true;
+      };
+      # Core features
+      enableSystemMonitoring = true;     # System monitoring widgets (dgop)
+      enableClipboard = true;            # Clipboard history manager
+      enableVPN = true;                  # VPN management widget
+      enableDynamicTheming = true;       # Wallpaper-based theming (matugen)
+      enableAudioWavelength = true;      # Audio visualizer (cava)
+      enableCalendarEvents = true;       # Calendar integration (khal)
+      plugins = {
+        DockerManager = {
+          src = pkgs.fetchFromGitHub {
+            owner = "LuckShiba";
+            repo = "DmsDockerManager";
+            rev = "v1.2.0";
+            sha256 = "sha256-VoJCaygWnKpv0s0pqTOmzZnPM922qPDMHk4EPcgVnaU=";
+          };
+        };
+        WebSearch = {
+          src = pkgs.fetchFromGitHub {
+            owner = "devnullvoid";
+            repo = "dms-web-search";
+            rev = "81ccd9f";
+            sha256 = "sha256-mKbmROijhYhy/IPbVxYbKyggXesqVGnS/AfAEyeQVhg=";
+          };
+        };
+        CommandRunner = {
+          src = pkgs.fetchFromGitHub {
+            owner = "devnullvoid";
+            repo = "dms-command-runner";
+            rev = "d89a094";
+            sha256 = "sha256-tXqDRVp1VhyD1WylW83mO4aYFmVg/NV6Z/toHmb5Tn8=";
+          };
+        };
+        EmojiLauncher = {
+          src = pkgs.fetchFromGitHub {
+            owner = "devnullvoid";
+            repo = "dms-emoji-launcher";
+            rev = "2951ec7";
+            sha256 = "sha256-aub5pXRMlMs7dxiv5P+/Rz/dA4weojr+SGZAItmbOvo=";
+          };
+        };
+        Calculator = {
+          src = pkgs.fetchFromGitHub {
+            owner = "rochacbruno";
+            repo = "DankCalculator";
+            rev = "de6dbd5";
+            sha256 = "sha256-Vq+E2F2Ym5JdzjpCusRMDXd6uuAhhjAehyD/tO3omdY=";
+          };
+        };
+      };
+    };
+    gamescope = {
+      enable = true;
+      # not needed when using gamemoderun
+      capSysNice = false;
+    };
+    gamemode = {
+      enable = true;
+      enableRenice = true;
+    };
     hyprland.enable = true; # may be needed for portals???
+    niri.enable = true;
     firefox.enable = false;
     starship = {
       enable = true;
@@ -230,9 +300,9 @@ in
     virt-manager.enable = true;
     steam = {
       enable = true;
-      gamescopeSession.enable = true;
+      # gamescopeSession.enable = true;
       remotePlay.openFirewall = true;
-      dedicatedServer.openFirewall = true;
+      # dedicatedServer.openFirewall = true;
     };
     thunar = {
       enable = true;
@@ -249,9 +319,35 @@ in
     mutableUsers = true;
   };
 
+  nixpkgs.config.permittedInsecurePackages = [
+    "ventoy-qt5-1.1.07"
+    "qtwebengine-5.15.19"
+  ];
+
   environment.systemPackages = with pkgs; [
+    xwayland-satellite
+    # Dank Linux Deps
+    cava
+    cliphist
+    dgop
+    dsearch
+    matugen
+    helix
+    lsfg-vk
+    lsfg-vk-ui
+    superTuxKart
+    libreoffice-qt
+    hunspell
+    hunspellDicts.en_US
+    hunspellDicts.de_DE
+    # Minecraft
+    prismlauncher
+    ftb-app
+
+    firefox
+    ventoy-full-qt
     protonvpn-gui
-    stremio
+    # stremio
     warp-terminal
     code-cursor
     bun
@@ -269,6 +365,7 @@ in
     sl
     dxvk_2
     vkd3d-proton
+    vulkan-tools
     keymapp
     wally-cli
     alarm-clock-applet
@@ -289,8 +386,9 @@ in
     bottles
     lutris
     heroic
-    protonup # protonGE installer
+    protonup-ng # protonGE installer
     mangohud # ingame performance hud
+    mangojuice
     qbittorrent # :)
     meld # best diff-tool ever
     obsidian # best markdown editor ever
@@ -355,12 +453,12 @@ in
     tree
     spotify
     neovide
-    greetd.tuigreet
+    tuigreet
   ];
 
   fonts = {
     packages = with pkgs; [
-      noto-fonts-emoji
+      noto-fonts-color-emoji
       noto-fonts-cjk-sans
       font-awesome
       symbola
@@ -378,9 +476,11 @@ in
   };
 
   environment.variables = {
-    ZANEYOS_VERSION = "2.3";
-    ZANEYOS = "true";
+    # ZANEYOS_VERSION = "2.3";
+    # ZANEYOS = "true";
     STEAM_EXTRA_COMPAT_TOOLS_PATHS = "/home/${username}/.steam/root/compatibilitytools.d";
+    # let gamescope handle mangohud injection or do so on game-by-game basis
+    # MANGOHUD="1";
   };
 
   environment.sessionVariables = {
@@ -411,20 +511,42 @@ in
         variant = "";
       };
     };
-    greetd = {
+    displayManager.dms-greeter = {
       enable = true;
-      vt = 3;
-      settings = {
-        default_session = {
-          # Wayland Desktop Manager is installed only for user via home-manager!
-          user = username;
-          # .wayland-session is a script generated by home-manager, which links to the current wayland compositor(sway/hyprland or others).
-          # with such a vendor-no-locking script, we can switch to another wayland compositor without modifying greetd's config here.
-          # command = "$HOME/.wayland-session"; # start a wayland session directly without a login manager
-          command = "${pkgs.greetd.tuigreet}/bin/tuigreet --user-menu --time --cmd Hyprland"; # start Hyprland with a TUI login manager
-        };
+      compositor = {
+        name = "niri"; # Required. Can be also "hyprland" or "sway"
       };
+
+      # Sync your user's DankMaterialShell theme with the greeter. You'll probably want this
+      configHome = "/home/evilweasel";
+
+      # Custom config files for non-standard config locations
+      configFiles = [
+        "/home/evilweasel/.config/DankMaterialShell/settings.json"
+      ];
+
+      # Save the logs to a file
+      logs = {
+        save = true; 
+        path = "/tmp/dms-greeter.log";
+      };
+
+      # Custom Quickshell Package    
+      quickshell.package = pkgs.quickshell;
     };
+    # greetd = {
+    #   enable = true;
+    #   settings = {
+    #     default_session = {
+    #       # Wayland Desktop Manager is installed only for user via home-manager!
+    #       user = username;
+    #       # .wayland-session is a script generated by home-manager, which links to the current wayland compositor(sway/hyprland or others).
+    #       # with such a vendor-no-locking script, we can switch to another wayland compositor without modifying greetd's config here.
+    #       # command = "$HOME/.wayland-session"; # start a wayland session directly without a login manager
+    #       command = "${pkgs.tuigreet}/bin/tuigreet --user-menu --time --cmd Hyprland"; # start Hyprland with a TUI login manager
+    #     };
+    #   };
+    # };
     smartd = {
       enable = false;
       autodetect = true;
@@ -468,11 +590,13 @@ in
       flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
     '';
   };
-    # hardware.sane = {
-    #   enable = true;
-    #   extraBackends = [ pkgs.sane-airscan ];
-    #   disabledDefaultBackends = [ "escl" ];
-    # };
+  hardware.sane = {
+    enable = true;
+    extraBackends = [ pkgs.sane-airscan ];
+    disabledDefaultBackends = [ "escl" ];
+  };
+
+  services.udev.packages = [ pkgs.sane-airscan ];
 
   # ZSA Keyboard flashing udev rules
   hardware.keyboard.zsa.enable = true;
@@ -517,6 +641,20 @@ in
     '';
   };
 
+  # security.pki.certificateFiles = [
+  #   "/home/evilweasel/certs/boxcert.cer"
+  # ];
+  # security.pki.certificateFiles = [
+  #   config.certs.boxcert
+  # ];
+
+    # security.pki.certificateFiles = [
+    #   (builtins.path {
+    #     path = ../../certs/boxcert.cer;
+    #     name = "boxcert.cer";
+    #   })
+    # ];
+
   # Optimization settings and garbage collection automation
   nix = {
     settings = {
@@ -525,8 +663,18 @@ in
         "nix-command"
         "flakes"
       ];
-      substituters = [ "https://hyprland.cachix.org" ];
-      trusted-public-keys = [ "hyprland.cachix.org-1:a7pgxzMz7+chwVL3/pzj6jIBMioiJM7ypFP8PwtkuGc=" ];
+      substituters = [ 
+        "https://cache.nixos.org?priority=10" 
+        "https://nyx.chaotic.cx"
+        "https://hyprland.cachix.org"
+        "https://nix-community.cachix.org"
+        "https://yazi.cachix.org"
+      ];
+      trusted-public-keys = [ 
+        "hyprland.cachix.org-1:a7pgxzMz7+chwVL3/pzj6jIBMioiJM7ypFP8PwtkuGc="
+        "nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs="
+        "yazi.cachix.org-1:Dcdz63NZKfvUCbDGngQDAZq6kOroIrFoyO064uvLh8k="
+      ];
     };
     gc = {
       automatic = true;
@@ -540,8 +688,6 @@ in
     enable = true;
     qemu = {
       swtpm.enable = true;
-      ovmf.enable = true;
-      ovmf.packages = [ pkgs.OVMFFull.fd ];
     };
   };
   virtualisation.docker.enable = true;

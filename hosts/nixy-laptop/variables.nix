@@ -18,7 +18,7 @@ monitor=desc:Ancor Communications Inc ROG PG279Q, 2560x1440@120, auto, 1.25
   clock24h = true;
 
   # Program Options
-  browser = "google-chrome-stable"; # Set Default Browser (google-chrome-stable for google-chrome)
+  browser = "firefox"; # Set Default Browser (google-chrome-stable for google-chrome)
   terminal = "kitty"; # Set Default System Terminal
   keyboardLayout = "de";
   consoleKeyMap = "de";
