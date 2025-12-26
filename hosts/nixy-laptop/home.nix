@@ -224,6 +224,7 @@ in
         }
       '';
       shellAliases = {
+        shader-log = "tail -f ~/.steam/root/logs/shader_log.txt";
         sv = "sudo nvim";
         fr = "nh os switch --hostname ${host} /home/${username}/weasel-os";
         fu = "nh os switch --hostname ${host} --update /home/${username}/weasel-os";
@@ -270,6 +271,7 @@ in
         }
       '';
       shellAliases = {
+        shader-log = "tail -f ~/.steam/root/logs/shader_log.txt";
         sv = "sudo nvim";
         fr = "nh os switch --hostname ${host} /home/${username}/weasel-os";
         fu = "nh os switch --hostname ${host} --update /home/${username}/weasel-os";
