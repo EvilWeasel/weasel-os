@@ -1,9 +1,9 @@
-
 {
   description = "WeaselOS";
 
   inputs = {
-    nixpkgs.url = "github:nixos/nixpkgs/nixos-unstable";
+    nixpkgs-unstable.url = "github:nixos/nixpkgs/nixos-unstable";
+    nixpkgs.url = "github:nixos/nixpkgs/nixos-25.11";
     home-manager.url = "github:nix-community/home-manager/master";
     home-manager.inputs.nixpkgs.follows = "nixpkgs";
     nixos-hardware.url = "github:NixOS/nixos-hardware/master";
@@ -20,25 +20,50 @@
       # Mismatched system dependencies will lead to crashes and other issues.
       inputs.nixpkgs.follows = "nixpkgs";
     };
+    dms = {
+      url = "github:AvengeMedia/DankMaterialShell/stable";
+      inputs.nixpkgs.follows = "nixpkgs-unstable";
+    };
+    helium = {
+      url = "path:/home/evilweasel/weasel-os/packages/helium";
+      inputs.nixpkgs.follows = "nixpkgs-unstable";
+    };
   };
 
-  outputs = { nixpkgs, home-manager, ... }@inputs:
+  outputs =
+    {
+      nixpkgs,
+      nixpkgs-unstable,
+      home-manager,
+      ...
+    }@inputs:
     let
       system = "x86_64-linux";
       username = "evilweasel";
       host = "nixy-desktop";
       hostLaptop = "nixy-laptop";
-    in {
+      mkPkgs =
+        nixpkgs:
+        import nixpkgs {
+          inherit system;
+          config.allowUnfree = true;
+        };
+      pkgsStable = mkPkgs nixpkgs;
+      pkgsUnstable = mkPkgs nixpkgs-unstable;
+    in
+    {
       # PACKAGES.DEFS (DERIVATIONS)
-      packages.${system}.certs = nixpkgs.lib.makeOverridable (pkgs:
-        pkgs.callPackage ./certs/default.nix { }
+      packages.${system}.certs = nixpkgs.lib.makeOverridable (
+        pkgs: pkgs.callPackage ./certs/default.nix { }
       );
 
       # MODULES
-      nixosModules.certs = { config, pkgs, ... }:
+      nixosModules.certs =
+        { config, pkgs, ... }:
         let
           myCerts = inputs.self.packages.${pkgs.system}.certs;
-        in {
+        in
+        {
           options.certs = nixpkgs.lib.mkOption {
             type = nixpkgs.lib.types.attrsOf nixpkgs.lib.types.path;
             default = myCerts;
@@ -48,7 +73,14 @@
 
       # HOST CONFIGS
       nixosConfigurations.${host} = nixpkgs.lib.nixosSystem {
-        specialArgs = { inherit system inputs username host; };
+        specialArgs = {
+          inherit
+            system
+            inputs
+            username
+            host
+            ;
+        };
         modules = [
           ./hosts/${host}/config.nix
           inputs.self.nixosModules.certs
@@ -66,16 +98,24 @@
       };
 
       nixosConfigurations.${hostLaptop} = nixpkgs.lib.nixosSystem {
-        specialArgs = { inherit system inputs username; host = hostLaptop; };
+        specialArgs = {
+          inherit system inputs username;
+          host = hostLaptop;
+          pkgsUnstable = pkgsUnstable;
+        };
         modules = [
+          # inputs.dms.nixosModules.dankMaterialShell
+          # inputs.dms.nixosModules.greeter
           ./hosts/${hostLaptop}/config.nix
           inputs.self.nixosModules.certs
           inputs.nixos-hardware.nixosModules.lenovo-yoga-7-14IAH7-hybrid
           inputs.stylix.nixosModules.stylix
           home-manager.nixosModules.home-manager
+          ./modules/canbus.nix
           {
             home-manager.extraSpecialArgs = {
-              inherit username inputs; host = hostLaptop;
+              inherit username inputs;
+              host = hostLaptop;
             };
             home-manager.useGlobalPkgs = false;
             home-manager.useUserPackages = true;

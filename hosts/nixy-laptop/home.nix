@@ -4,6 +4,7 @@
   host,
   config,
   lib,
+  inputs,
   ...
 }:
 let
@@ -23,6 +24,8 @@ in
 
   # Import Program Configurations
   imports = [
+    inputs.dms.homeModules.dankMaterialShell.default
+
     ../../programs/emoji.nix
     ../../programs/fastfetch
     ../../programs/hyprland.nix
@@ -43,7 +46,6 @@ in
     };
     "Pictures/face.png".source = ../../pictures/weasel.png;
   };
-
 
   # Install & Configure Git
   programs.git = {
@@ -121,7 +123,6 @@ in
     style.name = "kvantum";
   };
 
-
   # Scripts
   home.packages = [
     (import ../../scripts/emopicker9000.nix { inherit pkgs; })
@@ -149,7 +150,7 @@ in
           after_sleep_cmd = "hyprctl dispatch dpms on";
           ignore_dbus_inhibit = false;
           lock_cmd = "hyprlock";
-          };
+        };
         listener = [
           {
             timeout = 900;
@@ -166,6 +167,70 @@ in
   };
 
   programs = {
+    dankMaterialShell = {
+      enable = true;
+      systemd = {
+        enable = true;
+        restartIfChanged = true;
+      };
+      # Core features
+      enableSystemMonitoring = true; # System monitoring widgets (dgop)
+      enableClipboard = true; # Clipboard history manager
+      enableVPN = true; # VPN management widget
+      enableDynamicTheming = true; # Wallpaper-based theming (matugen)
+      enableAudioWavelength = true; # Audio visualizer (cava)
+      enableCalendarEvents = true; # Calendar integration (khal)
+      plugins = {
+        DockerManager = {
+          src = pkgs.fetchFromGitHub {
+            owner = "LuckShiba";
+            repo = "DmsDockerManager";
+            rev = "v1.2.0";
+            sha256 = "sha256-VoJCaygWnKpv0s0pqTOmzZnPM922qPDMHk4EPcgVnaU=";
+          };
+        };
+        WebSearch = {
+          src = pkgs.fetchFromGitHub {
+            owner = "devnullvoid";
+            repo = "dms-web-search";
+            rev = "81ccd9f";
+            sha256 = "sha256-mKbmROijhYhy/IPbVxYbKyggXesqVGnS/AfAEyeQVhg=";
+          };
+        };
+        CommandRunner = {
+          src = pkgs.fetchFromGitHub {
+            owner = "devnullvoid";
+            repo = "dms-command-runner";
+            rev = "d89a094";
+            sha256 = "sha256-tXqDRVp1VhyD1WylW83mO4aYFmVg/NV6Z/toHmb5Tn8=";
+          };
+        };
+        EmojiLauncher = {
+          src = pkgs.fetchFromGitHub {
+            owner = "devnullvoid";
+            repo = "dms-emoji-launcher";
+            rev = "2951ec7";
+            sha256 = "sha256-aub5pXRMlMs7dxiv5P+/Rz/dA4weojr+SGZAItmbOvo=";
+          };
+        };
+        Calculator = {
+          src = pkgs.fetchFromGitHub {
+            owner = "rochacbruno";
+            repo = "DankCalculator";
+            rev = "de6dbd5";
+            sha256 = "sha256-Vq+E2F2Ym5JdzjpCusRMDXd6uuAhhjAehyD/tO3omdY=";
+          };
+        };
+        NiriWindows = {
+          src = pkgs.fetchFromGitHub {
+            owner = "rochacbruno";
+            repo = "DankNiriWindows";
+            rev = "b845277";
+            sha256 = "sha256-rdZAnkRyfycI2a2wjSiepQwRI49zKbwoRzpz1+c6ZJA=";
+          };
+        };
+      };
+    };
     vscode = {
       enable = true;
       package = pkgs.vscode.fhs;
@@ -193,10 +258,10 @@ in
         inactive_tab_font_style bold
       '';
     };
-     starship = {
-            enable = true;
-            package = pkgs.starship;
-     };
+    starship = {
+      enable = true;
+      package = pkgs.starship;
+    };
     zsh = {
       enable = true;
       enableCompletion = true;

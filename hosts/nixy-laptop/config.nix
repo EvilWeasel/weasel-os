@@ -1,10 +1,12 @@
 {
   config,
   pkgs,
+  pkgsUnstable,
   host,
   lib,
   username,
   options,
+  inputs,
   ...
 }:
 let
@@ -12,6 +14,7 @@ let
 in
 {
   imports = [
+    inputs.dms.nixosModules.greeter
     ./hardware.nix
     ./users.nix
     ../../modules/amd-drivers.nix
@@ -22,7 +25,7 @@ in
     ../../modules/local-hardware-clock.nix
   ];
 
-
+  features.canbus.enable = true;
 
   boot = {
     # Kernel
@@ -150,72 +153,16 @@ in
   };
 
   programs = {
-    xwayland.enable = true;
-    dms-shell = {
+    dankMaterialShell.greeter = {
       enable = true;
-
-      systemd = {
-        enable = true;
-        restartIfChanged = true;
-      };
-      # Core features
-      enableSystemMonitoring = true;     # System monitoring widgets (dgop)
-      enableClipboard = true;            # Clipboard history manager
-      enableVPN = true;                  # VPN management widget
-      enableDynamicTheming = true;       # Wallpaper-based theming (matugen)
-      enableAudioWavelength = true;      # Audio visualizer (cava)
-      enableCalendarEvents = true;       # Calendar integration (khal)
-      plugins = {
-        DockerManager = {
-          src = pkgs.fetchFromGitHub {
-            owner = "LuckShiba";
-            repo = "DmsDockerManager";
-            rev = "v1.2.0";
-            sha256 = "sha256-VoJCaygWnKpv0s0pqTOmzZnPM922qPDMHk4EPcgVnaU=";
-          };
-        };
-        WebSearch = {
-          src = pkgs.fetchFromGitHub {
-            owner = "devnullvoid";
-            repo = "dms-web-search";
-            rev = "81ccd9f";
-            sha256 = "sha256-mKbmROijhYhy/IPbVxYbKyggXesqVGnS/AfAEyeQVhg=";
-          };
-        };
-        CommandRunner = {
-          src = pkgs.fetchFromGitHub {
-            owner = "devnullvoid";
-            repo = "dms-command-runner";
-            rev = "d89a094";
-            sha256 = "sha256-tXqDRVp1VhyD1WylW83mO4aYFmVg/NV6Z/toHmb5Tn8=";
-          };
-        };
-        EmojiLauncher = {
-          src = pkgs.fetchFromGitHub {
-            owner = "devnullvoid";
-            repo = "dms-emoji-launcher";
-            rev = "2951ec7";
-            sha256 = "sha256-aub5pXRMlMs7dxiv5P+/Rz/dA4weojr+SGZAItmbOvo=";
-          };
-        };
-        Calculator = {
-          src = pkgs.fetchFromGitHub {
-            owner = "rochacbruno";
-            repo = "DankCalculator";
-            rev = "de6dbd5";
-            sha256 = "sha256-Vq+E2F2Ym5JdzjpCusRMDXd6uuAhhjAehyD/tO3omdY=";
-          };
-        };
-        NiriWindows = {
-          src = pkgs.fetchFromGitHub {
-            owner = "rochacbruno";
-            repo = "DankNiriWindows";
-            rev = "b845277";
-            sha256 = "sha256-rdZAnkRyfycI2a2wjSiepQwRI49zKbwoRzpz1+c6ZJA=";
-          };
-        };
+      compositor.name = "niri";
+      configHome = "/home/yourusername";
+      logs = {
+        save = true;
+        path = "/tmp/dms-greeter.log";
       };
     };
+    xwayland.enable = true;
     gamescope = {
       enable = true;
       # not needed when using gamemoderun
@@ -332,139 +279,149 @@ in
     "qtwebengine-5.15.19"
   ];
 
-  environment.systemPackages = with pkgs; [
-    dsearch
-    dgop
-    xwayland-satellite
-    # Dank Linux Deps
-    cava
-    cliphist
-    dgop
-    dsearch
-    matugen
-    helix
-    lsfg-vk
-    lsfg-vk-ui
-    superTuxKart
-    libreoffice-qt
-    hunspell
-    hunspellDicts.en_US
-    hunspellDicts.de_DE
-    # Minecraft
-    prismlauncher
-    ftb-app
-
-    firefox
-    ventoy-full-qt
-    protonvpn-gui
-    # stremio
-    warp-terminal
-    code-cursor
-    bun
-    obs-studio
-    dotnetCorePackages.dotnet_9.sdk
-    dotnetCorePackages.dotnet_9.runtime
-    dotnetCorePackages.dotnet_9.aspnetcore
-    virtiofsd
-    remmina
-    thunderbird
-    ouch
-    razergenie
-    wineWowPackages.staging
-    winetricks
-    sl
-    dxvk_2
-    vkd3d-proton
-    vulkan-tools
-    keymapp
-    wally-cli
-    alarm-clock-applet
-    alacritty # fallback term
-    google-chrome
-    zellij # better tmux
-    yazi # tui file manager
-    fd # file searching
-    fzf # quick file subtree navigation
-    ripgrep # file content searching
-    zoxide # modern cd replacement
-    imagemagick # svg, font, heic and jpeg xl preview in yazi
-    poppler # pdf preview
-    jq # json preview
-    p7zip-rar # archive extraction and preview
-    ffmpeg # because the entire world of video runs on ffmpeg
-    # wine prefix managers
-    bottles
-    lutris
-    heroic
-    protonup-ng # protonGE installer
-    mangohud # ingame performance hud
-    mangojuice
-    qbittorrent # :)
-    meld # best diff-tool ever
-    obsidian # best markdown editor ever
-    vesktop # hopefully this works with hyprland portal lol
-    ## some dev stuff
-    ## commented out -> try devshells first uwu
-    # gcc
-    # dotnetCorePackages.dotnet_9.sdk
-    # dotnetCorePackages.dotnet_9.runtime
-    # rustup
-    ## distro
-    vim
-    wget
-    killall
-    docker-compose
-    eza
-    git
-    cmatrix
-    lolcat
-    htop
-    brave
-    libvirt
-    lxqt.lxqt-policykit
-    lm_sensors
-    unzip
-    unrar
-    libnotify
-    v4l-utils
-    ydotool
-    duf
-    ncdu
-    wl-clipboard
-    pciutils
-    socat
-    cowsay
-    lshw
-    bat
-    pkg-config
-    meson
-    hyprpicker
-    ninja
-    brightnessctl
-    virt-viewer
-    swappy
-    appimage-run
-    networkmanagerapplet
-    yad
-    inxi
-    playerctl
-    nh
-    nixfmt-rfc-style
-    libvirt
-    swww
-    grim
-    slurp
-    file-roller
-    swaynotificationcenter
-    imv
-    mpv
-    gimp
-    pavucontrol
-    tree
-    spotify
-    neovide
-    tuigreet
-  ];
+  environment.systemPackages =
+    with pkgs;
+    [
+      # stable packages
+      nil
+      xwayland-satellite
+      # Dank Linux Deps
+      cava
+      cliphist
+      matugen
+      helix
+      lsfg-vk
+      lsfg-vk-ui
+      superTuxKart
+      libreoffice-qt
+      hunspell
+      hunspellDicts.en_US
+      hunspellDicts.de_DE
+      # Minecraft
+      prismlauncher
+      ftb-app
+      firefox
+      ventoy-full-qt
+      protonvpn-gui
+      # stremio
+      warp-terminal
+      antigravity-fhs
+      code-cursor
+      bun
+      obs-studio
+      dotnetCorePackages.dotnet_9.sdk
+      dotnetCorePackages.dotnet_9.runtime
+      dotnetCorePackages.dotnet_9.aspnetcore
+      virtiofsd
+      remmina
+      thunderbird
+      ouch
+      razergenie
+      wineWowPackages.staging
+      winetricks
+      sl
+      dxvk_2
+      vkd3d-proton
+      vulkan-tools
+      kontroll
+      keymapp
+      wally-cli
+      alarm-clock-applet
+      alacritty # fallback term
+      google-chrome
+      zellij # better tmux
+      yazi # tui file manager
+      fd # file searching
+      fzf # quick file subtree navigation
+      ripgrep # file content searching
+      zoxide # modern cd replacement
+      imagemagick # svg, font, heic and jpeg xl preview in yazi
+      poppler # pdf preview
+      jq # json preview
+      p7zip-rar # archive extraction and preview
+      ffmpeg # because the entire world of video runs on ffmpeg
+      # wine prefix managers
+      bottles
+      lutris
+      heroic
+      protonup-ng # protonGE installer
+      mangohud # ingame performance hud
+      mangojuice
+      qbittorrent # :)
+      meld # best diff-tool ever
+      obsidian # best markdown editor ever
+      vesktop # hopefully this works with hyprland portal lol
+      ## some dev stuff
+      ## commented out -> try devshells first uwu
+      # gcc
+      # dotnetCorePackages.dotnet_9.sdk
+      # dotnetCorePackages.dotnet_9.runtime
+      # rustup
+      ## distro
+      vim
+      wget
+      killall
+      docker-compose
+      eza
+      git
+      cmatrix
+      lolcat
+      htop
+      brave
+      libvirt
+      lxqt.lxqt-policykit
+      lm_sensors
+      unzip
+      unrar
+      libnotify
+      v4l-utils
+      ydotool
+      duf
+      ncdu
+      wl-clipboard
+      pciutils
+      socat
+      cowsay
+      lshw
+      bat
+      pkg-config
+      meson
+      hyprpicker
+      ninja
+      brightnessctl
+      virt-viewer
+      swappy
+      appimage-run
+      networkmanagerapplet
+      yad
+      inxi
+      playerctl
+      nh
+      nixfmt-rfc-style
+      libvirt
+      swww
+      grim
+      slurp
+      file-roller
+      swaynotificationcenter
+      imv
+      mpv
+      gimp
+      pavucontrol
+      tree
+      spotify
+      neovide
+      tuigreet
+    ]
+    ++ [
+      # unstable
+      pkgsUnstable.dgop
+      pkgsUnstable.dsearch
+    ]
+    ++ [
+      # local packages
+      inputs.helium.packages.${pkgs.system}.default
+    ];
 
   fonts = {
     packages = with pkgs; [
@@ -474,6 +431,11 @@ in
       symbola
       material-icons
     ];
+    enableDefaultPackages = true;
+    fontconfig = {
+      enable = true;
+      cache32Bit = true;
+    };
   };
 
   environment.etc = {
@@ -514,6 +476,8 @@ in
 
   # Services to start
   services = {
+    tlp.enable = false;
+    power-profiles-daemon.enable = true;
     xserver = {
       enable = false;
       xkb = {
@@ -521,42 +485,6 @@ in
         variant = "";
       };
     };
-    displayManager.dms-greeter = {
-      enable = true;
-      compositor = {
-        name = "niri"; # Required. Can be also "hyprland" or "sway"
-      };
-
-      # Sync your user's DankMaterialShell theme with the greeter. You'll probably want this
-      configHome = "/home/evilweasel";
-
-      # Custom config files for non-standard config locations
-      configFiles = [
-        "/home/evilweasel/.config/DankMaterialShell/settings.json"
-      ];
-
-      # Save the logs to a file
-      logs = {
-        save = true; 
-        path = "/tmp/dms-greeter.log";
-      };
-
-      # Custom Quickshell Package    
-      quickshell.package = pkgs.quickshell;
-    };
-    # greetd = {
-    #   enable = true;
-    #   settings = {
-    #     default_session = {
-    #       # Wayland Desktop Manager is installed only for user via home-manager!
-    #       user = username;
-    #       # .wayland-session is a script generated by home-manager, which links to the current wayland compositor(sway/hyprland or others).
-    #       # with such a vendor-no-locking script, we can switch to another wayland compositor without modifying greetd's config here.
-    #       # command = "$HOME/.wayland-session"; # start a wayland session directly without a login manager
-    #       command = "${pkgs.tuigreet}/bin/tuigreet --user-menu --time --cmd Hyprland"; # start Hyprland with a TUI login manager
-    #     };
-    #   };
-    # };
     smartd = {
       enable = false;
       autodetect = true;
@@ -606,8 +534,13 @@ in
     disabledDefaultBackends = [ "escl" ];
   };
 
-  services.udev.packages = [ pkgs.sane-airscan ];
-
+  services.udev = {
+    packages = [ pkgs.sane-airscan ];
+    extraRules = ''
+      ATTRS{name}=="Sony Interactive Entertainment DualSense Wireless Controller Touchpad", ENV{LIBINPUT_IGNORE_DEVICE}="1"
+      ATTRS{name}=="DualSense Wireless Controller Touchpad", ENV{LIBINPUT_IGNORE_DEVICE}="1"
+    '';
+  };
   # ZSA Keyboard flashing udev rules
   hardware.keyboard.zsa.enable = true;
 
@@ -658,12 +591,12 @@ in
   #   config.certs.boxcert
   # ];
 
-    # security.pki.certificateFiles = [
-    #   (builtins.path {
-    #     path = ../../certs/boxcert.cer;
-    #     name = "boxcert.cer";
-    #   })
-    # ];
+  # security.pki.certificateFiles = [
+  #   (builtins.path {
+  #     path = ../../certs/boxcert.cer;
+  #     name = "boxcert.cer";
+  #   })
+  # ];
 
   # Optimization settings and garbage collection automation
   nix = {
@@ -673,14 +606,14 @@ in
         "nix-command"
         "flakes"
       ];
-      substituters = [ 
-        "https://cache.nixos.org?priority=10" 
+      substituters = [
+        "https://cache.nixos.org?priority=10"
         "https://nyx.chaotic.cx"
         "https://hyprland.cachix.org"
         "https://nix-community.cachix.org"
         "https://yazi.cachix.org"
       ];
-      trusted-public-keys = [ 
+      trusted-public-keys = [
         "hyprland.cachix.org-1:a7pgxzMz7+chwVL3/pzj6jIBMioiJM7ypFP8PwtkuGc="
         "nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs="
         "yazi.cachix.org-1:Dcdz63NZKfvUCbDGngQDAZq6kOroIrFoyO064uvLh8k="
