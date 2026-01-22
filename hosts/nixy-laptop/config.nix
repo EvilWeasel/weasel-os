@@ -283,6 +283,8 @@ in
     with pkgs;
     [
       # stable packages
+      snapper
+      btrfs-progs
       nil
       xwayland-satellite
       # Dank Linux Deps
@@ -476,6 +478,31 @@ in
 
   # Services to start
   services = {
+    snapper = {
+      # Snapper itself
+      snapshotInterval = "daily";
+      cleanupInterval = "daily";
+
+      configs.home = {
+        SUBVOLUME = "/home";
+
+        # Create snapshots automatically
+        TIMELINE_CREATE = true;
+
+        # Cleanup old snapshots automatically
+        TIMELINE_CLEANUP = true;
+
+        # Retention policy
+        TIMELINE_LIMIT_DAILY = 7;
+        TIMELINE_LIMIT_WEEKLY = 0;
+        TIMELINE_LIMIT_MONTHLY = 0;
+        TIMELINE_LIMIT_YEARLY = 0;
+
+        # Space-aware cleanup
+        # allow up to <percentage> of fs if things go sideways
+        SPACE_LIMIT = "0.3"; 
+      };
+    };
     tlp.enable = false;
     power-profiles-daemon.enable = true;
     xserver = {

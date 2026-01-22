@@ -18,10 +18,10 @@
       let
         pkgs = import nixpkgs { inherit system; };
 
-        version = "0.7.10.1";
+        version = "0.8.2.1";
         src = pkgs.fetchurl {
-          url = "https://github.com/imputnet/helium-linux/releases/download/v${version}/helium-${version}-x86_64.AppImage";
-          sha256 = "1hadvg86nfzalklv7lz6zpc7n6ifcs8vgw1qqaajr6rafaa54p6p";
+          url = "https://github.com/imputnet/helium-linux/releases/download/${version}/helium-${version}-x86_64.AppImage";
+          sha256 = "sha256:69b347a7859a47632a89d1b8d9312b259051d4f71456d46905816228299a756f";
         };
 
         # Wrapper-Script für Wayland / Ozone

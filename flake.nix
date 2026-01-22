@@ -4,8 +4,10 @@
   inputs = {
     nixpkgs-unstable.url = "github:nixos/nixpkgs/nixos-unstable";
     nixpkgs.url = "github:nixos/nixpkgs/nixos-25.11";
-    home-manager.url = "github:nix-community/home-manager/master";
-    home-manager.inputs.nixpkgs.follows = "nixpkgs";
+    home-manager = {
+      url = "github:nix-community/home-manager/release-25.11";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     nixos-hardware.url = "github:NixOS/nixos-hardware/master";
     stylix.url = "github:danth/stylix";
     fine-cmdline = {
@@ -114,7 +116,7 @@
           ./modules/canbus.nix
           {
             home-manager.extraSpecialArgs = {
-              inherit username inputs;
+              inherit username inputs pkgsUnstable;
               host = hostLaptop;
             };
             home-manager.useGlobalPkgs = false;

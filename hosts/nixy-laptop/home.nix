@@ -1,5 +1,6 @@
 {
   pkgs,
+  pkgsUnstable,
   username,
   host,
   config,
@@ -24,7 +25,7 @@ in
 
   # Import Program Configurations
   imports = [
-    inputs.dms.homeModules.dankMaterialShell.default
+    inputs.dms.homeModules.dank-material-shell
 
     ../../programs/emoji.nix
     ../../programs/fastfetch
@@ -175,7 +176,8 @@ in
       };
       # Core features
       enableSystemMonitoring = true; # System monitoring widgets (dgop)
-      enableClipboard = true; # Clipboard history manager
+      dgop.package = pkgsUnstable.dgop;
+      # enableClipboard = true; # Clipboard history manager
       enableVPN = true; # VPN management widget
       enableDynamicTheming = true; # Wallpaper-based theming (matugen)
       enableAudioWavelength = true; # Audio visualizer (cava)
@@ -233,7 +235,7 @@ in
     };
     vscode = {
       enable = true;
-      package = pkgs.vscode.fhs;
+      package = pkgsUnstable.vscode.fhs;
     };
     gh.enable = true;
     btop = {
