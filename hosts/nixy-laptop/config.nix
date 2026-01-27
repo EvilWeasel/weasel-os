@@ -500,7 +500,7 @@ in
 
         # Space-aware cleanup
         # allow up to <percentage> of fs if things go sideways
-        SPACE_LIMIT = "0.3"; 
+        SPACE_LIMIT = "0.3";
       };
     };
     tlp.enable = false;
@@ -549,6 +549,8 @@ in
     rpcbind.enable = false;
     nfs.server.enable = false;
   };
+  systemd.services.greetd.after = [ "systemd-udev-settle.service" ];
+  systemd.services.greetd.wants = [ "systemd-udev-settle.service" ];
   systemd.services.flatpak-repo = {
     path = [ pkgs.flatpak ];
     script = ''
