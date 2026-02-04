@@ -15,11 +15,7 @@
       flake = false;
     };
     quickshell = {
-      # add ?ref=<tag> to track a tag
       url = "git+https://git.outfoxxed.me/outfoxxed/quickshell";
-
-      # THIS IS IMPORTANT
-      # Mismatched system dependencies will lead to crashes and other issues.
       inputs.nixpkgs.follows = "nixpkgs";
     };
     dms = {
@@ -44,33 +40,31 @@
       username = "evilweasel";
       host = "nixy-desktop";
       hostLaptop = "nixy-laptop";
+
       mkPkgs =
         nixpkgs:
         import nixpkgs {
           inherit system;
           config.allowUnfree = true;
         };
+
       pkgsStable = mkPkgs nixpkgs;
       pkgsUnstable = mkPkgs nixpkgs-unstable;
     in
     {
-      # PACKAGES.DEFS (DERIVATIONS)
+      # PACKAGES (DERIVATIONS ONLY)
       packages.${system} = {
-        certs = nixpkgs.lib.makeOverridable (pkgs: pkgs.callPackage ./certs/default.nix { });
-
+        certs = pkgsStable.callPackage ./certs/default.nix { };
         frostycli = pkgsUnstable.callPackage ./packages/frostycli { };
       };
 
       # MODULES
       nixosModules.certs =
-        { config, pkgs, ... }:
-        let
-          myCerts = inputs.self.packages.${pkgs.system}.certs;
-        in
+        { pkgs, ... }:
         {
           options.certs = nixpkgs.lib.mkOption {
             type = nixpkgs.lib.types.attrsOf nixpkgs.lib.types.path;
-            default = myCerts;
+            default = inputs.self.packages.${pkgs.system}.certs;
             description = "Bundled custom certificates";
           };
         };
@@ -108,8 +102,6 @@
           pkgsUnstable = pkgsUnstable;
         };
         modules = [
-          # inputs.dms.nixosModules.dankMaterialShell
-          # inputs.dms.nixosModules.greeter
           ./hosts/${hostLaptop}/config.nix
           inputs.self.nixosModules.certs
           inputs.nixos-hardware.nixosModules.lenovo-yoga-7-14IAH7-hybrid
