@@ -25,7 +25,7 @@ in
 
   # Import Program Configurations
   imports = [
-    inputs.dms.homeModules.dank-material-shell
+    inputs.dms.homeModules."dank-material-shell"
 
     ../../programs/emoji.nix
     ../../programs/fastfetch
@@ -168,7 +168,7 @@ in
   };
 
   programs = {
-    dankMaterialShell = {
+    "dank-material-shell" = {
       enable = true;
       systemd = {
         enable = true;

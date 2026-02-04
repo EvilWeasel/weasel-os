@@ -154,7 +154,7 @@ in
 
   programs = {
     # todo
-    dankMaterialShell.greeter = {
+    "dank-material-shell".greeter = {
       enable = true;
       compositor.name = "niri";
       configHome = "/home/yourusername";
@@ -283,6 +283,8 @@ in
   environment.systemPackages =
     with pkgs;
     [
+      python3
+      python3Packages.pip
       # stable packages
       snapper
       btrfs-progs
@@ -348,6 +350,7 @@ in
       lutris
       heroic
       protonup-ng # protonGE installer
+      protontricks
       mangohud # ingame performance hud
       mangojuice
       qbittorrent # :)
@@ -430,6 +433,7 @@ in
     ++ [
       # local packages
       inputs.helium.packages.${pkgs.system}.default
+      # inputs.self.packages.${pkgs.system}.frostycli
     ];
 
   fonts = {

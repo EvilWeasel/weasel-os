@@ -9,7 +9,10 @@
       inputs.nixpkgs.follows = "nixpkgs";
     };
     nixos-hardware.url = "github:NixOS/nixos-hardware/master";
-    stylix.url = "github:danth/stylix";
+    stylix = {
+      url = "github:danth/stylix/release-25.11";
+      inputs.nixpkgs.follows = "nixpkgs";
+    };
     fine-cmdline = {
       url = "github:VonHeikemen/fine-cmdline.nvim";
       flake = false;
@@ -44,7 +47,7 @@
       mkPkgs =
         nixpkgs:
         import nixpkgs {
-          inherit system;
+          localSystem = { system = system; };
           config.allowUnfree = true;
         };
 
@@ -55,7 +58,7 @@
       # PACKAGES (DERIVATIONS ONLY)
       packages.${system} = {
         certs = pkgsStable.callPackage ./certs/default.nix { };
-        frostycli = pkgsUnstable.callPackage ./packages/frostycli { };
+        # frostycli = pkgsUnstable.callPackage ./packages/frostycli { };
       };
 
       # MODULES

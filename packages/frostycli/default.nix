@@ -1,34 +1,38 @@
-{ lib
-, stdenv
-, fetchFromGitHub
-, dotnet-sdk_8
-, dotnet-runtime_8
+{
+  lib,
+  stdenv,
+  fetchFromGitHub,
+  mono,
+  msbuild,
+  nuget,
 }:
 
 stdenv.mkDerivation rec {
   pname = "frostycli";
-  version = "master";
+  version = "c32856d45d7438379f295ffba46b2bd3c39abc5d";
 
   src = fetchFromGitHub {
     owner = "HarGabt";
     repo = "FrostyToolsuite";
-    rev = "master";
-    # fill this after first build
-    hash = "sha256-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA=";
+    rev = "c32856d45d7438379f295ffba46b2bd3c39abc5d";
+    hash = "sha256-cDTpIy6ittc6ShVtPplKapXhmVVbGZbYgbrDbjZqjNU=";
   };
 
   nativeBuildInputs = [
-    dotnet-sdk_8
+    mono
+    msbuild
+    nuget
   ];
 
   buildPhase = ''
     runHook preBuild
 
-    dotnet publish FrostyCli/FrostyCli.csproj \
-      --configuration Release \
-      --framework net8.0 \
-      --output publish \
-      /p:UseAppHost=false
+    export HOME="$TMPDIR"
+    nuget restore FrostyCmd/FrostyCmd.csproj -PackagesDirectory packages
+    msbuild FrostyCmd/FrostyCmd.csproj \
+      /p:Configuration="Release - Final" \
+      /p:Platform="x64" \
+      /p:OutputPath=publish/
 
     runHook postBuild
   '';
@@ -42,8 +46,8 @@ stdenv.mkDerivation rec {
     mkdir -p $out/bin
     cat > $out/bin/frostycli <<EOF
     #!${stdenv.shell}
-    exec ${dotnet-runtime_8}/bin/dotnet \
-      $out/lib/frostycli/FrostyCli.dll "\$@"
+    exec ${mono}/bin/mono \
+      $out/lib/frostycli/FrostyCmd.exe "\$@"
     EOF
 
     chmod +x $out/bin/frostycli
@@ -58,4 +62,3 @@ stdenv.mkDerivation rec {
     mainProgram = "frostycli";
   };
 }
-
