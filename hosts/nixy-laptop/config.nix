@@ -153,6 +153,7 @@ in
   };
 
   programs = {
+    # todo
     dankMaterialShell.greeter = {
       enable = true;
       compositor.name = "niri";
@@ -370,7 +371,14 @@ in
       lolcat
       htop
       brave
+      spice
+      spice-gtk
+      spice-protocol
+      virtio-win
+      win-spice
       libvirt
+      virt-viewer
+      adwaita-icon-theme
       lxqt.lxqt-policykit
       lm_sensors
       unzip
@@ -391,7 +399,6 @@ in
       hyprpicker
       ninja
       brightnessctl
-      virt-viewer
       swappy
       appimage-run
       networkmanagerapplet
@@ -440,14 +447,14 @@ in
     };
   };
 
-  environment.etc = {
-    "ovmf/edk2-x86_64-secure-code.fd" = {
-      source = config.virtualisation.libvirtd.qemu.package + "/share/qemu/edk2-x86_64-secure-code.fd";
-    };
-    "ovmf/edk2-i386-vars.fd" = {
-      source = config.virtualisation.libvirtd.qemu.package + "/share/qemu/edk2-i386-vars.fd";
-    };
-  };
+  # environment.etc = {
+  #   "ovmf/edk2-x86_64-secure-code.fd" = {
+  #     source = config.virtualisation.libvirtd.qemu.package + "/share/qemu/edk2-x86_64-secure-code.fd";
+  #   };
+  #   "ovmf/edk2-i386-vars.fd" = {
+  #     source = config.virtualisation.libvirtd.qemu.package + "/share/qemu/edk2-i386-vars.fd";
+  #   };
+  # };
 
   environment.variables = {
     # ZANEYOS_VERSION = "2.3";
@@ -478,6 +485,7 @@ in
 
   # Services to start
   services = {
+    spice-vdagentd.enable = true;
     snapper = {
       # Snapper itself
       snapshotInterval = "daily";
@@ -656,13 +664,17 @@ in
   };
 
   # Virtualization / Containers
-  virtualisation.libvirtd = {
-    enable = true;
-    qemu = {
-      swtpm.enable = true;
+  virtualisation = {
+    libvirtd = {
+      enable = true;
+      qemu = {
+        package = pkgs.qemu_kvm;
+        swtpm.enable = true;
+      };
     };
+    docker.enable = true;
+    spiceUSBRedirection.enable = true;
   };
-  virtualisation.docker.enable = true;
 
   # OpenGL
   hardware.graphics = {

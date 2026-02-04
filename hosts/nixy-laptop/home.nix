@@ -179,7 +179,7 @@ in
       dgop.package = pkgsUnstable.dgop;
       # enableClipboard = true; # Clipboard history manager
       enableVPN = true; # VPN management widget
-      enableDynamicTheming = true; # Wallpaper-based theming (matugen)
+      enableDynamicTheming = false; # Wallpaper-based theming (matugen)
       enableAudioWavelength = true; # Audio visualizer (cava)
       enableCalendarEvents = true; # Calendar integration (khal)
       plugins = {

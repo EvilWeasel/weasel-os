@@ -55,9 +55,11 @@
     in
     {
       # PACKAGES.DEFS (DERIVATIONS)
-      packages.${system}.certs = nixpkgs.lib.makeOverridable (
-        pkgs: pkgs.callPackage ./certs/default.nix { }
-      );
+      packages.${system} = {
+        certs = nixpkgs.lib.makeOverridable (pkgs: pkgs.callPackage ./certs/default.nix { });
+
+        frostycli = pkgsUnstable.callPackage ./packages/frostycli { };
+      };
 
       # MODULES
       nixosModules.certs =
