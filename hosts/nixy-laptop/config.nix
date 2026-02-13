@@ -8,11 +8,9 @@
   options,
   inputs,
   ...
-}:
-let
+}: let
   inherit (import ./variables.nix) keyboardLayout consoleKeyMap;
-in
-{
+in {
   imports = [
     inputs.dms.nixosModules.greeter
     ./hardware.nix
@@ -31,8 +29,8 @@ in
     # Kernel
     kernelPackages = pkgs.linuxPackages_zen;
     # This is for OBS Virtual Cam Support
-    kernelModules = [ "v4l2loopback" ];
-    extraModulePackages = [ config.boot.kernelPackages.v4l2loopback ];
+    kernelModules = ["v4l2loopback"];
+    extraModulePackages = [config.boot.kernelPackages.v4l2loopback];
     extraModprobeConfig = ''
       options v4l2loopback devices=1 video_nr=1 card_label="OBS Cam" exclusive_caps=1
     '';
@@ -132,7 +130,7 @@ in
     wireless.iwd.enable = lib.mkForce true;
   };
   networking.hostName = host;
-  networking.timeServers = options.networking.timeServers.default ++ [ "pool.ntp.org" ];
+  networking.timeServers = options.networking.timeServers.default ++ ["pool.ntp.org"];
 
   # Set your time zone.
   time.timeZone = "Europe/Berlin";
@@ -280,9 +278,11 @@ in
     "qtwebengine-5.15.19"
   ];
 
-  environment.systemPackages =
-    with pkgs;
+  environment.systemPackages = with pkgs;
     [
+      teams-for-linux
+      slack
+      protonmail-desktop
       python3
       python3Packages.pip
       # stable packages
@@ -561,22 +561,22 @@ in
     rpcbind.enable = false;
     nfs.server.enable = false;
   };
-  systemd.services.greetd.after = [ "systemd-udev-settle.service" ];
-  systemd.services.greetd.wants = [ "systemd-udev-settle.service" ];
+  systemd.services.greetd.after = ["systemd-udev-settle.service"];
+  systemd.services.greetd.wants = ["systemd-udev-settle.service"];
   systemd.services.flatpak-repo = {
-    path = [ pkgs.flatpak ];
+    path = [pkgs.flatpak];
     script = ''
       flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
     '';
   };
   hardware.sane = {
     enable = true;
-    extraBackends = [ pkgs.sane-airscan ];
-    disabledDefaultBackends = [ "escl" ];
+    extraBackends = [pkgs.sane-airscan];
+    disabledDefaultBackends = ["escl"];
   };
 
   services.udev = {
-    packages = [ pkgs.sane-airscan ];
+    packages = [pkgs.sane-airscan];
     extraRules = ''
       ATTRS{name}=="Sony Interactive Entertainment DualSense Wireless Controller Touchpad", ENV{LIBINPUT_IGNORE_DEVICE}="1"
       ATTRS{name}=="DualSense Wireless Controller Touchpad", ENV{LIBINPUT_IGNORE_DEVICE}="1"

@@ -1,0 +1,107 @@
+{
+  "git.enableSmartCommit": true,
+  "git.autofetch": true,
+  "git.enableCommitSigning": true,
+  "git.detectSubmodules": true,
+  "git.decorations.enabled": true,
+  "git.showProgress": true,
+  "vscode-neovim.neovimExecutablePaths.win32": "C:\\\\tools\\\\neovim\\\\Neovim\\\\bin\\\\nvim.exe",
+  "editor.inlineSuggest.enabled": true,
+  "github.copilot.enable": {
+    "*": true,
+    "plaintext": false,
+    "markdown": false,
+    "scminput": false,
+    "yaml": false,
+    "csharp": false
+  },
+  "errorLens.enabled": true,
+  "quokka.suppressExpirationNotifications": true,
+  "explorer.confirmDelete": false,
+  "liveServer.settings.donotShowInfoMsg": true,
+  "liveServer.settings.donotVerifyTags": true,
+  "remoteHub.commitDirectlyWarning": "off",
+  "rift.riftPath": "\\\\wsl.localhost\\Debian\\home\\tw\\.morph\\env\\bin",
+  "rift.autostart": false,
+  "security.workspace.trust.untrustedFiles": "open",
+  "workbench.startupEditor": "none",
+  "explorer.confirmDragAndDrop": false,
+  "[markdown]": {
+    "editor.defaultFormatter": "darkriszty.markdown-table-prettify"
+  },
+  "terminal.integrated.enableMultiLinePasteWarning": false,
+  "dotnet.preferRuntimeFromSDK": true,
+  "editor.fontSize": 22,
+  "[html]": {
+    "editor.defaultFormatter": "vscode.html-language-features"
+  },
+  "editor.wordWrap": "wordWrapColumn",
+  "editor.wordWrapColumn": 80,
+  "git.openRepositoryInParentFolders": "never",
+  "workbench.productIconTheme": "fluent-icons",
+  "[css]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "editor.tabSize": 2,
+  "terminal.external.windowsExec": "C:\\\\Program Files\\\\WindowsApps\\\\Microsoft.WindowsTerminal_1.19.10573.0_x64__8wekyb3d8bbwe\\\\wt.exe",
+  "security.allowedUNCHosts": [
+    "wsl.localhost"
+  ],
+  "[xml]": {
+    "editor.defaultFormatter": "redhat.vscode-xml"
+  },
+  "git.confirmSync": false,
+  "workbench.experimental.enableNewProfilesUI": true,
+  "window.newWindowProfile": "Default",
+  "pieces.cloudCapabilities": "Blended",
+  "pieces.telemetry": true,
+  "excalidraw.theme": "dark",
+  "pieces.OS.launchOnStartup": "Yes",
+  "pieces.toShowUpdateExtensionNotification": false,
+  "keyboard.layout": "00000407",
+  "workbench.colorTheme": "Alt Catppuccin Frappé",
+  "terminal.integrated.fontSize": 20,
+  "markdown.preview.fontSize": 22,
+  "Prettier-SQL.keywordCase": "upper",
+  "[sql]": {
+    "editor.defaultFormatter": "inferrinizzard.prettier-sql-vscode"
+  },
+  "Prettier-SQL.SQLFlavourOverride": "mariadb",
+  "editor.defaultFormatter": "rust-lang.rust-analyzer",
+  "editor.formatOnSave": true,
+  "files.autoSaveWhenNoErrors": true,
+  "editor.fontFamily": "'MonaspiceAr Nerd Font', 'Droid Sans Mono', 'monospace', monospace",
+  "editor.inlayHints.fontFamily": "'MonaspiceKr Nerd Font'",
+  "editor.inlineSuggest.fontFamily": "'MonaspiceRn Nerd Font'",
+  "debug.console.fontFamily": "'MonaspiceKr Nerd Font'",
+  "scm.inputFontFamily": "'MonaspiceXe Nerd Font'",
+  "terminal.integrated.fontFamily": "'MonaspiceKr Nerd Font'",
+  "notebook.output.fontFamily": "'MonaspiceKr Nerd Font'",
+  "chat.editor.fontFamily": "'MonaspiceXe Nerd Font'",
+  "markdown.preview.fontFamily": "'MonaspiceXe Nerd Font', -apple-system, BlinkMacSystemFont, 'Segoe WPC', 'Segoe UI', system-ui, 'Ubuntu', 'Droid Sans', sans-serif",
+  "terminal.integrated.fontLigatures": true,
+  "editor.fontLigatures": "'calt', 'ss01', 'ss02', 'ss03', 'ss04', 'ss05', 'ss06', 'ss07', 'ss08', 'ss09', 'liga'",
+  "[nix]": {
+    "editor.defaultFormatter": "jnoortheen.nix-ide",
+    "editor.formatOnSave": true
+  },
+  "[json]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "[typescript]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "typescript.updateImportsOnFileMove.enabled": "always",
+  "[python]": {
+    "editor.defaultFormatter": "ms-python.autopep8"
+  },
+  "python.analysis.typeCheckingMode": "standard",
+  "[typescriptreact]": {
+    "editor.defaultFormatter": "esbenp.prettier-vscode"
+  },
+  "nix.formatterPath": "@ALEJANDRA@",
+  "extensions.experimental.affinity": {
+    "asvetliakov.vscode-neovim": 1
+  },
+  "tailwindCSS.classFunctions": ["cva", "cx"]
+}

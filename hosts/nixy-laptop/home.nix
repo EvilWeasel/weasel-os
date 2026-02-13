@@ -31,6 +31,7 @@ in
     ../../programs/fastfetch
     ../../programs/hyprland.nix
     ../../programs/neovim.nix
+    ../../programs/vscode.nix
     ../../programs/rofi/rofi.nix
     ../../programs/rofi/config-emoji.nix
     ../../programs/rofi/config-long.nix

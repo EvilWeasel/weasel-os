@@ -1,0 +1,8 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Format Nix files using the flake formatter.
+nix fmt
+
+# Re-stage formatted Nix files.
+git add -u -- '*.nix'
