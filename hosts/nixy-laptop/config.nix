@@ -280,6 +280,7 @@ in {
 
   environment.systemPackages = with pkgs;
     [
+      azuredatastudio
       teams-for-linux
       slack
       protonmail-desktop
