@@ -31,94 +31,100 @@
     };
   };
 
-  outputs = {
-    nixpkgs,
-    nixpkgs-unstable,
-    home-manager,
-    ...
-  } @ inputs: let
-    system = "x86_64-linux";
-    username = "evilweasel";
-    host = "nixy-desktop";
-    hostLaptop = "nixy-laptop";
+  outputs =
+    {
+      nixpkgs,
+      nixpkgs-unstable,
+      home-manager,
+      ...
+    }@inputs:
+    let
+      system = "x86_64-linux";
+      username = "evilweasel";
+      host = "nixy-desktop";
+      hostLaptop = "nixy-laptop";
 
-    mkPkgs = nixpkgs:
-      import nixpkgs {
-        localSystem = {
-          system = system;
+      mkPkgs =
+        nixpkgs:
+        import nixpkgs {
+          localSystem = {
+            system = system;
+          };
+          config.allowUnfree = true;
         };
-        config.allowUnfree = true;
+
+      pkgsStable = mkPkgs nixpkgs;
+      pkgsUnstable = mkPkgs nixpkgs-unstable;
+    in
+    {
+      formatter.${system} = pkgsStable.alejandra;
+
+      # PACKAGES (DERIVATIONS ONLY)
+      packages.${system} = {
+        certs = pkgsStable.callPackage ./certs/default.nix { };
+        # frostycli = pkgsUnstable.callPackage ./packages/frostycli { };
       };
 
-    pkgsStable = mkPkgs nixpkgs;
-    pkgsUnstable = mkPkgs nixpkgs-unstable;
-  in {
-    formatter.${system} = pkgsStable.alejandra;
-
-    # PACKAGES (DERIVATIONS ONLY)
-    packages.${system} = {
-      certs = pkgsStable.callPackage ./certs/default.nix {};
-      # frostycli = pkgsUnstable.callPackage ./packages/frostycli { };
-    };
-
-    # MODULES
-    nixosModules.certs = {pkgs, ...}: {
-      options.certs = nixpkgs.lib.mkOption {
-        type = nixpkgs.lib.types.attrsOf nixpkgs.lib.types.path;
-        default = inputs.self.packages.${pkgs.system}.certs;
-        description = "Bundled custom certificates";
-      };
-    };
-
-    # HOST CONFIGS
-    nixosConfigurations.${host} = nixpkgs.lib.nixosSystem {
-      specialArgs = {
-        inherit
-          system
-          inputs
-          username
-          host
-          ;
-      };
-      modules = [
-        ./hosts/${host}/config.nix
-        inputs.self.nixosModules.certs
-        inputs.stylix.nixosModules.stylix
-        home-manager.nixosModules.home-manager
+      # MODULES
+      nixosModules.certs =
+        { pkgs, ... }:
         {
-          home-manager.extraSpecialArgs = {
-            inherit username inputs host;
+          options.certs = nixpkgs.lib.mkOption {
+            type = nixpkgs.lib.types.attrsOf nixpkgs.lib.types.path;
+            default = inputs.self.packages.${pkgs.system}.certs;
+            description = "Bundled custom certificates";
           };
-          home-manager.useGlobalPkgs = false;
-          home-manager.useUserPackages = true;
-          home-manager.users.${username} = import ./hosts/${host}/home.nix;
-        }
-      ];
-    };
+        };
 
-    nixosConfigurations.${hostLaptop} = nixpkgs.lib.nixosSystem {
-      specialArgs = {
-        inherit system inputs username;
-        host = hostLaptop;
-        pkgsUnstable = pkgsUnstable;
+      # HOST CONFIGS
+      nixosConfigurations.${host} = nixpkgs.lib.nixosSystem {
+        specialArgs = {
+          inherit
+            system
+            inputs
+            username
+            host
+            ;
+        };
+        modules = [
+          ./hosts/${host}/config.nix
+          inputs.self.nixosModules.certs
+          inputs.stylix.nixosModules.stylix
+          home-manager.nixosModules.home-manager
+          {
+            home-manager.extraSpecialArgs = {
+              inherit username inputs host;
+            };
+            home-manager.useGlobalPkgs = false;
+            home-manager.useUserPackages = true;
+            home-manager.users.${username} = import ./hosts/${host}/home.nix;
+          }
+        ];
       };
-      modules = [
-        ./hosts/${hostLaptop}/config.nix
-        inputs.self.nixosModules.certs
-        inputs.nixos-hardware.nixosModules.lenovo-yoga-7-14IAH7-hybrid
-        inputs.stylix.nixosModules.stylix
-        home-manager.nixosModules.home-manager
-        ./modules/canbus.nix
-        {
-          home-manager.extraSpecialArgs = {
-            inherit username inputs pkgsUnstable;
-            host = hostLaptop;
-          };
-          home-manager.useGlobalPkgs = false;
-          home-manager.useUserPackages = true;
-          home-manager.users.${username} = import ./hosts/${hostLaptop}/home.nix;
-        }
-      ];
+
+      nixosConfigurations.${hostLaptop} = nixpkgs.lib.nixosSystem {
+        specialArgs = {
+          inherit system inputs username;
+          host = hostLaptop;
+          pkgsUnstable = pkgsUnstable;
+        };
+        modules = [
+          ./hosts/${hostLaptop}/config.nix
+          inputs.self.nixosModules.certs
+          inputs.nixos-hardware.nixosModules.lenovo-yoga-7-14IAH7-hybrid
+          inputs.stylix.nixosModules.stylix
+          home-manager.nixosModules.home-manager
+          ./modules/canbus.nix
+          {
+            home-manager.extraSpecialArgs = {
+              inherit username inputs pkgsUnstable;
+              host = hostLaptop;
+            };
+            home-manager.useGlobalPkgs = false;
+            home-manager.useUserPackages = true;
+            home-manager.users.${username} = import ./hosts/${hostLaptop}/home.nix;
+          }
+        ];
+      };
     };
-  };
 }

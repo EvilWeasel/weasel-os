@@ -8,6 +8,7 @@ let
   inherit (import ./variables.nix) gitUsername;
 in
 {
+  users.groups.llama = { };
   users.users = {
     "${username}" = {
       homeMode = "755";
@@ -21,6 +22,7 @@ in
         "lp"
         "docker"
         "openrazer"
+        "llama"
       ];
       shell = pkgs.bash;
       ignoreShellProgramCheck = true;

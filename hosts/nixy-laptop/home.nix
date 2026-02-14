@@ -27,6 +27,7 @@ in
   imports = [
     inputs.dms.homeModules."dank-material-shell"
 
+    ../../home-modules/llama-cpp.nix
     ../../programs/emoji.nix
     ../../programs/fastfetch
     ../../programs/hyprland.nix
@@ -145,6 +146,25 @@ in
   ];
 
   services = {
+    llama-cpp = {
+      enable = true;
+      package = pkgsUnstable.llama-cpp.override { cudaSupport = true; };
+
+      autoStart = false;
+      restartPolicy = "on-failure";
+      host = "127.0.0.1";
+      port = 8080;
+
+      model = "${config.home.homeDirectory}/models/qwen2.5-3b-instruct-q4_k_m.gguf";
+
+      extraFlags = [
+        "--jinja"
+        "-ngl"
+        "auto"
+        "-c"
+        "4096"
+      ];
+    };
     hypridle = {
       enable = true;
       settings = {
