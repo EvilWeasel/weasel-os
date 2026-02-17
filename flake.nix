@@ -59,23 +59,6 @@
     {
       formatter.${system} = pkgsStable.alejandra;
 
-      # PACKAGES (DERIVATIONS ONLY)
-      packages.${system} = {
-        certs = pkgsStable.callPackage ./certs/default.nix { };
-        # frostycli = pkgsUnstable.callPackage ./packages/frostycli { };
-      };
-
-      # MODULES
-      nixosModules.certs =
-        { pkgs, ... }:
-        {
-          options.certs = nixpkgs.lib.mkOption {
-            type = nixpkgs.lib.types.attrsOf nixpkgs.lib.types.path;
-            default = inputs.self.packages.${pkgs.system}.certs;
-            description = "Bundled custom certificates";
-          };
-        };
-
       # HOST CONFIGS
       nixosConfigurations.${host} = nixpkgs.lib.nixosSystem {
         specialArgs = {
@@ -88,7 +71,6 @@
         };
         modules = [
           ./hosts/${host}/config.nix
-          inputs.self.nixosModules.certs
           inputs.stylix.nixosModules.stylix
           home-manager.nixosModules.home-manager
           {
@@ -110,7 +92,6 @@
         };
         modules = [
           ./hosts/${hostLaptop}/config.nix
-          inputs.self.nixosModules.certs
           inputs.nixos-hardware.nixosModules.lenovo-yoga-7-14IAH7-hybrid
           inputs.stylix.nixosModules.stylix
           home-manager.nixosModules.home-manager

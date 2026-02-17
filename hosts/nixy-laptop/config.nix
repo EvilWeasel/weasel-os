@@ -442,8 +442,8 @@ in {
     ]
     ++ [
       # local packages
-      inputs.helium.packages.${pkgs.system}.default
-      # inputs.self.packages.${pkgs.system}.frostycli
+      inputs.helium.packages.${pkgs.stdenv.hostPlatform.system}.default
+      # inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.frostycli
     ];
 
   fonts = {
@@ -635,20 +635,6 @@ in {
       auth include login
     '';
   };
-
-  # security.pki.certificateFiles = [
-  #   "/home/evilweasel/certs/boxcert.cer"
-  # ];
-  # security.pki.certificateFiles = [
-  #   config.certs.boxcert
-  # ];
-
-  # security.pki.certificateFiles = [
-  #   (builtins.path {
-  #     path = ../../certs/boxcert.cer;
-  #     name = "boxcert.cer";
-  #   })
-  # ];
 
   # Optimization settings and garbage collection automation
   nix = {

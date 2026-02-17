@@ -296,6 +296,10 @@ in
       enable = true;
       package = pkgs.starship;
     };
+    direnv = {
+      enable = true;
+      nix-direnv.enable = true;
+    };
     zsh = {
       enable = true;
       enableCompletion = true;
