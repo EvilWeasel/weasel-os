@@ -10,6 +10,7 @@
 }:
 let
   inherit (import ./variables.nix) gitUsername gitEmail gitSigningKey;
+  sshInitKeysCmd = "systemctl --user start ssh-agent.service >/dev/null 2>&1; export SSH_AUTH_SOCK=/run/user/$UID/ssh-agent; find \"$HOME/.ssh\" -maxdepth 1 -type f ! -name '*.pub' ! -name 'authorized_keys*' ! -name 'known_hosts*' ! -name 'config' -exec sh -c 'for key do ssh-keygen -yf \"$key\" >/dev/null 2>&1 && ssh-add \"$key\"; done' sh {} +";
 in
 {
   nixpkgs = {
@@ -22,6 +23,16 @@ in
   home.username = "${username}";
   home.homeDirectory = "/home/${username}";
   home.stateVersion = "24.11";
+
+  # Configure npm global prefix and add to PATH
+  home.file.".npmrc".text = ''
+    prefix=${config.home.homeDirectory}/.npm-global
+  '';
+
+  # Add npm global bin to PATH
+  home.sessionPath = [
+    "${config.home.homeDirectory}/.npm-global/bin"
+  ];
 
   # Import Program Configurations
   imports = [
@@ -295,6 +306,7 @@ in
         #fi
       '';
       initContent = ''
+        export PATH="$HOME/.npm-global/bin:$PATH"
         fastfetch
         if [ -f $HOME/.zshrc-personal ]; then
           source $HOME/.zshrc-personal
@@ -322,6 +334,7 @@ in
         ls = "eza --icons";
         ll = "eza -lh --icons --grid --group-directories-first";
         la = "eza -lah --icons --grid --group-directories-first";
+        ssh-initkeys = sshInitKeysCmd;
         ".." = "cd ..";
       };
       syntaxHighlighting = {
@@ -344,6 +357,7 @@ in
         #fi
       '';
       initExtra = ''
+        export PATH="$HOME/.npm-global/bin:$PATH"
         fastfetch
         if [ -f $HOME/.bashrc-personal ]; then
           source $HOME/.bashrc-personal
@@ -369,6 +383,7 @@ in
         ls = "eza --icons";
         ll = "eza -lh --icons --grid --group-directories-first";
         la = "eza -lah --icons --grid --group-directories-first";
+        ssh-initkeys = sshInitKeysCmd;
         ".." = "cd ..";
       };
     };

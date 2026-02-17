@@ -78,6 +78,7 @@
   "terminal.integrated.fontFamily": "'MonaspiceKr Nerd Font'",
   "notebook.output.fontFamily": "'MonaspiceKr Nerd Font'",
   "chat.editor.fontFamily": "'MonaspiceXe Nerd Font'",
+  "chat.editor.fontSize": 24,
   "markdown.preview.fontFamily": "'MonaspiceXe Nerd Font', -apple-system, BlinkMacSystemFont, 'Segoe WPC', 'Segoe UI', system-ui, 'Ubuntu', 'Droid Sans', sans-serif",
   "terminal.integrated.fontLigatures": true,
   "editor.fontLigatures": "'calt', 'ss01', 'ss02', 'ss03', 'ss04', 'ss05', 'ss06', 'ss07', 'ss08', 'ss09', 'liga'",
@@ -99,9 +100,24 @@
   "[typescriptreact]": {
     "editor.defaultFormatter": "esbenp.prettier-vscode"
   },
-  "nix.formatterPath": "@ALEJANDRA@",
+  "nix.formatterPath": "alejandra",
   "extensions.experimental.affinity": {
     "asvetliakov.vscode-neovim": 1
   },
-  "tailwindCSS.classFunctions": ["cva", "cx"]
+  "tailwindCSS.classFunctions": [
+    "cva",
+    "cx"
+  ],
+  "mssql.connectionGroups": [
+    {
+      "name": "ROOT",
+      "id": "ROOT"
+    },
+    {
+      "name": "BlainProd",
+      "color": "#F20202",
+      "id": "1A7B36EE-AA15-4698-A540-8EE54A5436F1",
+      "parentId": "ROOT"
+    }
+  ]
 }
