@@ -118,6 +118,50 @@
       "color": "#F20202",
       "id": "1A7B36EE-AA15-4698-A540-8EE54A5436F1",
       "parentId": "ROOT"
+    },
+    {
+      "name": "LocalTest",
+      "color": "#00EADA",
+      "id": "CC34DAD9-B641-44AA-9072-6DDF0B0F2A40",
+      "parentId": "ROOT"
     }
-  ]
+  ],
+  "mssql.connections": [
+    {
+      "authenticationType": "SqlLogin",
+      "connectTimeout": 30,
+      "applicationName": "vscode-mssql",
+      "applicationIntent": "ReadWrite",
+      "server": "blain-sql19",
+      "database": "BlainProduktion",
+      "user": "ProduktionUser",
+      "password": "",
+      "commandTimeout": 30,
+      "encrypt": "Mandatory",
+      "groupId": "1A7B36EE-AA15-4698-A540-8EE54A5436F1",
+      "profileName": "BlainProduktion",
+      "trustServerCertificate": true,
+      "savePassword": true,
+      "columnEncryptionSetting": "Disabled",
+      "id": "FA723F6D-4DD9-4A45-8C1B-231C0B799335"
+    },
+    {
+      "authenticationType": "SqlLogin",
+      "connectTimeout": 30,
+      "applicationName": "vscode-mssql",
+      "applicationIntent": "ReadWrite",
+      "server": "blain-sql19",
+      "database": "",
+      "user": "sa",
+      "password": "",
+      "commandTimeout": 30,
+      "encrypt": "Mandatory",
+      "groupId": "CC34DAD9-B641-44AA-9072-6DDF0B0F2A40",
+      "profileName": "DevContainer",
+      "trustServerCertificate": true,
+      "savePassword": true,
+      "id": "9DAAE982-5459-4713-AD0E-C14F1BE87FFB"
+    }
+  ],
+  "mssql.autoDisableNonTSqlLanguageService": false
 }

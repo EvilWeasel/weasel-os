@@ -287,6 +287,7 @@ in {
 
   environment.systemPackages = with pkgs;
     [
+      proton-pass
       azuredatastudio
       teams-for-linux
       slack
