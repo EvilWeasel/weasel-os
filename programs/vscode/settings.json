@@ -161,7 +161,26 @@
       "trustServerCertificate": true,
       "savePassword": true,
       "id": "9DAAE982-5459-4713-AD0E-C14F1BE87FFB"
+    },
+    {
+      "authenticationType": "SqlLogin",
+      "connectTimeout": 30,
+      "applicationName": "vscode-mssql",
+      "applicationIntent": "ReadWrite",
+      "server": "blain-sql19",
+      "database": "",
+      "user": "ProduktionUser",
+      "password": "",
+      "commandTimeout": 30,
+      "encrypt": "Mandatory",
+      "groupId": "1A7B36EE-AA15-4698-A540-8EE54A5436F1",
+      "profileName": "BlainProdAll",
+      "trustServerCertificate": true,
+      "savePassword": true,
+      "id": "D18EC002-5AD4-4174-8996-20EB2AB47AA1"
     }
   ],
-  "mssql.autoDisableNonTSqlLanguageService": false
+  "mssql.autoDisableNonTSqlLanguageService": false,
+  "mssql.openQueryResultsInTabByDefault": true,
+  "mssql.openQueryResultsInTabByDefaultDoNotShowPrompt": true
 }
