@@ -37,6 +37,9 @@ in {
     # Needed For Some Steam Games
     kernel.sysctl = {
       "vm.max_map_count" = 2147483642;
+      "net.bridge.bridge-nf-call-iptables" = 0;
+      "net.bridge.bridge-nf-call-ip6tables" = 0;
+      "net.bridge.bridge-nf-call-arptables" = 0;
     };
     # Bootloader.
     loader.systemd-boot.enable = true;
@@ -287,6 +290,7 @@ in {
 
   environment.systemPackages = with pkgs;
     [
+      openssl
       proton-pass
       azuredatastudio
       teams-for-linux

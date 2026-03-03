@@ -29,83 +29,89 @@
       url = "path:/home/evilweasel/weasel-os/packages/helium";
       inputs.nixpkgs.follows = "nixpkgs-unstable";
     };
+    handy = {
+      url = "github:cjpais/Handy";
+      inputs.nixpkgs.follows = "nixpkgs-unstable";
+    };
   };
 
-  outputs =
-    {
-      nixpkgs,
-      nixpkgs-unstable,
-      home-manager,
-      ...
-    }@inputs:
-    let
-      system = "x86_64-linux";
-      username = "evilweasel";
-      host = "nixy-desktop";
-      hostLaptop = "nixy-laptop";
+  outputs = {
+    nixpkgs,
+    nixpkgs-unstable,
+    home-manager,
+    handy,
+    ...
+  } @ inputs: let
+    system = "x86_64-linux";
+    username = "evilweasel";
+    host = "nixy-desktop";
+    hostLaptop = "nixy-laptop";
 
-      mkPkgs =
-        nixpkgs:
-        import nixpkgs {
-          localSystem = {
-            system = system;
+    mkPkgs = nixpkgs:
+      import nixpkgs {
+        localSystem = {
+          system = system;
+        };
+        config.allowUnfree = true;
+      };
+
+    pkgsStable = mkPkgs nixpkgs;
+    pkgsUnstable = mkPkgs nixpkgs-unstable;
+  in {
+    formatter.${system} = pkgsStable.alejandra;
+
+    # HOST CONFIGS
+    nixosConfigurations.${host} = nixpkgs.lib.nixosSystem {
+      specialArgs = {
+        inherit
+          system
+          inputs
+          username
+          host
+          ;
+      };
+      modules = [
+        ./hosts/${host}/config.nix
+        inputs.stylix.nixosModules.stylix
+        home-manager.nixosModules.home-manager
+        {
+          home-manager.extraSpecialArgs = {
+            inherit username inputs host;
           };
-          config.allowUnfree = true;
-        };
-
-      pkgsStable = mkPkgs nixpkgs;
-      pkgsUnstable = mkPkgs nixpkgs-unstable;
-    in
-    {
-      formatter.${system} = pkgsStable.alejandra;
-
-      # HOST CONFIGS
-      nixosConfigurations.${host} = nixpkgs.lib.nixosSystem {
-        specialArgs = {
-          inherit
-            system
-            inputs
-            username
-            host
-            ;
-        };
-        modules = [
-          ./hosts/${host}/config.nix
-          inputs.stylix.nixosModules.stylix
-          home-manager.nixosModules.home-manager
-          {
-            home-manager.extraSpecialArgs = {
-              inherit username inputs host;
-            };
-            home-manager.useGlobalPkgs = false;
-            home-manager.useUserPackages = true;
-            home-manager.users.${username} = import ./hosts/${host}/home.nix;
-          }
-        ];
-      };
-
-      nixosConfigurations.${hostLaptop} = nixpkgs.lib.nixosSystem {
-        specialArgs = {
-          inherit system inputs username;
-          host = hostLaptop;
-          pkgsUnstable = pkgsUnstable;
-        };
-        modules = [
-          ./hosts/${hostLaptop}/config.nix
-          inputs.nixos-hardware.nixosModules.lenovo-yoga-7-14IAH7-hybrid
-          inputs.stylix.nixosModules.stylix
-          home-manager.nixosModules.home-manager
-          ./modules/canbus.nix
-          {
-            home-manager.extraSpecialArgs = {
-              inherit username inputs pkgsUnstable;
-              host = hostLaptop;
-            };
-            home-manager.useGlobalPkgs = false;
-            home-manager.useUserPackages = true;
-            home-manager.users.${username} = import ./hosts/${hostLaptop}/home.nix;
-          }
-        ];
-      };
+          home-manager.useGlobalPkgs = false;
+          home-manager.useUserPackages = true;
+          home-manager.users.${username} = import ./hosts/${host}/home.nix;
+        }
+      ];
     };
+
+    nixosConfigurations.${hostLaptop} = nixpkgs.lib.nixosSystem {
+      specialArgs = {
+        inherit system inputs username;
+        host = hostLaptop;
+        pkgsUnstable = pkgsUnstable;
+      };
+      modules = [
+        ./hosts/${hostLaptop}/config.nix
+        inputs.nixos-hardware.nixosModules.lenovo-yoga-7-14IAH7-hybrid
+        inputs.stylix.nixosModules.stylix
+        home-manager.nixosModules.home-manager
+        ./modules/canbus.nix
+        {
+          home-manager.extraSpecialArgs = {
+            inherit username inputs pkgsUnstable;
+            host = hostLaptop;
+          };
+          home-manager.useGlobalPkgs = false;
+          home-manager.useUserPackages = true;
+          home-manager.users.${username} = import ./hosts/${hostLaptop}/home.nix;
+        }
+        {
+          environment.systemPackages = [
+            handy.packages.${system}.handy
+          ];
+        }
+      ];
+    };
+  };
 }

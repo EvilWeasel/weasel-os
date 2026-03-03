@@ -182,5 +182,6 @@
   ],
   "mssql.autoDisableNonTSqlLanguageService": false,
   "mssql.openQueryResultsInTabByDefault": true,
-  "mssql.openQueryResultsInTabByDefaultDoNotShowPrompt": true
+  "mssql.openQueryResultsInTabByDefaultDoNotShowPrompt": true,
+  "github.copilot.nextEditSuggestions.enabled": true
 }

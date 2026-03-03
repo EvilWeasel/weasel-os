@@ -36,8 +36,18 @@ There is no separate unit-test framework in this repo.
 - For host changes, build the affected host output before opening a PR.
 - For Home Manager/program edits, verify evaluation through the relevant host build.
 
+## Agent Verification Policy
+- Prefer syntax-only verification when possible: `nix-instantiate --parse <changed-file>`.
+- If a change cannot be fully validated by syntax parse (for example flake wiring, module option names, cross-file integration), run: `nix eval --no-write-lock-file .#nixosConfigurations.<affected-host>.config.system.build.toplevel.drvPath`.
+- Do not use verification commands that modify `flake.lock` unless the task explicitly requires lock updates.
+
 ## Commit & Pull Request Guidelines
 Git history uses short, imperative, scope-first messages (for example: `added llama-cpp.nix module`).
 - Keep commits focused to one area (host/module/program).
 - PRs should include: what changed, why, affected host(s), and exact validation commands run.
 - Include screenshots only for visible UI changes (Waybar, Rofi, wallpapers, wlogout, etc.).
+
+## Agent Learnings
+- Maintain `agent-learnings.md` as an append-only log for future agents.
+- After every task that changes files, append a short entry with date, what changed, pitfalls/root cause, and verification command(s) used.
+- Keep entries concise and factual.

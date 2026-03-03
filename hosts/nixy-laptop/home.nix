@@ -34,6 +34,11 @@ in
     "${config.home.homeDirectory}/.npm-global/bin"
   ];
 
+  home.sessionVariables = {
+    PLAYWRIGHT_BROWSERS_PATH = "${pkgs.playwright-driver.browsers}";
+    PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1";
+  };
+
   # Import Program Configurations
   imports = [
     inputs.dms.homeModules."dank-material-shell"
@@ -140,6 +145,7 @@ in
   # Scripts
   home.packages = [
     pkgs.mcp-nixos
+    pkgs.playwright-driver
     (import ../../scripts/emopicker9000.nix { inherit pkgs; })
     (import ../../scripts/task-waybar.nix { inherit pkgs; })
     (import ../../scripts/squirtle.nix { inherit pkgs; })
@@ -329,6 +335,12 @@ in
         }
       '';
       shellAliases = {
+        codex-gpg-warmup = ''
+          export GPG_TTY="$(tty)"; \
+          gpg-connect-agent updatestartuptty /bye >/dev/null; \
+          echo "codex warmup $(date -Is)" | gpg --clearsign >/dev/null; \
+          echo "GPG cache warmed"
+        '';
         shader-log = "tail -f ~/.steam/root/logs/shader_log.txt";
         sv = "sudo nvim";
         fr = "nh os switch --hostname ${host} /home/${username}/weasel-os";
@@ -378,6 +390,12 @@ in
         }
       '';
       shellAliases = {
+        codex-gpg-warmup = ''
+          export GPG_TTY="$(tty)"; \
+          gpg-connect-agent updatestartuptty /bye >/dev/null; \
+          echo "codex warmup $(date -Is)" | gpg --clearsign >/dev/null; \
+          echo "GPG cache warmed"
+        '';
         shader-log = "tail -f ~/.steam/root/logs/shader_log.txt";
         sv = "sudo nvim";
         fr = "nh os switch --hostname ${host} /home/${username}/weasel-os";
