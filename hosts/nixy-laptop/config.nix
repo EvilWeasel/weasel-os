@@ -174,7 +174,6 @@ in {
       enable = true;
       enableRenice = true;
     };
-    hyprland.enable = true; # may be needed for portals???
     niri.enable = true;
     firefox.enable = false;
     starship = {
@@ -284,12 +283,14 @@ in {
   };
 
   nixpkgs.config.permittedInsecurePackages = [
-    "ventoy-qt5-1.1.07"
+    "ventoy-qt5-${pkgs.ventoy-full-qt.version}"
     "qtwebengine-5.15.19"
   ];
 
   environment.systemPackages = with pkgs;
     [
+      bubblewrap
+      claude-code
       openssl
       proton-pass
       azuredatastudio
@@ -447,6 +448,7 @@ in {
     ++ [
       # local packages
       inputs.helium.packages.${pkgs.stdenv.hostPlatform.system}.default
+      inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.t3code
       # inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.frostycli
     ];
 
@@ -484,21 +486,6 @@ in {
 
   environment.sessionVariables = {
     DOTNET_ROOT = "${pkgs.dotnet-sdk}/share/dotnet";
-  };
-
-  # Extra Portal Configuration
-  xdg.portal = {
-    enable = true;
-    wlr.enable = true;
-    extraPortals = [
-      pkgs.xdg-desktop-portal-gtk
-      pkgs.xdg-desktop-portal
-    ];
-    configPackages = [
-      pkgs.xdg-desktop-portal-gtk
-      pkgs.xdg-desktop-portal-hyprland
-      pkgs.xdg-desktop-portal
-    ];
   };
 
   # Services to start

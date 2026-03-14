@@ -46,14 +46,13 @@ in
     ../../home-modules/llama-cpp.nix
     ../../programs/emoji.nix
     ../../programs/fastfetch
-    ../../programs/hyprland.nix
+    ../../programs/niri.nix
     ../../programs/neovim.nix
     ../../programs/vscode.nix
     ../../programs/rofi/rofi.nix
     ../../programs/rofi/config-emoji.nix
     ../../programs/rofi/config-long.nix
     ../../programs/swaync.nix
-    ../../programs/waybar.nix
     ../../programs/wlogout.nix
   ];
 
@@ -88,10 +87,6 @@ in
       createDirectories = true;
     };
     configFile = {
-      "hypr" = {
-        source = ../../.config/hypr;
-        recursive = true;
-      };
       "wlogout/icons" = {
         source = ../../pictures/wlogout;
         recursive = true;
@@ -121,9 +116,7 @@ in
 
   # Styling Options
   stylix.targets.vscode.enable = false;
-  stylix.targets.waybar.enable = false;
   stylix.targets.rofi.enable = false;
-  stylix.targets.hyprland.enable = false;
   stylix.targets.vesktop.enable = false;
   gtk = {
     iconTheme = {
@@ -147,7 +140,6 @@ in
     pkgs.mcp-nixos
     pkgs.playwright-driver
     (import ../../scripts/emopicker9000.nix { inherit pkgs; })
-    (import ../../scripts/task-waybar.nix { inherit pkgs; })
     (import ../../scripts/squirtle.nix { inherit pkgs; })
     (import ../../scripts/nvidia-offload.nix { inherit pkgs; })
     (import ../../scripts/wallsetter.nix {
@@ -157,10 +149,6 @@ in
     (import ../../scripts/web-search.nix { inherit pkgs; })
     (import ../../scripts/rofi-launcher.nix { inherit pkgs; })
     (import ../../scripts/screenshootin.nix { inherit pkgs; })
-    (import ../../scripts/list-hypr-bindings.nix {
-      inherit pkgs;
-      inherit host;
-    })
   ];
 
   services = {
@@ -210,7 +198,7 @@ in
     "dank-material-shell" = {
       enable = true;
       systemd = {
-        enable = true;
+        enable = false;
         restartIfChanged = true;
       };
       # Core features

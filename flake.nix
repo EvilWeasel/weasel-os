@@ -29,9 +29,16 @@
       url = "path:/home/evilweasel/weasel-os/packages/helium";
       inputs.nixpkgs.follows = "nixpkgs-unstable";
     };
-    handy = {
-      url = "github:cjpais/Handy";
+    t3code = {
+      url = "path:/home/evilweasel/weasel-os/packages/t3code";
       inputs.nixpkgs.follows = "nixpkgs-unstable";
+    };
+    handy-nixpkgs.url = "github:NixOS/nixpkgs/d6c71932130818840fc8fe9509cf50be8c64634f";
+    handy = {
+      # Pin to a known-good revision because latest upstream currently breaks Nix builds
+      # (`tauri-runtime-2.9.1` hash/dependency mismatch during evaluation/build).
+      url = "github:cjpais/Handy/f705a4948d01a29a815e284c44dae5fec890639c";
+      inputs.nixpkgs.follows = "handy-nixpkgs";
     };
   };
 
@@ -59,6 +66,7 @@
     pkgsUnstable = mkPkgs nixpkgs-unstable;
   in {
     formatter.${system} = pkgsStable.alejandra;
+    packages.${system}.t3code = inputs.t3code.packages.${system}.default;
 
     # HOST CONFIGS
     nixosConfigurations.${host} = nixpkgs.lib.nixosSystem {
