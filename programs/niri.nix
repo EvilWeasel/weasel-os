@@ -1,11 +1,29 @@
 {lib, ...}: {
   xdg.configFile = {
-    "niri/config.kdl".source = ./niri/config.kdl;
-    "niri/base/animations.kdl".source = ./niri/base/animations.kdl;
-    "niri/base/binds.kdl".source = ./niri/base/binds.kdl;
-    "niri/base/input.kdl".source = ./niri/base/input.kdl;
-    "niri/base/layout.kdl".source = ./niri/base/layout.kdl;
-    "niri/base/windowrules.kdl".source = ./niri/base/windowrules.kdl;
+    "niri/config.kdl" = {
+      source = ./niri/config.kdl;
+      force = true;
+    };
+    "niri/base/animations.kdl" = {
+      source = ./niri/base/animations.kdl;
+      force = true;
+    };
+    "niri/base/binds.kdl" = {
+      source = ./niri/base/binds.kdl;
+      force = true;
+    };
+    "niri/base/input.kdl" = {
+      source = ./niri/base/input.kdl;
+      force = true;
+    };
+    "niri/base/layout.kdl" = {
+      source = ./niri/base/layout.kdl;
+      force = true;
+    };
+    "niri/base/windowrules.kdl" = {
+      source = ./niri/base/windowrules.kdl;
+      force = true;
+    };
   };
 
   home.activation.ensureNiriDmsBootstrap = lib.hm.dag.entryAfter ["writeBoundary"] ''
