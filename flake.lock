@@ -259,15 +259,14 @@
         ]
       },
       "locked": {
-        "lastModified": 1768933522,
-        "narHash": "sha256-nzQdshF5lmk5UY4Kmisten7/r8i2ix7XhT4cWAM6h78=",
-        "path": "/home/evilweasel/weasel-os/packages/helium",
+        "path": "./packages/helium",
         "type": "path"
       },
       "original": {
-        "path": "/home/evilweasel/weasel-os/packages/helium",
+        "path": "./packages/helium",
         "type": "path"
-      }
+      },
+      "parent": []
     },
     "home-manager": {
       "inputs": {
@@ -509,15 +508,14 @@
         ]
       },
       "locked": {
-        "lastModified": 1772917374,
-        "narHash": "sha256-YgM7oiEynirB9kNscrDE24haUoHU2tctw8Sm2l4ztSE=",
-        "path": "/home/evilweasel/weasel-os/packages/t3code",
+        "path": "./packages/t3code",
         "type": "path"
       },
       "original": {
-        "path": "/home/evilweasel/weasel-os/packages/t3code",
+        "path": "./packages/t3code",
         "type": "path"
-      }
+      },
+      "parent": []
     },
     "tinted-foot": {
       "flake": false,

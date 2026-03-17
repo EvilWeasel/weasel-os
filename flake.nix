@@ -26,11 +26,11 @@
       inputs.nixpkgs.follows = "nixpkgs-unstable";
     };
     helium = {
-      url = "path:/home/evilweasel/weasel-os/packages/helium";
+      url = "path:./packages/helium";
       inputs.nixpkgs.follows = "nixpkgs-unstable";
     };
     t3code = {
-      url = "path:/home/evilweasel/weasel-os/packages/t3code";
+      url = "path:./packages/t3code";
       inputs.nixpkgs.follows = "nixpkgs-unstable";
     };
     handy-nixpkgs.url = "github:NixOS/nixpkgs/d6c71932130818840fc8fe9509cf50be8c64634f";
@@ -46,80 +46,40 @@
     nixpkgs,
     nixpkgs-unstable,
     home-manager,
-    handy,
     ...
   } @ inputs: let
-    system = "x86_64-linux";
-    username = "evilweasel";
-    host = "nixy-desktop";
-    hostLaptop = "nixy-laptop";
-
     mkPkgs = nixpkgs:
       import nixpkgs {
         localSystem = {
-          system = system;
+          system = "x86_64-linux";
         };
         config.allowUnfree = true;
       };
 
     pkgsStable = mkPkgs nixpkgs;
     pkgsUnstable = mkPkgs nixpkgs-unstable;
+    hosts = import ./lib/hosts.nix {inherit inputs;};
+    mkHost = import ./lib/mk-host.nix {
+      inherit
+        home-manager
+        inputs
+        nixpkgs
+        pkgsUnstable
+        ;
+    };
   in {
-    formatter.${system} = pkgsStable.alejandra;
-    packages.${system}.t3code = inputs.t3code.packages.${system}.default;
+    formatter.x86_64-linux = pkgsStable.alejandra;
+    packages.x86_64-linux.t3code = inputs.t3code.packages.x86_64-linux.default;
 
-    # HOST CONFIGS
-    nixosConfigurations.${host} = nixpkgs.lib.nixosSystem {
-      specialArgs = {
-        inherit
-          system
-          inputs
-          username
-          host
-          ;
-      };
-      modules = [
-        ./hosts/${host}/config.nix
-        inputs.stylix.nixosModules.stylix
-        home-manager.nixosModules.home-manager
-        {
-          home-manager.extraSpecialArgs = {
-            inherit username inputs host;
-          };
-          home-manager.useGlobalPkgs = false;
-          home-manager.useUserPackages = true;
-          home-manager.users.${username} = import ./hosts/${host}/home.nix;
-        }
-      ];
-    };
-
-    nixosConfigurations.${hostLaptop} = nixpkgs.lib.nixosSystem {
-      specialArgs = {
-        inherit system inputs username;
-        host = hostLaptop;
-        pkgsUnstable = pkgsUnstable;
-      };
-      modules = [
-        ./hosts/${hostLaptop}/config.nix
-        inputs.nixos-hardware.nixosModules.lenovo-yoga-7-14IAH7-hybrid
-        inputs.stylix.nixosModules.stylix
-        home-manager.nixosModules.home-manager
-        ./modules/canbus.nix
-        {
-          home-manager.extraSpecialArgs = {
-            inherit username inputs pkgsUnstable;
-            host = hostLaptop;
-          };
-          home-manager.useGlobalPkgs = false;
-          home-manager.useUserPackages = true;
-          home-manager.users.${username} = import ./hosts/${hostLaptop}/home.nix;
-        }
-        {
-          environment.systemPackages = [
-            handy.packages.${system}.handy
-          ];
-        }
-      ];
-    };
+    nixosConfigurations =
+      nixpkgs.lib.mapAttrs
+      (hostName: hostConfig:
+        mkHost (
+          hostConfig
+          // {
+            inherit hostName;
+          }
+        ))
+      hosts;
   };
 }

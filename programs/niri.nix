@@ -1,36 +1,20 @@
-{ ... }:
-{
-  xdg.configFile."niri/config.kdl".text = ''
-    // Skip "Important Hotkeys" pop-up at startup.
-    hotkey-overlay {
-        skip-at-startup
-    }
+{lib, ...}: {
+  xdg.configFile = {
+    "niri/config.kdl".source = ./niri/config.kdl;
+    "niri/base/animations.kdl".source = ./niri/base/animations.kdl;
+    "niri/base/binds.kdl".source = ./niri/base/binds.kdl;
+    "niri/base/input.kdl".source = ./niri/base/input.kdl;
+    "niri/base/layout.kdl".source = ./niri/base/layout.kdl;
+    "niri/base/windowrules.kdl".source = ./niri/base/windowrules.kdl;
+  };
 
-    // Disable client-side decorations.
-    prefer-no-csd
+  home.activation.ensureNiriDmsBootstrap = lib.hm.dag.entryAfter ["writeBoundary"] ''
+    mkdir -p "$HOME/.config/niri/dms/profiles"
 
-    spawn-at-startup "dms" "run"
-
-    // Screenshot path is formatted with strftime(3) to give you the screenshot date and time.
-    screenshot-path "~/Pictures/Screenshots/Screenshot from %Y-%m-%d %H-%M-%S.png"
-
-    // Base config.
-    include "base/binds.kdl"
-    include "base/input.kdl"
-    // include "base/monitors.kdl"
-    include "base/layout.kdl"
-    include "base/animations.kdl"
-    include "base/windowrules.kdl"
-
-    // DMS includes.
-    include "dms/colors.kdl"
-    include "dms/layout.kdl"
-    include "dms/alttab.kdl"
-    include "dms/wpblur.kdl"
-    include "dms/clipboard.kdl"
-    include "dms/env.kdl"
-    include "dms/binds.kdl"
-    include "dms/cursor.kdl"
-    include "dms/outputs.kdl"
+    for file in colors.kdl layout.kdl alttab.kdl wpblur.kdl clipboard.kdl env.kdl binds.kdl cursor.kdl outputs.kdl windowrules.kdl; do
+      if [ ! -e "$HOME/.config/niri/dms/$file" ]; then
+        touch "$HOME/.config/niri/dms/$file"
+      fi
+    done
   '';
 }

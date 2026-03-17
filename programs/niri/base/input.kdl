@@ -1,0 +1,22 @@
+input {
+    keyboard {
+        repeat-rate 25
+        repeat-delay 400
+        xkb {
+        }
+        numlock
+    }
+
+    touchpad {
+        tap
+        dwt
+    }
+
+    mouse {
+    }
+
+    trackpoint {
+    }
+
+    focus-follows-mouse max-scroll-amount="0%"
+}
