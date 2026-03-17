@@ -57,3 +57,9 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Updated `modules/overrides/linux-zen-preempt-fix.nix` to match the upstream nixpkgs 6.18 preemption workaround by overriding `PREEMPT = no` and allowing `PREEMPT_LAZY` / `PREEMPT_VOLUNTARY` as optional selections.
 - Pitfall/Root cause: Linux 6.18 changed preemption Kconfig handling, so forcing `PREEMPT = y` now fails config validation for `linux_zen`; disabling only `PREEMPT_LAZY` was insufficient because the old hard `PREEMPT` expectation still aborted the build.
 - Verification: `nix-instantiate --parse modules/overrides/linux-zen-preempt-fix.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, and `nix build --no-link .#nixosConfigurations.nixy-laptop.config.boot.kernelPackages.kernel.configfile`.
+
+### 2026-03-17
+- Date: 2026-03-17
+- Change: Integrated `origin/main` into the local branch with local `nixy-*` host naming preserved, then migrated `nixy-desktop` off stale `config/*` imports and Hyprland wiring onto the current `programs/*` / `pictures/*` layout with Niri plus DMS.
+- Pitfall/Root cause: The remote branch still carried an older host rename (`weaselos-*`) and Hyprland-era files, while the local laptop-first tree had already moved to Niri/DMS and different path conventions; desktop evaluation also exposed unrelated stale package and option drift (`protonup`, `greetd.tuigreet`, `noto-fonts-emoji`, insecure `stremio`, removed libvirtd OVMF options).
+- Verification: `nix-instantiate --parse hosts/nixy-desktop/config.nix`, `nix-instantiate --parse hosts/nixy-desktop/home.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, and `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`.

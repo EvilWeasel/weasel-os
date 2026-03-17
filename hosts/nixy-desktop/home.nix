@@ -3,6 +3,7 @@
   username,
   host,
   lib,
+  inputs,
   ...
 }:
 let
@@ -22,48 +23,38 @@ in
 
   # Import Program Configurations
   imports = [
-    ../../config/emoji.nix
-    ../../config/fastfetch
-    ../../config/hyprland.nix
-    ../../config/neovim.nix
+    inputs.dms.homeModules."dank-material-shell"
+
+    ../../programs/emoji.nix
+    ../../programs/fastfetch
+    ../../programs/niri.nix
+    ../../programs/neovim.nix
     ../../programs/vscode.nix
-    ../../config/rofi/rofi.nix
-    ../../config/rofi/config-emoji.nix
-    ../../config/rofi/config-long.nix
-    ../../config/swaync.nix
-    ../../config/waybar.nix
-    ../../config/wlogout.nix
+    ../../programs/rofi/rofi.nix
+    ../../programs/rofi/config-emoji.nix
+    ../../programs/rofi/config-long.nix
+    ../../programs/swaync.nix
+    ../../programs/wlogout.nix
   ];
 
   # Place Files Inside Home Directory
-  home.file."Pictures/Wallpapers" = {
-    source = ../../config/wallpapers;
-    recursive = true;
+  home.file = {
+    "Pictures/wallpapers" = {
+      source = ../../pictures/wallpapers;
+      recursive = true;
+    };
+    "Pictures/face.png".source = ../../pictures/weasel.png;
   };
-  home.file.".config/wlogout/icons" = {
-    source = ../../config/wlogout;
-    recursive = true;
-  };
-  home.file.".face.icon".source = ../../config/face.jpg;
-  home.file.".config/face.jpg".source = ../../config/face.jpg;
-  home.file.".config/swappy/config".text = ''
-    [Default]
-    save_dir=/home/${username}/Pictures/Screenshots
-    save_filename_format=swappy-%Y%m%d-%H%M%S.png
-    show_panel=false
-    line_size=5
-    text_size=20
-    text_font=Ubuntu
-    paint_mode=brush
-    early_exit=true
-    fill_shape=false
-  '';
 
   # Install & Configure Git
   programs.git = {
     enable = true;
-    userName = "${gitUsername}";
-    userEmail = "${gitEmail}";
+    settings = {
+      user = {
+        name = "${gitUsername}";
+        email = "${gitEmail}";
+      };
+    };
     signing = {
       key = "${gitSigningKey}";
       signByDefault = true;
@@ -76,6 +67,24 @@ in
       enable = true;
       createDirectories = true;
     };
+    configFile = {
+      "wlogout/icons" = {
+        source = ../../pictures/wlogout;
+        recursive = true;
+      };
+      "swappy/config".text = ''
+        [Default]
+        save_dir=/home/${username}/Pictures/Screenshots
+        save_filename_format=swappy-%Y%m%d-%H%M%S.png
+        show_panel=false
+        line_size=5
+        text_size=20
+        text_font=Ubuntu
+        paint_mode=brush
+        early_exit=true
+        fill_shape=false
+      '';
+    };
   };
 
   dconf.settings = {
@@ -87,11 +96,8 @@ in
 
   # Styling Options
   stylix.targets.vscode.enable = false;
-  stylix.targets.waybar.enable = false;
   stylix.targets.rofi.enable = false;
-  stylix.targets.hyprland.enable = false;
-  stylix.targets.kde.enable = false;
-  stylix.targets.qt.enable = false;
+  stylix.targets.vesktop.enable = false;
   gtk = {
     iconTheme = {
       name = "Papirus-Dark";
@@ -105,15 +111,14 @@ in
     };
   };
   qt = {
-    enable = lib.mkForce false;
-    # style.name = "kvantum";
+    enable = true;
+    style.name = lib.mkForce "kvantum";
   };
 
 
   # Scripts
   home.packages = [
     (import ../../scripts/emopicker9000.nix { inherit pkgs; })
-    (import ../../scripts/task-waybar.nix { inherit pkgs; })
     (import ../../scripts/squirtle.nix { inherit pkgs; })
     (import ../../scripts/nvidia-offload.nix { inherit pkgs; })
     (import ../../scripts/wallsetter.nix {
@@ -123,10 +128,6 @@ in
     (import ../../scripts/web-search.nix { inherit pkgs; })
     (import ../../scripts/rofi-launcher.nix { inherit pkgs; })
     (import ../../scripts/screenshootin.nix { inherit pkgs; })
-    (import ../../scripts/list-hypr-bindings.nix {
-      inherit pkgs;
-      inherit host;
-    })
   ];
 
   services = {
@@ -154,6 +155,18 @@ in
   };
 
   programs = {
+    "dank-material-shell" = {
+      enable = true;
+      systemd = {
+        enable = false;
+        restartIfChanged = true;
+      };
+      enableSystemMonitoring = false;
+      enableVPN = false;
+      enableDynamicTheming = false;
+      enableAudioWavelength = false;
+      enableCalendarEvents = false;
+    };
     vscode = {
       enable = true;
       package = pkgs.vscode.fhs;
@@ -194,7 +207,7 @@ in
         #  exec Hyprland
         #fi
       '';
-      initExtra = ''
+      initContent = ''
         fastfetch
         if [ -f $HOME/.zshrc-personal ]; then
           source $HOME/.zshrc-personal
@@ -282,14 +295,14 @@ in
         };
         lib.mkPrio.background = [
           {
-            path = "/home/${username}/Pictures/Wallpapers/zaney-wallpaper.jpg";
+            path = "/home/${username}/Pictures/wallpapers/beautifulmountainscape.jpg";
             blur_passes = 3;
             blur_size = 8;
           }
         ];
         image = [
           {
-            path = "/home/${username}/.config/face.jpg";
+            path = "/home/${username}/Pictures/face.png";
             size = 150;
             border_size = 4;
             border_color = "rgb(0C96F9)";
