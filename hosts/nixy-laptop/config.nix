@@ -15,6 +15,7 @@ in {
     inputs.dms.nixosModules.greeter
     ./hardware.nix
     ./users.nix
+    ../../modules/overrides/linux-zen-preempt-fix.nix
     ../../modules/amd-drivers.nix
     ../../modules/nvidia-drivers.nix
     ../../modules/nvidia-prime-drivers.nix
@@ -27,7 +28,6 @@ in {
 
   boot = {
     # Kernel
-    kernelPackages = pkgs.linuxPackages_zen;
     # This is for OBS Virtual Cam Support
     kernelModules = ["v4l2loopback"];
     extraModulePackages = [config.boot.kernelPackages.v4l2loopback];
@@ -131,6 +131,9 @@ in {
       wifi.backend = lib.mkForce "iwd";
     };
     wireless.iwd.enable = lib.mkForce true;
+      # hosts = {
+      #   "10.145.5.93" = [ "auth.apps.blain.de" "portal.apps.blain.de" "npm.apps.blain.de" "isms.apps.blain.de" ];
+      # };
   };
   networking.hostName = host;
   networking.timeServers = options.networking.timeServers.default ++ ["pool.ntp.org"];
@@ -518,6 +521,7 @@ in {
     };
     tlp.enable = false;
     power-profiles-daemon.enable = true;
+    upower.enable = true;
     xserver = {
       enable = false;
       xkb = {

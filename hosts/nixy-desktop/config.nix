@@ -13,6 +13,7 @@ in
   imports = [
     ./hardware.nix
     ./users.nix
+    ../../modules/overrides/linux-zen-preempt-fix.nix
     ../../modules/amd-drivers.nix
     ../../modules/nvidia-drivers.nix
     ../../modules/nvidia-prime-drivers.nix
@@ -23,7 +24,6 @@ in
 
   boot = {
     # Kernel
-    kernelPackages = pkgs.linuxPackages_zen;
     # This is for OBS Virtual Cam Support
     kernelModules = [ "v4l2loopback" ];
     extraModulePackages = [ config.boot.kernelPackages.v4l2loopback ];

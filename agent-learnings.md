@@ -45,3 +45,15 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Moved `nixy-laptop` Niri startup to a declarative `programs/niri.nix` config that starts DMS and no longer spawns Waybar, removed leftover Hyprland/Waybar Home Manager wiring, disabled DMS user-systemd startup, and dropped the manual portal override so `programs.niri.enable` can supply the upstream Niri portal defaults.
 - Pitfall/Root cause: The live `~/.config/niri/config.kdl` was still explicitly spawning `waybar`, and the host-level `xdg.portal` override forced Hyprland/wlr portal settings that conflict with Niri's recommended `xdg-desktop-portal-gnome` setup. Also, new files must be `git add`ed before `nix eval` sees them through the local Git-backed flake source.
 - Verification: `nix-instantiate --parse programs/niri.nix`, `nix-instantiate --parse hosts/nixy-laptop/home.nix`, `nix-instantiate --parse hosts/nixy-laptop/config.nix`, and `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`.
+
+### 2026-03-14
+- Date: 2026-03-14
+- Change: Added a repo convention for temporary Nixpkgs/workaround overrides: keep them in a dedicated override path (for example `modules/overrides/`) instead of burying them in host config, and put the upstream issue/PR removal note directly in the module file.
+- Pitfall/Root cause: Temporary fixes placed inline in host modules are easy to forget and harder to remove once upstream resolves the regression.
+- Verification: `nix-instantiate --parse modules/overrides/linux-zen-preempt-fix.nix`, `nix-instantiate --parse hosts/nixy-laptop/config.nix`, `nix-instantiate --parse hosts/nixy-desktop/config.nix`, and `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`.
+
+### 2026-03-14 (linux-zen PREEMPT follow-up)
+- Date: 2026-03-14
+- Change: Updated `modules/overrides/linux-zen-preempt-fix.nix` to match the upstream nixpkgs 6.18 preemption workaround by overriding `PREEMPT = no` and allowing `PREEMPT_LAZY` / `PREEMPT_VOLUNTARY` as optional selections.
+- Pitfall/Root cause: Linux 6.18 changed preemption Kconfig handling, so forcing `PREEMPT = y` now fails config validation for `linux_zen`; disabling only `PREEMPT_LAZY` was insufficient because the old hard `PREEMPT` expectation still aborted the build.
+- Verification: `nix-instantiate --parse modules/overrides/linux-zen-preempt-fix.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, and `nix build --no-link .#nixosConfigurations.nixy-laptop.config.boot.kernelPackages.kernel.configfile`.
