@@ -32,26 +32,33 @@ The repo no longer hard-requires the path `/home/evilweasel/weasel-os`, but the 
 
 1. Install NixOS normally.
 2. Log in as your user.
-3. Clone your fork into your home directory:
+3. If your current NixOS install does not already have flake support enabled, add this to your existing NixOS config before the first rebuild:
+
+   ```nix
+   nix.settings.experimental-features = [ "nix-command" "flakes" ];
+   ```
+
+   You need this for `nixos-rebuild --flake` and for `nh` while bootstrapping.
+4. Clone your fork into your home directory:
 
 ```bash
 git clone git@github.com:<your-user>/Weasel-OS.git ~/weasel-os
 cd ~/weasel-os
 ```
 
-4. Create a new host folder by copying one of the existing hosts:
+5. Create a new host folder by copying one of the existing hosts:
 
 ```bash
 cp -r hosts/nixy-laptop hosts/<your-host>
 ```
 
-5. Generate fresh hardware config on the target machine:
+6. Generate fresh hardware config on the target machine:
 
 ```bash
 sudo nixos-generate-config --show-hardware-config > hosts/<your-host>/hardware.nix
 ```
 
-6. Edit these files for your machine:
+7. Edit these files for your machine:
 
 - `hosts/<your-host>/users.nix`
 - `hosts/<your-host>/variables.nix`
@@ -65,15 +72,15 @@ At minimum adjust:
 - Git identity
 - any host-specific monitor notes or custom packages you want to change
 
-7. If you want to keep the repo somewhere other than `~/weasel-os`, export `WEASEL_OS_ROOT` before rebuilds or add it to your shell environment.
+8. If you want to keep the repo somewhere other than `~/weasel-os`, export `WEASEL_OS_ROOT` before rebuilds or add it to your shell environment.
 
-8. Switch to the flake for the first time:
+9. Switch to the flake for the first time:
 
 ```bash
 sudo nixos-rebuild switch --flake ~/weasel-os#<your-host>
 ```
 
-9. Log out and back in.
+10. Log out and back in.
 
 That first switch is the important bootstrap step. After it completes, Home Manager installs the shared Niri base config and creates empty mutable DMS files if DMS has not generated them yet.
 

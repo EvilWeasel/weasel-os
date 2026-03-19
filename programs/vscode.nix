@@ -1,8 +1,14 @@
-{pkgs, ...}: {
+{
+  config,
+  pkgs,
+  ...
+}: let
+  vscodeSettingsPath = "${config.home.homeDirectory}/weasel-os/programs/vscode/settings.json";
+in {
   home.packages = [pkgs.alejandra];
 
   xdg.configFile."Code/User/settings.json" = {
     force = true;
-    source = ./vscode/settings.json;
+    source = config.lib.file.mkOutOfStoreSymlink vscodeSettingsPath;
   };
 }

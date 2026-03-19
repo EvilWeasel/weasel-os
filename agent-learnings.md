@@ -75,3 +75,21 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Fixed Home Manager activation for the declarative Niri base layer by making the repo-owned `~/.config/niri/config.kdl` and `base/*.kdl` entries `force = true`, and synchronized the committed base KDL files back to the exact live laptop versions.
 - Pitfall/Root cause: Evaluation succeeded, but activation failed because Home Manager refused to clobber pre-existing mutable files in `~/.config/niri/base/`; additionally, the first repo import of some base KDL files had been truncated to partial content instead of mirroring the full live configuration.
 - Verification: `systemctl status home-manager-evilweasel.service --no-pager --full`, `journalctl -u home-manager-evilweasel.service -n 200 --no-pager`, `diff -u ~/.config/niri/base/binds.kdl programs/niri/base/binds.kdl`, `nix-instantiate --parse programs/niri.nix`, and `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`.
+
+### 2026-03-19
+- Date: 2026-03-19
+- Change: Switched VS Code `Code/User/settings.json` to `config.lib.file.mkOutOfStoreSymlink` so the committed repo file stays in the flake while the live file remains writable from the editor UI.
+- Pitfall/Root cause: A normal Home Manager `source` link points into the Nix store and is read-only, so UI edits cannot persist; the symlink target must stay inside the writable working tree.
+- Verification: `nix-instantiate --parse programs/vscode.nix` and `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`.
+
+### 2026-03-19 (README bootstrap note)
+- Date: 2026-03-19
+- Change: Added the missing bootstrap note to `README.md` telling new users to enable `nix-command` and `flakes` before the first flake rebuild.
+- Pitfall/Root cause: Fresh NixOS installs still need the experimental features enabled in their existing config before `nixos-rebuild --flake` works.
+- Verification: README content update only.
+
+### 2026-03-19 (michapc rollback)
+- Date: 2026-03-19
+- Change: Removed the temporary `michapc` host scaffolding and Nvidia module after the host-specific change was no longer wanted.
+- Pitfall/Root cause: The new host files were only a temporary integration step and should not remain in the shared repo without the full machine-specific setup.
+- Verification: `nix-instantiate --parse lib/hosts.nix`.
