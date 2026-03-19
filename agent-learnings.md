@@ -93,3 +93,9 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Removed the temporary `michapc` host scaffolding and Nvidia module after the host-specific change was no longer wanted.
 - Pitfall/Root cause: The new host files were only a temporary integration step and should not remain in the shared repo without the full machine-specific setup.
 - Verification: `nix-instantiate --parse lib/hosts.nix`.
+
+### 2026-03-19 (zed-editor)
+- Date: 2026-03-19
+- Change: Added `pkgsUnstable.zed-editor` to the shared Home Manager base package list so both hosts get Zed from the unstable pin.
+- Pitfall/Root cause: The common home base module needed `pkgsUnstable` threaded through before it could reference the unstable package set.
+- Verification: `nix-instantiate --parse profiles/home/base.nix` and `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`.

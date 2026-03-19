@@ -1,6 +1,7 @@
 {
   config,
   pkgs,
+  pkgsUnstable,
   host,
   lib,
   username,
@@ -67,6 +68,7 @@ in {
       (import ../../scripts/web-search.nix {inherit pkgs;})
       (import ../../scripts/rofi-launcher.nix {inherit pkgs;})
       (import ../../scripts/screenshootin.nix {inherit pkgs;})
+      pkgsUnstable.zed-editor
     ];
     sessionVariables = {
       WEASEL_OS_ROOT = repoDefaultPath;
