@@ -117,3 +117,21 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Switched the session keymaps and Alpha dashboard button from deprecated `SessionSave`/`SessionRestore` commands to `AutoSession save`/`AutoSession restore`, migrated the Neovim LSP setup off `require("lspconfig")` to `vim.lsp.config`/`vim.lsp.enable`, and updated Nushell history config to `history.file_format = "sqlite"`.
 - Pitfall/Root cause: Neovim 0.11 deprecates the old lspconfig framework API, AutoSession renamed its commands, and Nushell 0.111 rejects the old `history.format` field.
 - Verification: `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`, `nix flake check`, and `nix develop .#dev --command nvim --headless -u NONE -c 'lua package.preload["which-key"] = function() return { add = function() end, setup = function() end } end; package.preload["cmp_nvim_lsp"] = function() return { default_capabilities = function() return {} end } end; package.preload["auto-session"] = function() return { setup = function() end } end; vim.cmd = { colorscheme = function() end }; dofile("programs/nvim/plugins/auto-session.lua"); dofile("programs/nvim/keymaps.lua"); dofile("programs/nvim/plugins/lsp.lua")' -c q`.
+
+### 2026-03-20 (wifi bssid helper)
+- Date: 2026-03-20
+- Change: Added a reusable `wifi-bssid` shell helper package and exposed it as a shared `bssid` alias in Bash, Zsh, and Nushell.
+- Pitfall/Root cause: New files in this git-backed flake must be staged before `nix eval` can see them, and the first evaluation attempt was blocked by the sandboxed Nix daemon/cache path.
+- Verification: `nix-instantiate --parse scripts/wifi-bssid.nix`, `nix-instantiate --parse programs/terminal-stack.nix`, `nix-instantiate --parse profiles/home/base.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`, and `nix flake check`.
+
+### 2026-03-20 (bubblewrap availability)
+- Date: 2026-03-20
+- Change: Added `bubblewrap` to the shared NixOS package set and the flake dev shell so Codex and system installs can find `bwrap` without falling back to the vendored copy.
+- Pitfall/Root cause: `codex` was launched from an environment that did not have `bubblewrap` available on `PATH`, and the common desktop system profile did not include it yet.
+- Verification: `nix-instantiate --parse flake.nix`, `nix-instantiate --parse profiles/system/base.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, and `nix flake check` (desktop eval still hit an unrelated Home Manager derivation parse failure).
+
+### 2026-03-20 (shell helpers + niri overlay docs)
+- Date: 2026-03-20
+- Change: Restored the old shell helpers as real PATH commands, added a startup alias table after `fastfetch` for Bash/Zsh/Nushell, and expanded the native Niri hotkey overlay bindings with clearer titles and an extra `Mod+Shift+/` shortcut.
+- Pitfall/Root cause: This chat is voice-transcribed through another model, so unusual spellings in user requests may need context-based interpretation; also, helper additions and Niri bind changes need to stay synchronized with the alias table and overlay titles.
+- Verification: Not yet run after this batch of edits.

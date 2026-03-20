@@ -250,21 +250,35 @@ in {
     nushell = {
       enable = true;
       package = pkgsUnstable.nushell;
-      shellAliases.zj = "zellij";
+      shellAliases = {
+        ".." = "cd ..";
+      };
       settings = {
         show_banner = false;
         history.file_format = "sqlite";
       };
+      extraConfig = lib.mkAfter ''
+        if $nu.is-interactive {
+          try {
+            fastfetch
+            weasel-shell-aliases
+          } catch {
+          }
+        }
+      '';
     };
 
     bash = {
       enable = true;
       enableCompletion = true;
-      shellAliases.zj = "zellij";
+      shellAliases = {
+        ".." = "cd ..";
+      };
       initExtra = lib.mkAfter ''
         ${shellCommon}
         if [[ -t 1 ]]; then
           fastfetch || true
+          command -v weasel-shell-aliases >/dev/null 2>&1 && weasel-shell-aliases
         fi
 
         bind "set completion-ignore-case on"
@@ -277,7 +291,9 @@ in {
       enable = true;
       enableCompletion = true;
       defaultKeymap = "viins";
-      shellAliases.zj = "zellij";
+      shellAliases = {
+        ".." = "cd ..";
+      };
       autosuggestion.enable = true;
       syntaxHighlighting = {
         enable = true;
@@ -293,6 +309,7 @@ in {
         ${shellCommon}
         if [[ -t 1 ]]; then
           fastfetch || true
+          command -v weasel-shell-aliases >/dev/null 2>&1 && weasel-shell-aliases
         fi
 
         bindkey '^R' history-incremental-search-backward

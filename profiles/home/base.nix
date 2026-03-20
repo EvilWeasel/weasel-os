@@ -10,18 +10,6 @@
 }: let
   inherit (import ../../hosts/${host}/variables.nix) gitEmail gitSigningKey gitUsername;
   repoDefaultPath = "${config.home.homeDirectory}/weasel-os";
-  shellAliases = {
-    sv = "sudo nvim";
-    fr = "nh os switch --hostname ${host} \"$(weasel_os_root)\"";
-    fu = "nh os switch --hostname ${host} --update \"$(weasel_os_root)\"";
-    ncg = "nix-collect-garbage --delete-old && sudo nix-collect-garbage -d && sudo /run/current-system/bin/switch-to-configuration boot";
-    v = "nvim";
-    cat = "bat";
-    ls = "eza --icons";
-    ll = "eza -lh --icons --grid --group-directories-first";
-    la = "eza -lah --icons --grid --group-directories-first";
-    ".." = "cd ..";
-  };
 in {
   nixpkgs.config = {
     allowUnfree = true;
@@ -45,6 +33,9 @@ in {
       (import ../../scripts/nvidia-offload.nix {inherit pkgs;})
       (import ../../scripts/wallsetter.nix {
         inherit pkgs username;
+      })
+      (import ../../scripts/weasel-shell-helpers.nix {
+        inherit config host pkgs pkgsUnstable;
       })
       (import ../../scripts/web-search.nix {inherit pkgs;})
       (import ../../scripts/rofi-launcher.nix {inherit pkgs;})

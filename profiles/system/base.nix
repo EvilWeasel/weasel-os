@@ -57,6 +57,7 @@
     obsidian
     vesktop
     vim
+    bubblewrap
     wget
     killall
     docker-compose

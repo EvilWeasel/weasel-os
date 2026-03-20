@@ -74,6 +74,7 @@
       bash-completion
       bashInteractive
       bat
+      bubblewrap
       bun
       carapace
       claude-code

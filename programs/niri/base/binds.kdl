@@ -14,7 +14,8 @@ binds {
 
     // Mod-Shift-/, which is usually the same as Mod-?,
     // shows a list of important hotkeys.
-    Mod+Alt+P { show-hotkey-overlay; }
+    Mod+Alt+P hotkey-overlay-title="Niri: Show hotkey overlay" { show-hotkey-overlay; }
+    Mod+Shift+/ hotkey-overlay-title="Niri: Show hotkey overlay" { show-hotkey-overlay; }
 
     // Mod+Shift+W hotkey-overlay-title="Web search" { spawn "web-search"; }
 
@@ -199,30 +200,30 @@ binds {
     // The following binds move the focused window in and out of a column.
     // If the window is alone, they will consume it into the nearby column to the side.
     // If the window is already in a column, they will expel it out.
-    Mod+BracketLeft  { consume-or-expel-window-left; }
-    Mod+BracketRight { consume-or-expel-window-right; }
+    Mod+BracketLeft  hotkey-overlay-title="Niri: Consume or expel window left" { consume-or-expel-window-left; }
+    Mod+BracketRight hotkey-overlay-title="Niri: Consume or expel window right" { consume-or-expel-window-right; }
 
     // Consume one window from the right to the bottom of the focused column.
-    Mod+Comma  { consume-window-into-column; }
+    Mod+Comma hotkey-overlay-title="Niri: Consume window into column" { consume-window-into-column; }
     // Expel the bottom window from the focused column to the right.
-    Mod+Period { expel-window-from-column; }
+    Mod+Period hotkey-overlay-title="Niri: Expel window from column" { expel-window-from-column; }
 
-    Mod+R { switch-preset-column-width; }
+    Mod+R hotkey-overlay-title="Niri: Switch preset column width" { switch-preset-column-width; }
     // Cycling through the presets in reverse order is also possible.
     // Mod+R { switch-preset-column-width-back; }
-    Mod+Shift+R { switch-preset-window-height; }
-    Mod+Ctrl+R { reset-window-height; }
-    Mod+F { maximize-column; }
-    Mod+Shift+F { fullscreen-window; }
+    Mod+Shift+R hotkey-overlay-title="Niri: Switch preset window height" { switch-preset-window-height; }
+    Mod+Ctrl+R hotkey-overlay-title="Niri: Reset window height" { reset-window-height; }
+    Mod+F hotkey-overlay-title="Niri: Maximize column" { maximize-column; }
+    Mod+Shift+F hotkey-overlay-title="Niri: Fullscreen focused window" { fullscreen-window; }
 
     // Expand the focused column to space not taken up by other fully visible columns.
     // Makes the column "fill the rest of the space".
-    Mod+Ctrl+F { expand-column-to-available-width; }
+    Mod+Ctrl+F hotkey-overlay-title="Niri: Expand column to available width" { expand-column-to-available-width; }
 
-    Mod+C { center-column; }
+    Mod+C hotkey-overlay-title="Niri: Center focused column" { center-column; }
 
     // Center all fully visible columns on screen.
-    Mod+Ctrl+C { center-visible-columns; }
+    Mod+Ctrl+C hotkey-overlay-title="Niri: Center visible columns" { center-visible-columns; }
 
     // Finer width adjustments.
     // This command can also:
@@ -240,13 +241,13 @@ binds {
     Mod+Shift+Plus { set-window-height "+10%"; }
 
     // Move the focused window between the floating and the tiling layout.
-    Mod+Shift+V       { toggle-window-floating; }
+    Mod+Shift+V hotkey-overlay-title="Niri: Toggle window floating" { toggle-window-floating; }
     // Mod+Shift+I { switch-focus-between-floating-and-tiling; }
 
     // Toggle tabbed column display mode.
     // Windows in this column will appear as vertical tabs,
     // rather than stacked on top of each other.
-    Mod+W { toggle-column-tabbed-display; }
+    Mod+W hotkey-overlay-title="Niri: Toggle tabbed column display" { toggle-column-tabbed-display; }
 
     // Actions to switch layouts.
     // Note: if you uncomment these, make sure you do NOT have
@@ -254,7 +255,7 @@ binds {
     // Having both at once on the same hotkey will break the switching,
     // since it will switch twice upon pressing the hotkey (once by xkb, once by niri).
     // Mod+Space       { switch-layout "next"; }
-    Mod+Shift+Space { switch-layout "next"; }
+    Mod+Shift+Space hotkey-overlay-title="Niri: Switch to next layout" { switch-layout "next"; }
 
     Print { screenshot; }
     Ctrl+Print { screenshot-screen; }
