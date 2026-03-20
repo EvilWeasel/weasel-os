@@ -135,3 +135,21 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Restored the old shell helpers as real PATH commands, added a startup alias table after `fastfetch` for Bash/Zsh/Nushell, and expanded the native Niri hotkey overlay bindings with clearer titles and an extra `Mod+Shift+/` shortcut.
 - Pitfall/Root cause: This chat is voice-transcribed through another model, so unusual spellings in user requests may need context-based interpretation; also, helper additions and Niri bind changes need to stay synchronized with the alias table and overlay titles.
 - Verification: Not yet run after this batch of edits.
+
+### 2026-03-20 (local ai app switch)
+- Date: 2026-03-20
+- Change: Added `lmstudio` as a shared Home Manager package for both hosts and removed the laptop-specific `services.llama-cpp` wiring from the active configuration while keeping the module in the repo.
+- Pitfall/Root cause: `llama-cpp` is useful as a service module but expensive to rebuild and unnecessary for the current desktop workflow; the desktop app path is a better fit for quick local-model iteration.
+- Verification: Not yet run after this batch of edits.
+
+### 2026-03-20 (xorg deprecation cleanup)
+- Date: 2026-03-20
+- Change: Added `libxcb` as an explicit argument in the vendored Asahi Mesa package so the evaluation no longer needs to resolve `xorg.libxcb`.
+- Pitfall/Root cause: The deprecation warning came from the vendored Mesa file using `with xorg;` and implicitly reaching `xorg.libxcb`, which Nixpkgs now warns about.
+- Verification: Not yet run after this batch of edits.
+
+### 2026-03-20 (brave removal)
+- Date: 2026-03-20
+- Change: Removed `brave` from the shared system package list so the active laptop and desktop configs stop pulling in the package that triggered the `xorg.libxcb` warning.
+- Pitfall/Root cause: The warning was coming from an unused but still-installed browser package, not from the Asahi support tree.
+- Verification: Not yet run after this batch of edits.

@@ -6,10 +6,6 @@
 }: let
   sshInitKeysCmd = "systemctl --user start ssh-agent.service >/dev/null 2>&1; export SSH_AUTH_SOCK=/run/user/$UID/ssh-agent; find \"$HOME/.ssh\" -maxdepth 1 -type f ! -name '*.pub' ! -name 'authorized_keys*' ! -name 'known_hosts*' ! -name 'config' -exec sh -c 'for key do ssh-keygen -yf \"$key\" >/dev/null 2>&1 && ssh-add \"$key\"; done' sh {} +";
 in {
-  imports = [
-    ../../home-modules/llama-cpp.nix
-  ];
-
   home = {
     file.".npmrc".text = ''
       prefix=${config.home.homeDirectory}/.npm-global
@@ -25,23 +21,6 @@ in {
       PLAYWRIGHT_BROWSERS_PATH = "${pkgs.playwright-driver.browsers}";
       PLAYWRIGHT_SKIP_BROWSER_DOWNLOAD = "1";
     };
-  };
-
-  services.llama-cpp = {
-    enable = true;
-    package = pkgsUnstable.llama-cpp.override {cudaSupport = true;};
-    autoStart = false;
-    restartPolicy = "on-failure";
-    host = "127.0.0.1";
-    port = 8080;
-    model = "${config.home.homeDirectory}/models/qwen2.5-3b-instruct-q4_k_m.gguf";
-    extraFlags = [
-      "--jinja"
-      "-ngl"
-      "auto"
-      "-c"
-      "4096"
-    ];
   };
 
   programs = {

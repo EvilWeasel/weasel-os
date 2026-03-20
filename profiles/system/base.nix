@@ -66,7 +66,6 @@
     cmatrix
     lolcat
     htop
-    brave
     libvirt
     lxqt.lxqt-policykit
     lm_sensors

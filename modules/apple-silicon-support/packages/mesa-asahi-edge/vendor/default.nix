@@ -20,6 +20,7 @@
 , libunwind
 , libva-minimal
 , libvdpau
+, libxcb
 , llvmPackages
 , lm_sensors
 , meson
