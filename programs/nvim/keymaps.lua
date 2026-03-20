@@ -34,5 +34,5 @@ keymap.set("n", "<leader>fb", "<cmd>Telescope buffers<CR>", { desc = "Find buffe
 keymap.set("n", "<leader>fh", "<cmd>Telescope help_tags<CR>", { desc = "Help tags" })
 keymap.set("n", "<leader>ft", "<cmd>TodoTelescope<CR>", { desc = "Find todos" })
 -- workspace/session
-keymap.set("n", "<leader>wr", "<cmd>SessionRestore<CR>", { desc = "Restore session" })
-keymap.set("n", "<leader>ws", "<cmd>SessionSave<CR>", { desc = "Save session" })
+keymap.set("n", "<leader>wr", "<cmd>AutoSession restore<CR>", { desc = "Restore session" })
+keymap.set("n", "<leader>ws", "<cmd>AutoSession save<CR>", { desc = "Save session" })

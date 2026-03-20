@@ -253,7 +253,7 @@ in {
       shellAliases.zj = "zellij";
       settings = {
         show_banner = false;
-        history.format = "sqlite";
+        history.file_format = "sqlite";
       };
     };
 

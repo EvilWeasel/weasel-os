@@ -1,4 +1,3 @@
-local lspconfig = require("lspconfig")
 local cmp_nvim_lsp = require("cmp_nvim_lsp")
 local which_key = require("which-key")
 
@@ -30,39 +29,40 @@ local function bufmap(bufnr, lhs, rhs, desc)
   })
 end
 
-local function on_attach(_, bufnr)
-  which_key.add({
-    { "<leader>l", group = "LSP", buffer = bufnr },
-  })
-
-  bufmap(bufnr, "gd", vim.lsp.buf.definition, "Go to definition")
-  bufmap(bufnr, "gD", vim.lsp.buf.declaration, "Go to declaration")
-  bufmap(bufnr, "gi", vim.lsp.buf.implementation, "Go to implementation")
-  bufmap(bufnr, "gr", vim.lsp.buf.references, "List references")
-  bufmap(bufnr, "K", vim.lsp.buf.hover, "Hover docs")
-  bufmap(bufnr, "<leader>la", vim.lsp.buf.code_action, "Code action")
-  bufmap(bufnr, "<leader>ld", vim.diagnostic.open_float, "Line diagnostics")
-  bufmap(bufnr, "<leader>lf", function()
-    vim.lsp.buf.format({ async = true })
-  end, "Format buffer")
-  bufmap(bufnr, "<leader>lr", vim.lsp.buf.rename, "Rename symbol")
-  bufmap(bufnr, "<leader>ls", vim.lsp.buf.signature_help, "Signature help")
-  bufmap(bufnr, "[d", vim.diagnostic.goto_prev, "Previous diagnostic")
-  bufmap(bufnr, "]d", vim.diagnostic.goto_next, "Next diagnostic")
-end
-
 local function setup(server_name, settings)
-  if lspconfig[server_name] == nil then
-    return false
-  end
-
-  settings = settings or {}
-  settings.capabilities = capabilities
-  settings.on_attach = on_attach
-  lspconfig[server_name].setup(settings)
-
-  return true
+  vim.lsp.config(server_name, vim.tbl_deep_extend("force", {
+    capabilities = capabilities,
+  }, settings or {}))
 end
+
+local function enable(server_name)
+  vim.lsp.enable(server_name)
+end
+
+vim.api.nvim_create_autocmd("LspAttach", {
+  callback = function(event)
+    local bufnr = event.buf
+
+    which_key.add({
+      { "<leader>l", group = "LSP", buffer = bufnr },
+    })
+
+    bufmap(bufnr, "gd", vim.lsp.buf.definition, "Go to definition")
+    bufmap(bufnr, "gD", vim.lsp.buf.declaration, "Go to declaration")
+    bufmap(bufnr, "gi", vim.lsp.buf.implementation, "Go to implementation")
+    bufmap(bufnr, "gr", vim.lsp.buf.references, "List references")
+    bufmap(bufnr, "K", vim.lsp.buf.hover, "Hover docs")
+    bufmap(bufnr, "<leader>la", vim.lsp.buf.code_action, "Code action")
+    bufmap(bufnr, "<leader>ld", vim.diagnostic.open_float, "Line diagnostics")
+    bufmap(bufnr, "<leader>lf", function()
+      vim.lsp.buf.format({ async = true })
+    end, "Format buffer")
+    bufmap(bufnr, "<leader>lr", vim.lsp.buf.rename, "Rename symbol")
+    bufmap(bufnr, "<leader>ls", vim.lsp.buf.signature_help, "Signature help")
+    bufmap(bufnr, "[d", vim.diagnostic.goto_prev, "Previous diagnostic")
+    bufmap(bufnr, "]d", vim.diagnostic.goto_next, "Next diagnostic")
+  end,
+})
 
 setup("bashls")
 setup("csharp_ls")
@@ -116,17 +116,11 @@ setup("rust_analyzer", {
   },
 })
 setup("taplo")
-if not setup("ts_ls", {
+setup("ts_ls", {
   init_options = {
     hostInfo = "neovim",
   },
-}) then
-  setup("tsserver", {
-    init_options = {
-      hostInfo = "neovim",
-    },
-  })
-end
+})
 setup("yamlls", {
   settings = {
     yaml = {
@@ -137,3 +131,16 @@ setup("yamlls", {
     },
   },
 })
+
+enable("bashls")
+enable("csharp_ls")
+enable("dockerls")
+enable("gopls")
+enable("lua_ls")
+enable("marksman")
+enable("nixd")
+enable("pyright")
+enable("rust_analyzer")
+enable("taplo")
+enable("ts_ls")
+enable("yamlls")
