@@ -177,3 +177,9 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Added a detailed follow-up plan to `docs/backburner-ideas.md` describing when to escalate from `michapc-debug` to targeted DMS/Quickshell diagnostics, which files to touch, and which evidence to capture.
 - Pitfall/Root cause: The next debugging step only makes sense if `michapc-debug` works and `michapc` fails; documenting that trigger avoids another generic compatibility pass in a future chat.
 - Verification: `git diff --check`
+
+### 2026-03-20 (niri hotkey overlay bind regression)
+- Date: 2026-03-20
+- Change: Removed the experimental `Mod+Shift+/` hotkey overlay bind from `programs/niri/base/binds.kdl` after it broke the shared Niri config on both `nixy-laptop` and Micha-related hosts.
+- Pitfall/Root cause: Niri's current key syntax did not accept the literal `/` token in that bind, so `base/binds.kdl` failed to parse and the whole config loaded in broken mode with missing hotkeys and no DMS startup.
+- Verification: `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix build .#nixosConfigurations.nixy-laptop.config.system.build.toplevel --no-link`, `nix build .#nixosConfigurations.nixy-laptop.config.home-manager.users.evilweasel.home.activationPackage --no-link`, `niri validate -c /tmp/niri-validate/config.kdl`, and `journalctl --user -b --no-pager | rg -i "niri|error loading config|error parsing KDL"`

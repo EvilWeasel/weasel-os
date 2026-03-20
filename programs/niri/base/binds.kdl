@@ -12,10 +12,9 @@ binds {
     // Most actions that you can bind here can also be invoked programmatically with
     // `niri msg action do-something`.
 
-    // Mod-Shift-/, which is usually the same as Mod-?,
-    // shows a list of important hotkeys.
+    // Keep a single known-good overlay bind here; `Mod+Shift+/` looked nice on paper
+    // but breaks Niri's config parser with the current key syntax.
     Mod+Alt+P hotkey-overlay-title="Niri: Show hotkey overlay" { show-hotkey-overlay; }
-    Mod+Shift+/ hotkey-overlay-title="Niri: Show hotkey overlay" { show-hotkey-overlay; }
 
     // Mod+Shift+W hotkey-overlay-title="Web search" { spawn "web-search"; }
 
