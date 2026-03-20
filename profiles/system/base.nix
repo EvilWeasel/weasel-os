@@ -123,6 +123,10 @@ in {
     ../../modules/local-hardware-clock.nix
   ];
 
+  # Keep existing hand-managed Home Manager config files as backups during
+  # activation instead of aborting the switch.
+  home-manager.backupFileExtension = "hm-backup";
+
   boot = {
     kernelModules = ["v4l2loopback"];
     extraModulePackages = [config.boot.kernelPackages.v4l2loopback];
