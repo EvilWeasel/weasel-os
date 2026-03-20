@@ -38,7 +38,8 @@ There is no separate unit-test framework in this repo.
 
 ## Agent Verification Policy
 - Prefer syntax-only verification when possible: `nix-instantiate --parse <changed-file>`.
-- If a change cannot be fully validated by syntax parse (for example flake wiring, module option names, cross-file integration), run: `nix eval --no-write-lock-file .#nixosConfigurations.<affected-host>.config.system.build.toplevel.drvPath`.
+- For any task that changes repo-tracked code or NixOS/Home Manager configuration, run `nix eval --no-write-lock-file .#nixosConfigurations.<affected-host>.config.system.build.toplevel.drvPath` for each affected host after the edits.
+- For docs-only or markdown-only changes, skip the `nix eval` step unless the change also touches code or config that needs rebuild validation.
 - Do not use verification commands that modify `flake.lock` unless the task explicitly requires lock updates.
 
 ## Commit & Pull Request Guidelines
@@ -46,6 +47,8 @@ Git history uses short, imperative, scope-first messages (for example: `added ll
 - Keep commits focused to one area (host/module/program).
 - PRs should include: what changed, why, affected host(s), and exact validation commands run.
 - Include screenshots only for visible UI changes (Waybar, Rofi, wallpapers, wlogout, etc.).
+- After a verified code/config change request, create a focused signed commit and push it to `origin/main` before handing the task back.
+- If `git commit` or `git push` fails because the required GPG/SSH key or permissions are unavailable, stop and report the blocker; never create an unsigned commit or work around signing/auth requirements.
 
 ## Agent Learnings
 - Maintain `agent-learnings.md` as an append-only log for future agents.

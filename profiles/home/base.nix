@@ -159,7 +159,12 @@ in {
     kitty = {
       enable = true;
       package = pkgs.kitty;
+      shellIntegration = {
+        mode = "no-rc";
+      };
       settings = {
+        # Emit a notification when a long-running command finishes in an unfocused or invisible window.
+        notify_on_cmd_finish = "invisible 5.0 notify";
         scrollback_lines = 2000;
         wheel_scroll_min_lines = 1;
         window_padding_width = 4;

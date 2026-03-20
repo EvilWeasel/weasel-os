@@ -153,3 +153,15 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Removed `brave` from the shared system package list so the active laptop and desktop configs stop pulling in the package that triggered the `xorg.libxcb` warning.
 - Pitfall/Root cause: The warning was coming from an unused but still-installed browser package, not from the Asahi support tree.
 - Verification: Not yet run after this batch of edits.
+
+### 2026-03-20 (kitty long-run notifications)
+- Date: 2026-03-20
+- Change: Enabled Kitty shell integration explicitly and added `notify_on_cmd_finish = "invisible 5.0 notify"` in the shared Home Manager Kitty config so long-running commands in unfocused or invisible Kitty windows emit desktop notifications.
+- Pitfall/Root cause: Kitty's finish notifications depend on shell integration, and the config needs to live in the shared home profile to cover both hosts consistently.
+- Verification: `nix-instantiate --parse profiles/home/base.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`; the desktop eval also hit an existing `weasel-rebuild` derivation parse error (`expected string 'D'`).
+
+### 2026-03-20 (backburner ideas log)
+- Date: 2026-03-20
+- Change: Added `docs/backburner-ideas.md` as a concise holding area for deferred project ideas, starting with the Kitty/background-command notification idea and its relevant references.
+- Pitfall/Root cause: This is intentionally a docs-only addition, so no Nix evaluation was needed for the new note file itself.
+- Verification: `git diff --check`
