@@ -10,25 +10,6 @@
 }: let
   inherit (import ../../hosts/${host}/variables.nix) gitEmail gitSigningKey gitUsername;
   repoDefaultPath = "${config.home.homeDirectory}/weasel-os";
-  shellCommon = ''
-    export XDG_DATA_DIRS=$XDG_DATA_DIRS:/usr/share:/var/lib/flatpak/exports/share:$HOME/.local/share/flatpak/exports/share
-
-    weasel_os_root() {
-      if [ -n "$WEASEL_OS_ROOT" ] && [ -f "$WEASEL_OS_ROOT/flake.nix" ]; then
-        printf '%s\n' "$WEASEL_OS_ROOT"
-        return 0
-      fi
-
-      local git_root=""
-      git_root="$(git rev-parse --show-toplevel 2>/dev/null || true)"
-      if [ -n "$git_root" ] && [ -f "$git_root/flake.nix" ] && [ -d "$git_root/hosts" ] && [ -d "$git_root/programs" ]; then
-        printf '%s\n' "$git_root"
-        return 0
-      fi
-
-      printf '%s\n' "${repoDefaultPath}"
-    }
-  '';
   shellAliases = {
     sv = "sudo nvim";
     fr = "nh os switch --hostname ${host} \"$(weasel_os_root)\"";
@@ -71,6 +52,7 @@ in {
       pkgsUnstable.zed-editor
     ];
     sessionVariables = {
+      WEASEL_OS_HOST = host;
       WEASEL_OS_ROOT = repoDefaultPath;
     };
   };
@@ -81,6 +63,7 @@ in {
     ../../programs/fastfetch
     ../../programs/niri.nix
     ../../programs/neovim.nix
+    ../../programs/terminal-stack.nix
     ../../programs/vscode.nix
     ../../programs/rofi/rofi.nix
     ../../programs/rofi/config-emoji.nix
@@ -196,63 +179,6 @@ in {
         active_tab_font_style   bold
         inactive_tab_font_style bold
       '';
-    };
-    starship = {
-      enable = true;
-      package = pkgs.starship;
-    };
-    zsh = {
-      enable = true;
-      enableCompletion = true;
-      profileExtra = shellCommon;
-      initContent = ''
-        fastfetch
-        if [ -f $HOME/.zshrc-personal ]; then
-          source $HOME/.zshrc-personal
-        fi
-        bindkey -v
-        bindkey '^R' history-incremental-search-backward
-        eval "$(zoxide init zsh)"
-        function y() {
-        	local tmp="$(mktemp -t "yazi-cwd.XXXXXX")" cwd
-        	yazi "$@" --cwd-file="$tmp"
-        	if cwd="$(command cat -- "$tmp")" && [ -n "$cwd" ] && [ "$cwd" != "$PWD" ]; then
-        		builtin cd -- "$cwd"
-        	fi
-        	rm -f -- "$tmp"
-        }
-      '';
-      inherit shellAliases;
-      syntaxHighlighting = {
-        enable = true;
-        highlighters = [
-          "brackets"
-          "cursor"
-          "root"
-          "line"
-        ];
-      };
-    };
-    bash = {
-      enable = true;
-      enableCompletion = true;
-      profileExtra = shellCommon;
-      initExtra = ''
-        fastfetch
-        if [ -f $HOME/.bashrc-personal ]; then
-          source $HOME/.bashrc-personal
-        fi
-        eval "$(zoxide init bash)"
-        function y() {
-        	local tmp="$(mktemp -t "yazi-cwd.XXXXXX")" cwd
-        	yazi "$@" --cwd-file="$tmp"
-        	if cwd="$(command cat -- "$tmp")" && [ -n "$cwd" ] && [ "$cwd" != "$PWD" ]; then
-        		builtin cd -- "$cwd"
-        	fi
-        	rm -f -- "$tmp"
-        }
-      '';
-      inherit shellAliases;
     };
     home-manager.enable = true;
     hyprlock = {

@@ -1,11 +1,14 @@
-{ pkgs, inputs, ... }:
-let
+{
+  pkgs,
+  pkgsUnstable,
+  inputs,
+  ...
+}: let
   finecmdline = pkgs.vimUtils.buildVimPlugin {
     name = "fine-cmdline";
     src = inputs.fine-cmdline;
   };
-in
-{
+in {
   programs = {
     neovim = {
       enable = true;
@@ -14,23 +17,28 @@ in
       vimAlias = true;
       vimdiffAlias = true;
       withNodeJs = true;
-      extraPackages = with pkgs; [
-        lua-language-server
+      extraPackages = with pkgsUnstable; [
+        bash-language-server
+        csharp-ls
+        dockerfile-language-server
         gopls
-        xclip
-        wl-clipboard
-        luajitPackages.lua-lsp
-        nil
-        rust-analyzer
-        #nodePackages.bash-language-server
-        yaml-language-server
-        pyright
+        lua-language-server
         marksman
+        nixd
+        pyright
+        rust-analyzer
+        taplo
+        typescript
+        typescript-language-server
+        wl-clipboard
+        xclip
+        yaml-language-server
       ];
       plugins = with pkgs.vimPlugins; [
         alpha-nvim
         auto-session
         bufferline-nvim
+        catppuccin-nvim
         dressing-nvim
         indent-blankline-nvim
         nui-nvim
@@ -52,11 +60,11 @@ in
         nvim-ts-context-commentstring
         plenary-nvim
         neodev-nvim
-        luasnip
         telescope-nvim
         todo-comments-nvim
         nvim-tree-lua
         telescope-fzf-native-nvim
+        which-key-nvim
         vim-tmux-navigator
       ];
       extraConfig = ''
@@ -65,6 +73,8 @@ in
       '';
       extraLuaConfig = ''
         ${builtins.readFile ./nvim/options.lua}
+        ${builtins.readFile ./nvim/plugins/which-key.lua}
+        ${builtins.readFile ./nvim/plugins/theme.lua}
         ${builtins.readFile ./nvim/keymaps.lua}
         ${builtins.readFile ./nvim/plugins/alpha.lua}
         ${builtins.readFile ./nvim/plugins/autopairs.lua}

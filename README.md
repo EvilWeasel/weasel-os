@@ -110,6 +110,8 @@ After the first successful switch and re-login, the shell aliases are available:
 - `fr`: rebuild the current host from this repo.
 - `fu`: update flake inputs and rebuild the current host.
 - `ncg`: garbage-collect user and system generations, then refresh boot config.
+- `nix develop .#dev`: enter the portable editor and tool shell.
+- `nix run .#dev`: launch the same portable shell with one command.
 
 Examples:
 
@@ -117,7 +119,11 @@ Examples:
 fr
 fu
 ncg
+nix develop .#dev
+nix run .#dev
 ```
+
+For Neovim and the portable shell workflow, see [docs/neovim-quick-start.md](docs/neovim-quick-start.md).
 
 If the repo is not at `~/weasel-os`, set:
 
