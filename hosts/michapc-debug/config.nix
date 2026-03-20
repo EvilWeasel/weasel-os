@@ -1,0 +1,5 @@
+{...}: {
+  imports = [
+    ../michapc/config.nix
+  ];
+}

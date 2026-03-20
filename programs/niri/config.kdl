@@ -6,7 +6,7 @@ hotkey-overlay {
 // Disable client-side decorations.
 prefer-no-csd
 
-spawn-at-startup "dms" "run"
+// __WEASEL_DMS_SPAWN__
 
 // Screenshot path is formatted with strftime(3) to give you the screenshot date and time.
 screenshot-path "~/Pictures/Screenshots/Screenshot from %Y-%m-%d %H-%M-%S.png"

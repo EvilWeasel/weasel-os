@@ -24,7 +24,18 @@ let
       ${resolveRoot}
 
       repo_root="$(resolve_weasel_os_root)"
-      exec ${pkgs.nh}/bin/nh os switch --hostname "${host}" ${if update then "--update " else ""}"$repo_root"
+      nh_args=(
+        os
+        switch
+        --hostname
+        "${host}"
+      )
+
+      ${if update then ''
+        nh_args+=(--update)
+      '' else ""}
+
+      exec ${pkgs.nh}/bin/nh "''${nh_args[@]}" "$repo_root"
     '';
 in
 pkgs.symlinkJoin {

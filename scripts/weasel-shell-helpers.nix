@@ -61,6 +61,7 @@ pkgs.symlinkJoin {
       ..	cd ..	Go up one directory
       fr	nh os switch --hostname ${host}	Rebuild the current host
       fu	nh os switch --hostname ${host} --update	Update inputs and rebuild the current host
+      weasel-collect-session-debug	weasel-collect-session-debug	Capture a timestamped session debug bundle in \$HOME/weasel-debug
       sv	sudo nvim	Edit files as root with Neovim
       v	nvim	Open Neovim
       cat	bat	Pretty-print file contents
