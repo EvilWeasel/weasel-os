@@ -34,18 +34,38 @@ pkgs.writeShellScriptBin "weasel-collect-session-debug" ''
   run_capture "loginctl-user-status" ${pkgs.systemd}/bin/loginctl user-status "$USER"
   run_capture "journal-user-boot" ${pkgs.systemd}/bin/journalctl --user -b --no-pager
   run_capture "journal-greetd-boot" ${pkgs.systemd}/bin/journalctl -u greetd -b --no-pager
+  run_capture "systemctl-user-audio" ${pkgs.systemd}/bin/systemctl --user status pipewire.service pipewire-pulse.service wireplumber.service
+  run_capture "journal-user-audio" ${pkgs.systemd}/bin/journalctl --user -b -u pipewire.service -u pipewire-pulse.service -u wireplumber.service --no-pager
   run_capture "lspci-k" ${pkgs.pciutils}/bin/lspci -k
   run_capture "ps-tree" ${pkgs.procps}/bin/ps faux
   run_capture "env-sorted" ${pkgs.coreutils}/bin/env
 
   run_bash_capture "processes-interesting" \
-    "${pkgs.procps}/bin/pgrep -af 'greetd|niri|dms|qs|quickshell|kitty' || true"
+    "${pkgs.procps}/bin/pgrep -af 'greetd|niri|dms|qs|quickshell|kitty|pipewire|wireplumber|pulse' || true"
   run_bash_capture "journal-filtered" \
-    "${pkgs.systemd}/bin/journalctl -b --no-pager | ${pkgs.ripgrep}/bin/rg -i 'greetd|niri|dms|quickshell|qt|wayland|nvidia|drm|gbm|egl|input|seat' || true"
+    "${pkgs.systemd}/bin/journalctl -b --no-pager | ${pkgs.ripgrep}/bin/rg -i 'greetd|niri|dms|quickshell|qt|wayland|nvidia|drm|gbm|egl|input|seat|pipewire|wireplumber|pulse|alsa|snd|sof' || true"
   run_bash_capture "coredumps-interesting" \
-    "${pkgs.systemd}/bin/coredumpctl --no-pager list dms qs quickshell niri || true"
+    "${pkgs.systemd}/bin/coredumpctl --no-pager list dms qs quickshell niri pipewire wireplumber pipewire-pulse || true"
   run_bash_capture "nvidia-smi" \
     "command -v nvidia-smi >/dev/null 2>&1 && nvidia-smi || echo 'nvidia-smi not available'"
+  run_bash_capture "wpctl-status" \
+    "command -v wpctl >/dev/null 2>&1 && wpctl status || echo 'wpctl not available'"
+  run_bash_capture "wpctl-default-sink" \
+    "command -v wpctl >/dev/null 2>&1 && wpctl inspect @DEFAULT_AUDIO_SINK@ || echo 'wpctl not available'"
+  run_bash_capture "wpctl-default-source" \
+    "command -v wpctl >/dev/null 2>&1 && wpctl inspect @DEFAULT_AUDIO_SOURCE@ || echo 'wpctl not available'"
+  run_bash_capture "pactl-info" \
+    "command -v pactl >/dev/null 2>&1 && pactl info || echo 'pactl not available'"
+  run_bash_capture "pactl-sinks" \
+    "command -v pactl >/dev/null 2>&1 && pactl list short sinks || echo 'pactl not available'"
+  run_bash_capture "pactl-sources" \
+    "command -v pactl >/dev/null 2>&1 && pactl list short sources || echo 'pactl not available'"
+  run_bash_capture "pactl-sink-inputs" \
+    "command -v pactl >/dev/null 2>&1 && pactl list short sink-inputs || echo 'pactl not available'"
+  run_bash_capture "alsa-devices" \
+    "command -v aplay >/dev/null 2>&1 && aplay -l || echo 'aplay not available'; echo; command -v arecord >/dev/null 2>&1 && arecord -l || echo 'arecord not available'"
+  run_bash_capture "snd-devnodes" \
+    "ls -l /dev/snd 2>/dev/null || echo '/dev/snd missing'"
   run_bash_capture "state-tree" \
     "${pkgs.findutils}/bin/find '$debug_state' -maxdepth 3 -mindepth 1 -print 2>/dev/null || true"
 
@@ -70,9 +90,13 @@ pkgs.writeShellScriptBin "weasel-collect-session-debug" ''
   Important files:
   - journal-filtered.txt
   - journal-user-boot.txt
+  - journal-user-audio.txt
   - journal-greetd-boot.txt
   - processes-interesting.txt
   - coredumps-interesting.txt
+  - systemctl-user-audio.txt
+  - wpctl-status.txt
+  - pactl-info.txt
   EOF
 
   printf '%s\n' "$bundle_dir"
