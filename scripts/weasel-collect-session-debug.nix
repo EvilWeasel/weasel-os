@@ -77,12 +77,38 @@ pkgs.writeShellScriptBin "weasel-collect-session-debug" ''
     "${pkgs.kmod}/bin/modinfo evdi || true; echo; ${pkgs.kmod}/bin/modinfo udl || true"
   run_bash_capture "displaylink-udev" \
     "${pkgs.systemd}/bin/udevadm info --export-db | ${pkgs.ripgrep}/bin/rg -i 'displaylink|17e9|evdi|udl|thunderbolt|usb' -C 2 || true"
+  run_bash_capture "input-udev" \
+    "${pkgs.systemd}/bin/udevadm info --export-db | ${pkgs.ripgrep}/bin/rg -i 'ID_INPUT|keyboard|keyb|AT Translated|touchpad|libinput|serio|i8042' -C 2 || true"
   run_bash_capture "drm-connectors" \
     "for f in /sys/class/drm/*/status; do echo \"== $f ==\"; cat \"$f\"; echo; done"
   run_bash_capture "drm-tree" \
     "${pkgs.findutils}/bin/find /sys/class/drm -maxdepth 3 -mindepth 1 -print 2>/dev/null | ${pkgs.coreutils}/bin/sort || true"
   run_bash_capture "dev-dri" \
     "ls -l /dev/dri 2>/dev/null || echo '/dev/dri missing'"
+  run_bash_capture "dev-input-by-path" \
+    "ls -l /dev/input/by-path 2>/dev/null || echo '/dev/input/by-path missing'"
+  run_bash_capture "dev-input-by-id" \
+    "ls -l /dev/input/by-id 2>/dev/null || echo '/dev/input/by-id missing'"
+  run_bash_capture "proc-bus-input-devices" \
+    "cat /proc/bus/input/devices 2>/dev/null || echo '/proc/bus/input/devices missing'"
+  run_bash_capture "input-keyboards-sysfs" \
+    "for dev in /sys/class/input/event*; do \
+      [ -e \"$dev\" ] || continue; \
+      name=$(cat \"$dev/device/name\" 2>/dev/null || echo 'unknown'); \
+      handlers=$(sed -n 's/^H: Handlers=//p' /proc/bus/input/devices 2>/dev/null | ${pkgs.ripgrep}/bin/rg -m1 \"$(basename \"$dev\")\" || true); \
+      case \"$name $handlers\" in \
+        *kbd*|*Keyboard*|*keyboard*|*AT\ Translated\ Set\ 2\ keyboard*) \
+          echo \"== $dev ==\"; \
+          echo \"name=$name\"; \
+          echo \"sysfs=$(${pkgs.coreutils}/bin/readlink -f \"$dev/device\" 2>/dev/null || true)\"; \
+          echo \"uevent:\"; \
+          cat \"$dev/device/uevent\" 2>/dev/null || true; \
+          echo; \
+        ;; \
+      esac; \
+    done"
+  run_bash_capture "libinput-list-devices" \
+    "command -v libinput >/dev/null 2>&1 && libinput list-devices || echo 'libinput not available'"
   run_bash_capture "usb-tree-sysfs" \
     "${pkgs.findutils}/bin/find /sys/bus/usb/devices -maxdepth 2 -mindepth 1 -print 2>/dev/null | ${pkgs.coreutils}/bin/sort || true"
   run_bash_capture "thunderbolt-tree-sysfs" \
@@ -155,6 +181,10 @@ pkgs.writeShellScriptBin "weasel-collect-session-debug" ''
   - xrandr-providers.txt
   - lsusb-tree.txt
   - displaylink-udev.txt
+  - input-udev.txt
+  - proc-bus-input-devices.txt
+  - input-keyboards-sysfs.txt
+  - dev-input-by-path.txt
   - systemctl-user-audio.txt
   - wpctl-status.txt
   - pactl-info.txt
