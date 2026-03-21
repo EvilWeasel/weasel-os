@@ -8,6 +8,7 @@
   ...
 }: {
   features.canbus.enable = true;
+  features.displaylink.enable = true;
 
   local.hardware-clock.enable = true;
 

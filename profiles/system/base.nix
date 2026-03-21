@@ -114,6 +114,7 @@ in {
   imports = [
     inputs.dms.nixosModules.greeter
     ../../modules/canbus.nix
+    ../../modules/displaylink.nix
     ../../modules/overrides/linux-zen-preempt-fix.nix
     ../../modules/amd-drivers.nix
     ../../modules/nvidia-drivers.nix
