@@ -51,6 +51,9 @@ in {
       WEASEL_OS_ROOT = repoDefaultPath;
       WEASEL_DEBUG_HOME = "${config.home.homeDirectory}/weasel-debug";
       WEASEL_DEBUG_STATE = "${config.home.homeDirectory}/.local/state/weasel-debug";
+      # Home Manager's `qt.platformTheme = "qtct"` maps to `qt5ct`, which
+      # makes Quickshell spin before DMS even loads QML on this setup.
+      QT_QPA_PLATFORMTHEME = lib.mkForce "";
     };
   };
 
@@ -130,6 +133,10 @@ in {
   qt = {
     enable = true;
     style.name = lib.mkForce "kvantum";
+  };
+
+  systemd.user.sessionVariables = {
+    QT_QPA_PLATFORMTHEME = lib.mkForce "";
   };
 
   services.hypridle = {

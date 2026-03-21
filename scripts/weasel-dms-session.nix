@@ -28,5 +28,10 @@ pkgs.writeShellScriptBin "weasel-dms-session" ''
   ${pkgs.coreutils}/bin/ln -sfn "$env_file" "$dms_log_dir/latest.env"
   ${pkgs.coreutils}/bin/ln -sfn "$log_file" "$dms_log_dir/latest.log"
 
+  # Quickshell/DMS hangs before QML loading when Home Manager exports
+  # `QT_QPA_PLATFORMTHEME=qt5ct`; keep the style override but drop the
+  # platform theme for this session.
+  unset QT_QPA_PLATFORMTHEME
+
   exec dms run --session >>"$log_file" 2>&1
 ''
