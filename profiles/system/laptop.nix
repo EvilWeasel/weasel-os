@@ -1,5 +1,6 @@
 {
   config,
+  host,
   pkgs,
   pkgsUnstable,
   inputs,
@@ -9,6 +10,7 @@
 }: {
   features.canbus.enable = true;
   features.displaylink.enable = true;
+  services.xserver.videoDrivers = lib.mkIf (host == "nixy-laptop") [ "nvidia" ];
 
   local.hardware-clock.enable = true;
 
