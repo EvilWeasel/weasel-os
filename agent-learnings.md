@@ -320,3 +320,8 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Removed the repo-owned Matugen Kitty template files and their Home Manager links so DMS owns the Kitty theme outputs exclusively.
 - Pitfall/Root cause: DMS already exposes Kitty as a Matugen target; keeping repo-owned `kitty-theme` and `kitty-tabs` templates duplicated the `dmskittytabs` TOML table and crashed the theme worker during every theme refresh.
 - Verification: `matugen image /home/evilweasel/Pictures/wallpapers/zaney-wallpaper.jpg --config /home/evilweasel/.config/matugen/config.toml --dry-run --type scheme-vibrant --mode dark`, `nix-instantiate --parse programs/matugen/config.toml`, `nix-instantiate --parse programs/matugen.nix`
+
+### 2026-03-22 (kitty transparency)
+- Change: Added `background_opacity 0.85` to the repo-owned Kitty config so terminal transparency is handled locally in Kitty instead of through Matugen/DMS templates.
+- Pitfall/Root cause: Kitty opacity is an independent terminal setting; it does not belong in the Matugen theme pipeline and should not reintroduce template ownership conflicts.
+- Verification: `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`
