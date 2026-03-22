@@ -309,3 +309,9 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Added multiple cursor themes and additional icon themes to the shared Home Manager package set so DMS can enumerate them on both hosts.
 - Pitfall/Root cause: DMS only offers themes that exist in the user-visible XDG data path, so cursor and icon themes need to be exposed under `~/.local/share/icons`; merely adding packages to the profile is not enough. Multiple icon-theme packages also cannot all live in `home.packages` because Home Manager merges their `share/icons` trees and collides on duplicate upstream files like `breeze/actions/12/object-fill.svg`. The greeter also needs explicit `configFiles` for `settings.json` and `session.json` or it will forget the wallpaper/session state.
 - Verification: `nix-instantiate --parse profiles/home/base.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`, `nix flake check`
+
+### 2026-03-22 (theme activation performance)
+- Date: 2026-03-22
+- Change: Replaced recursive XDG icon-theme materialization with simple activation-time symlinks into the package store paths.
+- Pitfall/Root cause: `xdg.dataFile` with `recursive = true` on large icon trees forces Home Manager to traverse and link thousands of files during every activation. That made `nh os switch` look hung even though it was just busy linking theme assets.
+- Verification: `nix-instantiate --parse profiles/home/base.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`, `nix flake check`

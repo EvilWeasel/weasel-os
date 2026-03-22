@@ -97,128 +97,6 @@ in {
       enable = true;
       createDirectories = true;
     };
-    dataFile = {
-      "icons/Bibata-Modern-Amber" = {
-        source = "${pkgs.bibata-cursors}/share/icons/Bibata-Modern-Amber";
-        recursive = true;
-      };
-      "icons/Bibata-Modern-Classic" = {
-        source = "${pkgs.bibata-cursors}/share/icons/Bibata-Modern-Classic";
-        recursive = true;
-      };
-      "icons/Bibata-Modern-Ice" = {
-        source = "${pkgs.bibata-cursors}/share/icons/Bibata-Modern-Ice";
-        recursive = true;
-      };
-      "icons/Adwaita" = {
-        source = "${pkgs.adwaita-icon-theme}/share/icons/Adwaita";
-        recursive = true;
-      };
-      "icons/capitaine-cursors" = {
-        source = "${pkgs.capitaine-cursors}/share/icons/capitaine-cursors";
-        recursive = true;
-      };
-      "icons/capitaine-cursors-white" = {
-        source = "${pkgs.capitaine-cursors}/share/icons/capitaine-cursors-white";
-        recursive = true;
-      };
-      "icons/phinger-cursors-dark" = {
-        source = "${pkgs.phinger-cursors}/share/icons/phinger-cursors-dark";
-        recursive = true;
-      };
-      "icons/phinger-cursors-light" = {
-        source = "${pkgs.phinger-cursors}/share/icons/phinger-cursors-light";
-        recursive = true;
-      };
-      "icons/Papirus" = {
-        source = "${pkgs.papirus-icon-theme}/share/icons/Papirus";
-        recursive = true;
-      };
-      "icons/Papirus-Dark" = {
-        source = "${pkgs.papirus-icon-theme}/share/icons/Papirus-Dark";
-        recursive = true;
-      };
-      "icons/Papirus-Light" = {
-        source = "${pkgs.papirus-icon-theme}/share/icons/Papirus-Light";
-        recursive = true;
-      };
-      "icons/breeze" = {
-        source = "${pkgs.kdePackages.breeze-icons}/share/icons/breeze";
-        recursive = true;
-      };
-      "icons/breeze-dark" = {
-        source = "${pkgs.kdePackages.breeze-icons}/share/icons/breeze-dark";
-        recursive = true;
-      };
-      "icons/Numix" = {
-        source = "${pkgs.numix-icon-theme}/share/icons/Numix";
-        recursive = true;
-      };
-      "icons/Numix-Light" = {
-        source = "${pkgs.numix-icon-theme}/share/icons/Numix-Light";
-        recursive = true;
-      };
-      "icons/rose-pine" = {
-        source = "${pkgs.rose-pine-icon-theme}/share/icons/rose-pine";
-        recursive = true;
-      };
-      "icons/rose-pine-dawn" = {
-        source = "${pkgs.rose-pine-icon-theme}/share/icons/rose-pine-dawn";
-        recursive = true;
-      };
-      "icons/rose-pine-moon" = {
-        source = "${pkgs.rose-pine-icon-theme}/share/icons/rose-pine-moon";
-        recursive = true;
-      };
-      "icons/Simp1e" = {
-        source = "${pkgs.simp1e-cursors}/share/icons/Simp1e";
-        recursive = true;
-      };
-      "icons/Simp1e-Adw-Dark" = {
-        source = "${pkgs.simp1e-cursors}/share/icons/Simp1e-Adw-Dark";
-        recursive = true;
-      };
-      "icons/Simp1e-Rose-Pine-Moon" = {
-        source = "${pkgs.simp1e-cursors}/share/icons/Simp1e-Rose-Pine-Moon";
-        recursive = true;
-      };
-      "icons/Simp1e-Tokyo-Night" = {
-        source = "${pkgs.simp1e-cursors}/share/icons/Simp1e-Tokyo-Night";
-        recursive = true;
-      };
-      "icons/Tela" = {
-        source = "${pkgs.tela-icon-theme}/share/icons/Tela";
-        recursive = true;
-      };
-      "icons/Tela-dark" = {
-        source = "${pkgs.tela-icon-theme}/share/icons/Tela-dark";
-        recursive = true;
-      };
-      "icons/Tela-light" = {
-        source = "${pkgs.tela-icon-theme}/share/icons/Tela-light";
-        recursive = true;
-      };
-      "icons/Tela-dracula" = {
-        source = "${pkgs.tela-icon-theme}/share/icons/Tela-dracula";
-        recursive = true;
-      };
-      "icons/Tela-nord" = {
-        source = "${pkgs.tela-icon-theme}/share/icons/Tela-nord";
-        recursive = true;
-      };
-      "icons/Vanilla-DMZ" = {
-        source = "${pkgs.vanilla-dmz}/share/icons/DMZ-White";
-        recursive = true;
-      };
-      "icons/Volantes" = {
-        source = "${pkgs.volantes-cursors}/share/icons/volantes_cursors";
-        recursive = true;
-      };
-      "icons/Volantes-Light" = {
-        source = "${pkgs.volantes-cursors}/share/icons/volantes_light_cursors";
-        recursive = true;
-      };
-    };
     configFile = {
       "mimeapps.list" = {
         source = config.lib.file.mkOutOfStoreSymlink "${repoDefaultPath}/programs/mimeapps.list";
@@ -273,6 +151,49 @@ in {
   home.file.".local/share/applications/kitty.desktop" = {
     source = config.lib.file.mkOutOfStoreSymlink "${repoDefaultPath}/programs/kitty.desktop";
   };
+
+  home.activation.ensureThemeIconDirs = lib.hm.dag.entryAfter ["writeBoundary"] ''
+    install -d "$HOME/.local/share/icons"
+
+    ln -sfn "${pkgs.adwaita-icon-theme}/share/icons/Adwaita" "$HOME/.local/share/icons/Adwaita"
+
+    ln -sfn "${pkgs.bibata-cursors}/share/icons/Bibata-Modern-Amber" "$HOME/.local/share/icons/Bibata-Modern-Amber"
+    ln -sfn "${pkgs.bibata-cursors}/share/icons/Bibata-Modern-Classic" "$HOME/.local/share/icons/Bibata-Modern-Classic"
+    ln -sfn "${pkgs.bibata-cursors}/share/icons/Bibata-Modern-Ice" "$HOME/.local/share/icons/Bibata-Modern-Ice"
+
+    ln -sfn "${pkgs.capitaine-cursors}/share/icons/capitaine-cursors" "$HOME/.local/share/icons/capitaine-cursors"
+    ln -sfn "${pkgs.capitaine-cursors}/share/icons/capitaine-cursors-white" "$HOME/.local/share/icons/capitaine-cursors-white"
+
+    ln -sfn "${pkgs.numix-icon-theme}/share/icons/Numix" "$HOME/.local/share/icons/Numix"
+    ln -sfn "${pkgs.numix-icon-theme}/share/icons/Numix-Light" "$HOME/.local/share/icons/Numix-Light"
+
+    ln -sfn "${pkgs.papirus-icon-theme}/share/icons/Papirus" "$HOME/.local/share/icons/Papirus"
+    ln -sfn "${pkgs.papirus-icon-theme}/share/icons/Papirus-Dark" "$HOME/.local/share/icons/Papirus-Dark"
+    ln -sfn "${pkgs.papirus-icon-theme}/share/icons/Papirus-Light" "$HOME/.local/share/icons/Papirus-Light"
+
+    ln -sfn "${pkgs.phinger-cursors}/share/icons/phinger-cursors-dark" "$HOME/.local/share/icons/phinger-cursors-dark"
+    ln -sfn "${pkgs.phinger-cursors}/share/icons/phinger-cursors-light" "$HOME/.local/share/icons/phinger-cursors-light"
+
+    ln -sfn "${pkgs.rose-pine-icon-theme}/share/icons/rose-pine" "$HOME/.local/share/icons/rose-pine"
+    ln -sfn "${pkgs.rose-pine-icon-theme}/share/icons/rose-pine-dawn" "$HOME/.local/share/icons/rose-pine-dawn"
+    ln -sfn "${pkgs.rose-pine-icon-theme}/share/icons/rose-pine-moon" "$HOME/.local/share/icons/rose-pine-moon"
+
+    ln -sfn "${pkgs.simp1e-cursors}/share/icons/Simp1e" "$HOME/.local/share/icons/Simp1e"
+    ln -sfn "${pkgs.simp1e-cursors}/share/icons/Simp1e-Adw-Dark" "$HOME/.local/share/icons/Simp1e-Adw-Dark"
+    ln -sfn "${pkgs.simp1e-cursors}/share/icons/Simp1e-Rose-Pine-Moon" "$HOME/.local/share/icons/Simp1e-Rose-Pine-Moon"
+    ln -sfn "${pkgs.simp1e-cursors}/share/icons/Simp1e-Tokyo-Night" "$HOME/.local/share/icons/Simp1e-Tokyo-Night"
+
+    ln -sfn "${pkgs.tela-icon-theme}/share/icons/Tela" "$HOME/.local/share/icons/Tela"
+    ln -sfn "${pkgs.tela-icon-theme}/share/icons/Tela-dark" "$HOME/.local/share/icons/Tela-dark"
+    ln -sfn "${pkgs.tela-icon-theme}/share/icons/Tela-dracula" "$HOME/.local/share/icons/Tela-dracula"
+    ln -sfn "${pkgs.tela-icon-theme}/share/icons/Tela-light" "$HOME/.local/share/icons/Tela-light"
+    ln -sfn "${pkgs.tela-icon-theme}/share/icons/Tela-nord" "$HOME/.local/share/icons/Tela-nord"
+
+    ln -sfn "${pkgs.vanilla-dmz}/share/icons/DMZ-White" "$HOME/.local/share/icons/DMZ-White"
+
+    ln -sfn "${pkgs.volantes-cursors}/share/icons/volantes_cursors" "$HOME/.local/share/icons/volantes_cursors"
+    ln -sfn "${pkgs.volantes-cursors}/share/icons/volantes_light_cursors" "$HOME/.local/share/icons/volantes_light_cursors"
+  '';
 
   dconf.settings = {
     "org/virt-manager/virt-manager/connections" = {
