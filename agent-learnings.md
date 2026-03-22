@@ -307,5 +307,5 @@ Append-only log of implementation lessons for future agents working in this repo
 ### 2026-03-22 (cursor and icon theme inventory)
 - Date: 2026-03-22
 - Change: Added multiple cursor themes and additional icon themes to the shared Home Manager package set so DMS can enumerate them on both hosts.
-- Pitfall/Root cause: DMS only offers themes that exist in the user-visible XDG data path, so merely configuring a default theme is not enough if the package is absent from the profile.
-- Verification: `nix-instantiate --parse profiles/home/base.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`
+- Pitfall/Root cause: DMS only offers themes that exist in the user-visible XDG data path, so merely configuring a default theme is not enough if the package is absent from the profile. Multiple icon-theme packages also cannot all live in `home.packages` because Home Manager merges their `share/icons` trees and collides on duplicate upstream files like `breeze/actions/12/object-fill.svg`.
+- Verification: `nix-instantiate --parse profiles/home/base.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`, `nix flake check`

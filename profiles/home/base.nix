@@ -44,16 +44,11 @@ in {
       (import ../../scripts/rofi-launcher.nix {inherit pkgs;})
       (import ../../scripts/screenshootin.nix {inherit pkgs;})
       pkgs.adw-gtk3
-      pkgs.adwaita-icon-theme
       pkgs.bibata-cursors
       pkgs.capitaine-cursors
-      pkgs.kdePackages.breeze-icons
-      pkgs.numix-icon-theme
       pkgs.phinger-cursors
       pkgs.papirus-icon-theme
-      pkgs.rose-pine-icon-theme
       pkgs.simp1e-cursors
-      pkgs.tela-icon-theme
       pkgs.vanilla-dmz
       pkgs.volantes-cursors
       pkgs.kitty
@@ -101,6 +96,72 @@ in {
     userDirs = {
       enable = true;
       createDirectories = true;
+    };
+    dataFile = {
+      "icons/Adwaita" = {
+        source = "${pkgs.adwaita-icon-theme}/share/icons/Adwaita";
+        recursive = true;
+      };
+      "icons/Papirus" = {
+        source = "${pkgs.papirus-icon-theme}/share/icons/Papirus";
+        recursive = true;
+      };
+      "icons/Papirus-Dark" = {
+        source = "${pkgs.papirus-icon-theme}/share/icons/Papirus-Dark";
+        recursive = true;
+      };
+      "icons/Papirus-Light" = {
+        source = "${pkgs.papirus-icon-theme}/share/icons/Papirus-Light";
+        recursive = true;
+      };
+      "icons/breeze" = {
+        source = "${pkgs.kdePackages.breeze-icons}/share/icons/breeze";
+        recursive = true;
+      };
+      "icons/breeze-dark" = {
+        source = "${pkgs.kdePackages.breeze-icons}/share/icons/breeze-dark";
+        recursive = true;
+      };
+      "icons/Numix" = {
+        source = "${pkgs.numix-icon-theme}/share/icons/Numix";
+        recursive = true;
+      };
+      "icons/Numix-Light" = {
+        source = "${pkgs.numix-icon-theme}/share/icons/Numix-Light";
+        recursive = true;
+      };
+      "icons/rose-pine" = {
+        source = "${pkgs.rose-pine-icon-theme}/share/icons/rose-pine";
+        recursive = true;
+      };
+      "icons/rose-pine-dawn" = {
+        source = "${pkgs.rose-pine-icon-theme}/share/icons/rose-pine-dawn";
+        recursive = true;
+      };
+      "icons/rose-pine-moon" = {
+        source = "${pkgs.rose-pine-icon-theme}/share/icons/rose-pine-moon";
+        recursive = true;
+      };
+      "icons/Tela" = {
+        source = "${pkgs.tela-icon-theme}/share/icons/Tela";
+        recursive = true;
+      };
+      "icons/Tela-dark" = {
+        source = "${pkgs.tela-icon-theme}/share/icons/Tela-dark";
+        recursive = true;
+      };
+      "icons/Tela-light" = {
+        source = "${pkgs.tela-icon-theme}/share/icons/Tela-light";
+        recursive = true;
+      };
+      "icons/Tela-dracula" = {
+        source = "${pkgs.tela-icon-theme}/share/icons/Tela-dracula";
+        recursive = true;
+      };
+      "icons/Tela-nord" = {
+        source = "${pkgs.tela-icon-theme}/share/icons/Tela-nord";
+        recursive = true;
+      };
     };
     configFile = {
       "mimeapps.list" = {
