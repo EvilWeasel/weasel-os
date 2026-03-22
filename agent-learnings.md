@@ -315,3 +315,8 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Replaced recursive XDG icon-theme materialization with simple activation-time symlinks into the package store paths.
 - Pitfall/Root cause: `xdg.dataFile` with `recursive = true` on large icon trees forces Home Manager to traverse and link thousands of files during every activation. That made `nh os switch` look hung even though it was just busy linking theme assets.
 - Verification: `nix-instantiate --parse profiles/home/base.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`, `nix flake check`
+
+### 2026-03-22 (kitty matugen ownership split)
+- Change: Removed the repo-owned Matugen Kitty template files and their Home Manager links so DMS owns the Kitty theme outputs exclusively.
+- Pitfall/Root cause: DMS already exposes Kitty as a Matugen target; keeping repo-owned `kitty-theme` and `kitty-tabs` templates duplicated the `dmskittytabs` TOML table and crashed the theme worker during every theme refresh.
+- Verification: `matugen image /home/evilweasel/Pictures/wallpapers/zaney-wallpaper.jpg --config /home/evilweasel/.config/matugen/config.toml --dry-run --type scheme-vibrant --mode dark`, `nix-instantiate --parse programs/matugen/config.toml`, `nix-instantiate --parse programs/matugen.nix`

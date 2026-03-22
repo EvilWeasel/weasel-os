@@ -15,11 +15,3 @@ output_path = '@REPO_ROOT@/programs/matugen/generated/qt5ct.conf'
 [templates.dmsqtct6]
 input_path = '@REPO_ROOT@/programs/matugen/templates/qtct.conf'
 output_path = '@REPO_ROOT@/programs/matugen/generated/qt6ct.conf'
-
-[templates.dmskittytheme]
-input_path = '@REPO_ROOT@/programs/matugen/templates/kitty-theme.conf'
-output_path = '@REPO_ROOT@/programs/matugen/generated/kitty-theme.conf'
-
-[templates.dmskittytabs]
-input_path = '@REPO_ROOT@/programs/matugen/templates/kitty-tabs.conf'
-output_path = '@REPO_ROOT@/programs/matugen/generated/kitty-tabs.conf'

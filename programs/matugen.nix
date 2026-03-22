@@ -27,14 +27,6 @@ in {
       source = config.lib.file.mkOutOfStoreSymlink "${matugenRoot}/generated/swaync.css";
       force = true;
     };
-    ".config/kitty/dank-theme.conf" = {
-      source = config.lib.file.mkOutOfStoreSymlink "${matugenRoot}/generated/kitty-theme.conf";
-      force = true;
-    };
-    ".config/kitty/dank-tabs.conf" = {
-      source = config.lib.file.mkOutOfStoreSymlink "${matugenRoot}/generated/kitty-tabs.conf";
-      force = true;
-    };
     ".config/gtk-3.0/dank-colors.css" = {
       source = config.lib.file.mkOutOfStoreSymlink "${matugenRoot}/generated/gtk3-colors.css";
       force = true;
