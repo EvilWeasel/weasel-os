@@ -303,3 +303,9 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Updated `packages/helium/flake.nix` to Helium `0.10.6.1` and `packages/t3code/flake.nix` to T3 Code `0.0.13`, including the new upstream AppImage hashes.
 - Pitfall/Root cause: Both package flakes were still pinned to old releases. The correct asset hashes had to be fetched from the current GitHub release assets and converted to SRI format before updating the fetch attributes.
 - Verification: `nix-instantiate --parse packages/helium/flake.nix`, `nix-instantiate --parse packages/t3code/flake.nix`, `nix eval --no-write-lock-file ./packages/helium#packages.x86_64-linux.default.drvPath`, `nix eval --no-write-lock-file ./packages/t3code#packages.x86_64-linux.default.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`
+
+### 2026-03-22 (cursor and icon theme inventory)
+- Date: 2026-03-22
+- Change: Added multiple cursor themes and additional icon themes to the shared Home Manager package set so DMS can enumerate them on both hosts.
+- Pitfall/Root cause: DMS only offers themes that exist in the user-visible XDG data path, so merely configuring a default theme is not enough if the package is absent from the profile.
+- Verification: `nix-instantiate --parse profiles/home/base.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`

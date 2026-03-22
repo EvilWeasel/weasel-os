@@ -44,7 +44,18 @@ in {
       (import ../../scripts/rofi-launcher.nix {inherit pkgs;})
       (import ../../scripts/screenshootin.nix {inherit pkgs;})
       pkgs.adw-gtk3
+      pkgs.adwaita-icon-theme
+      pkgs.bibata-cursors
+      pkgs.capitaine-cursors
+      pkgs.kdePackages.breeze-icons
+      pkgs.numix-icon-theme
+      pkgs.phinger-cursors
       pkgs.papirus-icon-theme
+      pkgs.rose-pine-icon-theme
+      pkgs.simp1e-cursors
+      pkgs.tela-icon-theme
+      pkgs.vanilla-dmz
+      pkgs.volantes-cursors
       pkgs.kitty
       pkgsUnstable.lmstudio
       pkgsUnstable.zed-editor
