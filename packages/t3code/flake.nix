@@ -17,10 +17,10 @@
       let
         pkgs = import nixpkgs { inherit system; };
 
-        version = "0.0.4";
+        version = "0.0.13";
         src = pkgs.fetchurl {
           url = "https://github.com/pingdotgg/t3code/releases/download/v${version}/T3-Code-${version}-x86_64.AppImage";
-          hash = "sha256-HlkQ/uPLXHh2Duamrmhp31yQqnETawQ4Ru7kg2MmpVs=";
+          hash = "sha256-oHKIh+aHsbGVHEoLLjItl6AbVRwvWVlZaIWyHKiekVc=";
         };
 
         desktopFile = pkgs.writeText "t3code.desktop" ''

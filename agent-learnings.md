@@ -297,3 +297,9 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Removed the remaining Hyprland/Waybar/Wlogout leftovers, switched the Niri lock bind to the DMS lock IPC call, and pruned the related Matugen outputs, helper scripts, and cached assets.
 - Pitfall/Root cause: The old Hypr stack was mostly dead code but still pulled in `hypridle`, `hyprlock`, `hyprpicker`, Waybar/Wlogout assets, and a Hyprland cache entry. DMS already owns the lock and power actions, so keeping those extras only added stale dependencies and confusion.
 - Verification: `nix-instantiate --parse profiles/home/base.nix`, `nix-instantiate --parse profiles/system/base.nix`, `nix-instantiate --parse programs/matugen.nix`, `nix-instantiate --parse programs/matugen/config.toml`, `nix-instantiate --parse programs/niri/base/binds.kdl`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`
+
+### 2026-03-22 (Helium and T3 Code refresh)
+- Date: 2026-03-22
+- Change: Updated `packages/helium/flake.nix` to Helium `0.10.6.1` and `packages/t3code/flake.nix` to T3 Code `0.0.13`, including the new upstream AppImage hashes.
+- Pitfall/Root cause: Both package flakes were still pinned to old releases. The correct asset hashes had to be fetched from the current GitHub release assets and converted to SRI format before updating the fetch attributes.
+- Verification: `nix-instantiate --parse packages/helium/flake.nix`, `nix-instantiate --parse packages/t3code/flake.nix`, `nix eval --no-write-lock-file ./packages/helium#packages.x86_64-linux.default.drvPath`, `nix eval --no-write-lock-file ./packages/t3code#packages.x86_64-linux.default.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`
