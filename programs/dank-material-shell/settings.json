@@ -3,7 +3,7 @@
   "currentThemeCategory": "dynamic",
   "customThemeFile": "",
   "registryThemeVariants": {},
-  "matugenScheme": "scheme-vibrant",
+  "matugenScheme": "scheme-fruit-salad",
   "runUserMatugenTemplates": true,
   "matugenTargetMonitor": "",
   "popupTransparency": 1,
@@ -248,8 +248,8 @@
   "networkPreference": "wifi",
   "iconTheme": "Papirus-Dark",
   "cursorSettings": {
-    "theme": "System Default",
-    "size": 74,
+    "theme": "volantes_cursors",
+    "size": 56,
     "niri": {
       "hideWhenTyping": false,
       "hideAfterInactiveMs": 0
@@ -334,7 +334,7 @@
   "matugenTemplateVesktop": true,
   "matugenTemplateEquibop": true,
   "matugenTemplateGhostty": true,
-  "matugenTemplateKitty": false,
+  "matugenTemplateKitty": true,
   "matugenTemplateFoot": true,
   "matugenTemplateAlacritty": true,
   "matugenTemplateNeovim": true,

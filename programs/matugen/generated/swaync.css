@@ -1,11 +1,11 @@
-@define-color bg #091517;
-@define-color bg_alt #152224;
-@define-color bg_hover #202c2e;
-@define-color fg #d7e5e8;
-@define-color fg_muted #bbc9cc;
-@define-color accent #00daf2;
-@define-color accent_alt #004f58;
-@define-color border #869396;
+@define-color bg #0f131c;
+@define-color bg_alt #1b2029;
+@define-color bg_hover #262a33;
+@define-color fg #dfe2ef;
+@define-color fg_muted #bec6dc;
+@define-color accent #52d7f0;
+@define-color accent_alt #004e5a;
+@define-color border #8891a5;
 @define-color danger #ffb4ab;
 @define-color danger_container #93000a;
 

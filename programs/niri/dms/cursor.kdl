@@ -4,5 +4,6 @@
 // ! PLACE YOUR CUSTOM CONFIGURATION ELSEWHERE !
 
 cursor {
-    xcursor-size 74
+    xcursor-theme "volantes_cursors"
+    xcursor-size 56
 }
