@@ -184,6 +184,10 @@ in {
       enable = true;
       compositor.name = "niri";
       configHome = "/home/${username}";
+      configFiles = [
+        "/home/${username}/.config/DankMaterialShell/settings.json"
+        "/home/${username}/.local/state/DankMaterialShell/session.json"
+      ];
       logs = {
         save = true;
         path = "/tmp/dms-greeter-${host}.log";

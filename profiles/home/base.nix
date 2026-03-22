@@ -98,8 +98,36 @@ in {
       createDirectories = true;
     };
     dataFile = {
+      "icons/Bibata-Modern-Amber" = {
+        source = "${pkgs.bibata-cursors}/share/icons/Bibata-Modern-Amber";
+        recursive = true;
+      };
+      "icons/Bibata-Modern-Classic" = {
+        source = "${pkgs.bibata-cursors}/share/icons/Bibata-Modern-Classic";
+        recursive = true;
+      };
+      "icons/Bibata-Modern-Ice" = {
+        source = "${pkgs.bibata-cursors}/share/icons/Bibata-Modern-Ice";
+        recursive = true;
+      };
       "icons/Adwaita" = {
         source = "${pkgs.adwaita-icon-theme}/share/icons/Adwaita";
+        recursive = true;
+      };
+      "icons/capitaine-cursors" = {
+        source = "${pkgs.capitaine-cursors}/share/icons/capitaine-cursors";
+        recursive = true;
+      };
+      "icons/capitaine-cursors-white" = {
+        source = "${pkgs.capitaine-cursors}/share/icons/capitaine-cursors-white";
+        recursive = true;
+      };
+      "icons/phinger-cursors-dark" = {
+        source = "${pkgs.phinger-cursors}/share/icons/phinger-cursors-dark";
+        recursive = true;
+      };
+      "icons/phinger-cursors-light" = {
+        source = "${pkgs.phinger-cursors}/share/icons/phinger-cursors-light";
         recursive = true;
       };
       "icons/Papirus" = {
@@ -142,6 +170,22 @@ in {
         source = "${pkgs.rose-pine-icon-theme}/share/icons/rose-pine-moon";
         recursive = true;
       };
+      "icons/Simp1e" = {
+        source = "${pkgs.simp1e-cursors}/share/icons/Simp1e";
+        recursive = true;
+      };
+      "icons/Simp1e-Adw-Dark" = {
+        source = "${pkgs.simp1e-cursors}/share/icons/Simp1e-Adw-Dark";
+        recursive = true;
+      };
+      "icons/Simp1e-Rose-Pine-Moon" = {
+        source = "${pkgs.simp1e-cursors}/share/icons/Simp1e-Rose-Pine-Moon";
+        recursive = true;
+      };
+      "icons/Simp1e-Tokyo-Night" = {
+        source = "${pkgs.simp1e-cursors}/share/icons/Simp1e-Tokyo-Night";
+        recursive = true;
+      };
       "icons/Tela" = {
         source = "${pkgs.tela-icon-theme}/share/icons/Tela";
         recursive = true;
@@ -160,6 +204,18 @@ in {
       };
       "icons/Tela-nord" = {
         source = "${pkgs.tela-icon-theme}/share/icons/Tela-nord";
+        recursive = true;
+      };
+      "icons/Vanilla-DMZ" = {
+        source = "${pkgs.vanilla-dmz}/share/icons/DMZ-White";
+        recursive = true;
+      };
+      "icons/Volantes" = {
+        source = "${pkgs.volantes-cursors}/share/icons/volantes_cursors";
+        recursive = true;
+      };
+      "icons/Volantes-Light" = {
+        source = "${pkgs.volantes-cursors}/share/icons/volantes_light_cursors";
         recursive = true;
       };
     };
