@@ -1,13 +1,13 @@
 * {
-    bg: #0f131c;
-    bg-alt: #1b2029;
-    fg: #dfe2ef;
-    fg-muted: #bec6dc;
-    accent: #52d7f0;
-    accent-alt: #004e5a;
-    border: #8891a5;
-    selected-bg: #004e5a;
-    selected-fg: #a4eeff;
+    bg: #12131c;
+    bg-alt: #1e1f29;
+    fg: #e2e1ef;
+    fg-muted: #c4c5dd;
+    accent: #6dd2ff;
+    accent-alt: #004d65;
+    border: #8e8fa6;
+    selected-bg: #004d65;
+    selected-fg: #bfe8ff;
     urgent-bg: #93000a;
     urgent-fg: #ffdad6;
 }
