@@ -1,9 +1,5 @@
 [config]
 
-[templates.dmswaybar]
-input_path = '@REPO_ROOT@/programs/matugen/templates/waybar.css'
-output_path = '@REPO_ROOT@/programs/matugen/generated/waybar.css'
-
 [templates.dmsrofi]
 input_path = '@REPO_ROOT@/programs/matugen/templates/rofi.rasi'
 output_path = '@REPO_ROOT@/programs/matugen/generated/rofi.rasi'
@@ -11,10 +7,6 @@ output_path = '@REPO_ROOT@/programs/matugen/generated/rofi.rasi'
 [templates.dmsswaync]
 input_path = '@REPO_ROOT@/programs/matugen/templates/swaync.css'
 output_path = '@REPO_ROOT@/programs/matugen/generated/swaync.css'
-
-[templates.dmswlogout]
-input_path = '@REPO_ROOT@/programs/matugen/templates/wlogout.css'
-output_path = '@REPO_ROOT@/programs/matugen/generated/wlogout.css'
 
 [templates.dmsqtct]
 input_path = '@REPO_ROOT@/programs/matugen/templates/qtct.conf'

@@ -60,7 +60,7 @@ in {
     };
   };
 
-  imports = [
+    imports = [
     inputs.dms.homeModules."dank-material-shell"
     ../../programs/emoji.nix
     ../../programs/fastfetch
@@ -73,7 +73,6 @@ in {
     ../../programs/rofi/config-emoji.nix
     ../../programs/rofi/config-long.nix
     ../../programs/swaync.nix
-    ../../programs/wlogout.nix
   ];
 
   programs.git = {
@@ -96,10 +95,6 @@ in {
       "mimeapps.list" = {
         source = config.lib.file.mkOutOfStoreSymlink "${repoDefaultPath}/programs/mimeapps.list";
         force = true;
-      };
-      "wlogout/icons" = {
-        source = ../../pictures/wlogout;
-        recursive = true;
       };
       "DankMaterialShell/settings.json" = {
         source = config.lib.file.mkOutOfStoreSymlink "${repoDefaultPath}/programs/dank-material-shell/settings.json";
@@ -180,28 +175,6 @@ in {
     QT_QPA_PLATFORMTHEME = "gtk3";
   };
 
-  services.hypridle = {
-    enable = true;
-    settings = {
-      general = {
-        after_sleep_cmd = "hyprctl dispatch dpms on";
-        ignore_dbus_inhibit = false;
-        lock_cmd = "hyprlock";
-      };
-      listener = [
-        {
-          timeout = 900;
-          on-timeout = "hyprlock";
-        }
-        {
-          timeout = 1200;
-          on-timeout = "hyprctl dispatch dpms off";
-          on-resume = "hyprctl dispatch dpms on";
-        }
-      ];
-    };
-  };
-
   programs = {
     gh.enable = true;
     btop = {
@@ -209,50 +182,5 @@ in {
       settings.vim_keys = true;
     };
     home-manager.enable = true;
-    hyprlock = {
-      enable = true;
-      settings = {
-        general = {
-          disable_loading_bar = true;
-          grace = 10;
-          hide_cursor = true;
-          no_fade_in = false;
-        };
-        lib.mkPrio.background = [
-          {
-            path = "/home/${username}/Pictures/wallpapers/beautifulmountainscape.jpg";
-            blur_passes = 3;
-            blur_size = 8;
-          }
-        ];
-        image = [
-          {
-            path = "/home/${username}/Pictures/face.png";
-            size = 150;
-            border_size = 4;
-            border_color = "rgb(0C96F9)";
-            rounding = -1;
-            position = "0, 200";
-            halign = "center";
-            valign = "center";
-          }
-        ];
-        lib.mkPrio.input-field = [
-          {
-            size = "200, 50";
-            position = "0, -80";
-            monitor = "";
-            dots_center = true;
-            fade_on_empty = false;
-            font_color = "rgb(CFE6F4)";
-            inner_color = "rgb(657DC2)";
-            outer_color = "rgb(0D0E15)";
-            outline_thickness = 5;
-            placeholder_text = "Password...";
-            shadow_passes = 2;
-          }
-        ];
-      };
-    };
   };
 }

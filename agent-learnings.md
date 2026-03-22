@@ -291,3 +291,9 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Fixed the missing app/workspace/tray icons by installing `papirus-icon-theme` into the active user profile and restarting DMS after the repo config already pointed at `Papirus-Dark`.
 - Pitfall/Root cause: The repo config was correct, but the active user profile still lacked `Papirus-Dark`, so DMS fell back to text letters for many icons. A local `nix profile add` repaired the live session only; the durable fix is the `home.packages` entry in `profiles/home/base.nix`.
 - Verification: `readlink -f /home/evilweasel/.nix-profile/share/icons/Papirus-Dark`, `pgrep -af 'quickshell|/bin/dms'`, `dms restart`
+
+### 2026-03-22 (Hyprland cleanup and DMS lock handoff)
+- Date: 2026-03-22
+- Change: Removed the remaining Hyprland/Waybar/Wlogout leftovers, switched the Niri lock bind to the DMS lock IPC call, and pruned the related Matugen outputs, helper scripts, and cached assets.
+- Pitfall/Root cause: The old Hypr stack was mostly dead code but still pulled in `hypridle`, `hyprlock`, `hyprpicker`, Waybar/Wlogout assets, and a Hyprland cache entry. DMS already owns the lock and power actions, so keeping those extras only added stale dependencies and confusion.
+- Verification: `nix-instantiate --parse profiles/home/base.nix`, `nix-instantiate --parse profiles/system/base.nix`, `nix-instantiate --parse programs/matugen.nix`, `nix-instantiate --parse programs/matugen/config.toml`, `nix-instantiate --parse programs/niri/base/binds.kdl`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`

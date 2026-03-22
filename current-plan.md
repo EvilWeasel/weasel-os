@@ -4,10 +4,10 @@ Ziel: die aktuellen Probleme am Laptop-Setup so lösen, dass die sauberen Defaul
 
 ## Was wir gerade wissen
 
-- `Super+Space` ist im Repo aktuell nicht als Launcher-Bind vorhanden; auf meinem Setup ist das offenbar über andere DMS/Niri-Defaults oder lokale Anpassungen verfügbar.
+- `Super+Space` ist als DMS-Default-Bind in `programs/niri/dms/binds.kdl` vorhanden und wird per Repo-Ownership in die Home-Konfiguration gezogen.
 - `DisplayLink` ist im Repo bereits aktiviert, aber der aktuelle Michael-Repro zeigt nur einen externen Output in Niri. Das ist ein Hinweis auf Output-Mapping/Erkennung, nicht auf ein reines USB-Problem.
 - Das Audio-Problem wirkt global: im Greeter läuft schon WirePlumber und schreibt State nach `/var/empty`, und die Session hat eine kaputte `environment.d`-Zeile. Das ist nicht sinnvoll und kann zu zufälligen Audio-Ausfällen führen.
-- Hypridle läuft noch in einer Niri-Session; das ist ein falscher Layer für die aktuelle Konfiguration.
+- Hypridle, Hyprlock, Hyprland-Waybar und Wlogout-Reste wurden entfernt; DMS übernimmt Lock- und Power-Aktionen.
 - `weasel-collect-session-debug` sammelt schon viel, aber die Ausgabe ist noch zu grob für große Debug-Sessions.
 
 ## Zielbild
@@ -16,7 +16,7 @@ Ziel: die aktuellen Probleme am Laptop-Setup so lösen, dass die sauberen Defaul
 2. `DisplayLink` soll standardmäßig für alle Laptops aktiviert sein. Falls ein Host trotzdem Sonderbehandlung braucht, dann nur als host-spezifischer Override.
 3. Audio soll für alle Hosts robust und deterministisch funktionieren, ohne Audio-Stack im Greeter und ohne zufällige Sink-Auswahl.
 4. Das Debug-Tooling soll deutlich mehr strukturierte Infos liefern, ohne große Logs unkontrolliert in ein einziges Riesenfile zu kippen.
-5. Hyprland- bzw. Hypridle-Reste sollen nur dort bleiben, wo sie noch wirklich gebraucht werden. Wenn nicht, raus damit.
+5. Hyprland- bzw. Hypridle-Reste sind weitgehend entfernt; nur echte Restreferenzen oder Folgeprobleme sollen noch bleiben.
 
 ## Arbeitspakete
 
@@ -56,9 +56,7 @@ Ziel: die aktuellen Probleme am Laptop-Setup so lösen, dass die sauberen Defaul
 
 ### 5. Hyprland-Reste aufräumen
 
-- `hypridle` aus der Niri-basierten Standardkonfiguration entfernen, wenn dafür keine echte Notwendigkeit mehr besteht.
-- Hyprland-spezifische Tools und Konfigs im Repo aufräumen, soweit sie nicht mehr gebraucht werden.
-- Nur dort behalten, wo sie noch absichtlich referenziert werden; sonst lieber die Niri-Variante pflegen.
+- Verwaiste Hyprland-Tools und Konfigs sind bereits großteils entfernt; nur noch echte Restreferenzen oder fehlende Fallbacks nachziehen.
 
 ### 6. Michael-spezifische Fallbacks nur wenn nötig
 
@@ -71,7 +69,7 @@ Ziel: die aktuellen Probleme am Laptop-Setup so lösen, dass die sauberen Defaul
 2. Niri-Defaults für Launcher und globale Defaults vereinheitlichen.
 3. DisplayLink global aktivieren und danach auf beiden Monitoren verifizieren.
 4. Audio global stabilisieren.
-5. Hyprland-/Hypridle-Reste aufräumen.
+5. Hyprland-/Hypridle-Reste verifizieren und nur echte Restreferenzen nachziehen.
 6. Nur falls nötig Michael-spezifische Overrides nachziehen.
 
 ## Verifikation

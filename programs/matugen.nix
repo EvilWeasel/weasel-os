@@ -19,20 +19,12 @@ in {
   };
 
   home.file = {
-    ".config/waybar/style.css" = {
-      source = config.lib.file.mkOutOfStoreSymlink "${matugenRoot}/generated/waybar.css";
-      force = true;
-    };
     ".local/share/rofi/themes/rofi.rasi" = {
       source = config.lib.file.mkOutOfStoreSymlink "${matugenRoot}/generated/rofi.rasi";
       force = true;
     };
     ".config/swaync/style.css" = {
       source = config.lib.file.mkOutOfStoreSymlink "${matugenRoot}/generated/swaync.css";
-      force = true;
-    };
-    ".config/wlogout/style.css" = {
-      source = config.lib.file.mkOutOfStoreSymlink "${matugenRoot}/generated/wlogout.css";
       force = true;
     };
     ".config/kitty/dank-theme.conf" = {
@@ -60,11 +52,9 @@ in {
   home.activation.ensureMatugenDirectories = lib.hm.dag.entryAfter ["writeBoundary"] ''
     mkdir -p \
       "$HOME/.config/matugen/templates" \
-      "$HOME/.config/waybar" \
       "$HOME/.config/rofi" \
       "$HOME/.local/share/rofi/themes" \
       "$HOME/.config/swaync" \
-      "$HOME/.config/wlogout" \
       "$HOME/.config/kitty" \
       "$HOME/.config/gtk-3.0" \
       "$HOME/.config/gtk-4.0" \
