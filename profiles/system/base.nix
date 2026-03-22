@@ -97,6 +97,7 @@
     nh
     nixfmt-rfc-style
     swww
+    matugen
     grim
     slurp
     file-roller
@@ -152,36 +153,6 @@ in {
       magicOrExtension = ''\x7fELF....AI\x02'';
     };
     plymouth.enable = true;
-  };
-
-  stylix = {
-    enable = true;
-    image = ../../pictures/wallpapers/beautifulmountainscape.jpg;
-    polarity = "dark";
-    opacity.terminal = 0.8;
-    cursor.package = pkgs.bibata-cursors;
-    cursor.name = "Bibata-Modern-Ice";
-    cursor.size = 24;
-    fonts = {
-      monospace = {
-        package = pkgs.nerd-fonts.monaspace;
-        name = "MonaspiceKr Nerd Font Mono";
-      };
-      sansSerif = {
-        package = pkgs.nerd-fonts.monaspace;
-        name = "MonaspiceNe Nerd Font";
-      };
-      serif = {
-        package = pkgs.nerd-fonts.monaspace;
-        name = "MonaspiceXe Nerd Font";
-      };
-      sizes = {
-        applications = 12;
-        terminal = 15;
-        desktop = 11;
-        popups = 12;
-      };
-    };
   };
 
   vm.guest-services.enable = false;
@@ -304,8 +275,12 @@ in {
       noto-fonts-cjk-sans
       font-awesome
       symbola
-      material-icons
-    ];
+    material-icons
+    monaspace
+    nerd-fonts.monaspace
+    adwaita-qt
+    adwaita-qt6
+  ];
     enableDefaultPackages = true;
     fontconfig = {
       enable = true;

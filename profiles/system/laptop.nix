@@ -49,7 +49,6 @@
       xwayland-satellite
       cava
       cliphist
-      matugen
       helix
       lsfg-vk
       lsfg-vk-ui

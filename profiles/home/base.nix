@@ -43,6 +43,9 @@ in {
       (import ../../scripts/web-search.nix {inherit pkgs;})
       (import ../../scripts/rofi-launcher.nix {inherit pkgs;})
       (import ../../scripts/screenshootin.nix {inherit pkgs;})
+      pkgs.adw-gtk3
+      pkgs.papirus-icon-theme
+      pkgs.kitty
       pkgsUnstable.lmstudio
       pkgsUnstable.zed-editor
     ];
@@ -51,9 +54,9 @@ in {
       WEASEL_OS_ROOT = repoDefaultPath;
       WEASEL_DEBUG_HOME = "${config.home.homeDirectory}/weasel-debug";
       WEASEL_DEBUG_STATE = "${config.home.homeDirectory}/.local/state/weasel-debug";
-      # Home Manager's `qt.platformTheme = "qtct"` maps to `qt5ct`, which
-      # makes Quickshell spin before DMS even loads QML on this setup.
-      QT_QPA_PLATFORMTHEME = lib.mkForce "";
+      GTK_THEME = "adw-gtk3-dark";
+      QT_STYLE_OVERRIDE = "adwaita-dark";
+      QT_QPA_PLATFORMTHEME = "gtk3";
     };
   };
 
@@ -61,6 +64,7 @@ in {
     inputs.dms.homeModules."dank-material-shell"
     ../../programs/emoji.nix
     ../../programs/fastfetch
+    ../../programs/matugen.nix
     ../../programs/niri.nix
     ../../programs/neovim.nix
     ../../programs/terminal-stack.nix
@@ -89,9 +93,17 @@ in {
       createDirectories = true;
     };
     configFile = {
+      "mimeapps.list" = {
+        source = config.lib.file.mkOutOfStoreSymlink "${repoDefaultPath}/programs/mimeapps.list";
+        force = true;
+      };
       "wlogout/icons" = {
         source = ../../pictures/wlogout;
         recursive = true;
+      };
+      "DankMaterialShell/settings.json" = {
+        source = config.lib.file.mkOutOfStoreSymlink "${repoDefaultPath}/programs/dank-material-shell/settings.json";
+        force = true;
       };
       "swappy/config".text = ''
         [Default]
@@ -108,6 +120,37 @@ in {
     };
   };
 
+  home.file = {
+    ".config/gtk-3.0/gtk.css" = {
+      text = ''
+      @import url("dank-colors.css");
+      '';
+      force = true;
+    };
+    ".config/gtk-4.0/gtk.css" = {
+      text = ''
+      @import url("dank-colors.css");
+      '';
+      force = true;
+    };
+    ".config/kitty/kitty.conf" = {
+      source = config.lib.file.mkOutOfStoreSymlink "${repoDefaultPath}/programs/kitty/kitty.conf";
+      force = true;
+    };
+    ".config/qt5ct/qt5ct.conf" = {
+      source = config.lib.file.mkOutOfStoreSymlink "${repoDefaultPath}/programs/qt5ct.conf";
+      force = true;
+    };
+    ".config/qt6ct/qt6ct.conf" = {
+      source = config.lib.file.mkOutOfStoreSymlink "${repoDefaultPath}/programs/qt6ct.conf";
+      force = true;
+    };
+  };
+
+  home.file.".local/share/applications/kitty.desktop" = {
+    source = config.lib.file.mkOutOfStoreSymlink "${repoDefaultPath}/programs/kitty.desktop";
+  };
+
   dconf.settings = {
     "org/virt-manager/virt-manager/connections" = {
       autoconnect = ["qemu:///system"];
@@ -115,13 +158,11 @@ in {
     };
   };
 
-  stylix.targets = {
-    vscode.enable = false;
-    rofi.enable = false;
-    vesktop.enable = false;
-  };
-
   gtk = {
+    theme = {
+      name = "adw-gtk3-dark";
+      package = pkgs.adw-gtk3;
+    };
     iconTheme = {
       name = "Papirus-Dark";
       package = pkgs.papirus-icon-theme;
@@ -132,11 +173,11 @@ in {
 
   qt = {
     enable = true;
-    style.name = lib.mkForce "kvantum";
+    style.name = lib.mkForce "adwaita-dark";
   };
 
   systemd.user.sessionVariables = {
-    QT_QPA_PLATFORMTHEME = lib.mkForce "";
+    QT_QPA_PLATFORMTHEME = "gtk3";
   };
 
   services.hypridle = {
@@ -166,27 +207,6 @@ in {
     btop = {
       enable = true;
       settings.vim_keys = true;
-    };
-    kitty = {
-      enable = true;
-      package = pkgs.kitty;
-      shellIntegration = {
-        mode = "no-rc";
-      };
-      settings = {
-        # Emit a notification when a long-running command finishes in an unfocused or invisible window.
-        notify_on_cmd_finish = "invisible 5.0 notify";
-        scrollback_lines = 2000;
-        wheel_scroll_min_lines = 1;
-        window_padding_width = 4;
-        confirm_os_window_close = 0;
-      };
-      extraConfig = ''
-        tab_bar_style fade
-        tab_fade 1
-        active_tab_font_style   bold
-        inactive_tab_font_style bold
-      '';
     };
     home-manager.enable = true;
     hyprlock = {

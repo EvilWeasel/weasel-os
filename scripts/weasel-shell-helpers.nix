@@ -20,7 +20,7 @@ pkgs.symlinkJoin {
     })
     (mkScript {
       name = "v";
-      body = "exec ${pkgs.neovim}/bin/nvim \"$@\"";
+      body = "exec nvim \"$@\"";
     })
     (mkScript {
       name = "cat";
@@ -28,15 +28,15 @@ pkgs.symlinkJoin {
     })
     (mkScript {
       name = "ls";
-      body = "exec ${pkgs.eza}/bin/eza --icons \"$@\"";
+      body = "exec ${pkgs.eza}/bin/eza --icons --color=auto \"$@\"";
     })
     (mkScript {
       name = "ll";
-      body = "exec ${pkgs.eza}/bin/eza -lh --icons --grid --group-directories-first \"$@\"";
+      body = "exec ${pkgs.eza}/bin/eza -lh --icons --grid --group-directories-first --color=auto \"$@\"";
     })
     (mkScript {
       name = "la";
-      body = "exec ${pkgs.eza}/bin/eza -lah --icons --grid --group-directories-first \"$@\"";
+      body = "exec ${pkgs.eza}/bin/eza -lah --icons --grid --group-directories-first --color=auto \"$@\"";
     })
     (mkScript {
       name = "ncg";
@@ -65,9 +65,9 @@ pkgs.symlinkJoin {
       sv	sudo nvim	Edit files as root with Neovim
       v	nvim	Open Neovim
       cat	bat	Pretty-print file contents
-      ls	eza --icons	List files with icons
-      ll	eza -lh --icons --grid --group-directories-first	Compact long listing
-      la	eza -lah --icons --grid --group-directories-first	Long listing including hidden files
+      ls	eza --icons --color=auto	List files with icons
+      ll	eza -lh --icons --grid --group-directories-first --color=auto	Compact long listing
+      la	eza -lah --icons --grid --group-directories-first --color=auto	Long listing including hidden files
       ncg	nix-collect-garbage	Clean old generations and refresh the boot profile
       zj	zellij	Open the Zellij terminal multiplexer
       bssid	wifi-bssid	Print the BSSID of the connected Wi-Fi AP

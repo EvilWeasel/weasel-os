@@ -1,0 +1,63 @@
+@define-color bg #091517;
+@define-color bg_alt #152224;
+@define-color bg_hover #202c2e;
+@define-color fg #d7e5e8;
+@define-color fg_muted #bbc9cc;
+@define-color accent #00daf2;
+@define-color accent_alt #004f58;
+@define-color border #869396;
+@define-color danger #ffb4ab;
+@define-color danger_container #93000a;
+
+* {
+  font-family: inherit;
+}
+
+notification-center,
+control-center {
+  background: alpha(@bg, 0.94);
+  color: @fg;
+  border: 1px solid @border;
+  border-radius: 18px;
+}
+
+.notification-row {
+  margin: 6px;
+}
+
+.notification {
+  background: @bg_alt;
+  color: @fg;
+  border-radius: 16px;
+  border: 1px solid @border;
+}
+
+.notification:hover {
+  background: @bg_hover;
+}
+
+.notification .summary,
+.notification .body {
+  color: @fg;
+}
+
+.notification .time,
+.notification .app-name,
+.notification .control-center-list,
+.notification .close-button {
+  color: @fg_muted;
+}
+
+.notification.default-action,
+.notification action,
+.notification .action-button {
+  background: @accent_alt;
+  color: @accent;
+  border-radius: 12px;
+}
+
+.notification .critical,
+.notification.critical {
+  background: @danger_container;
+  color: @danger;
+}

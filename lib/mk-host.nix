@@ -24,7 +24,6 @@ nixpkgs.lib.nixosSystem {
   modules =
     [
       ../hosts/${hostName}/config.nix
-      inputs.stylix.nixosModules.stylix
       home-manager.nixosModules.home-manager
       {
         home-manager.extraSpecialArgs = {

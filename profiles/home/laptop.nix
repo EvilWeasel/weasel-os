@@ -33,7 +33,7 @@ in {
       enableSystemMonitoring = true;
       dgop.package = pkgsUnstable.dgop;
       enableVPN = true;
-      enableDynamicTheming = false;
+      enableDynamicTheming = true;
       enableAudioWavelength = true;
       enableCalendarEvents = true;
       plugins = {

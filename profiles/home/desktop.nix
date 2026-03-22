@@ -8,7 +8,7 @@
       };
       enableSystemMonitoring = false;
       enableVPN = false;
-      enableDynamicTheming = false;
+      enableDynamicTheming = true;
       enableAudioWavelength = false;
       enableCalendarEvents = false;
     };
