@@ -50,6 +50,9 @@ Git history uses short, imperative, scope-first messages (for example: `added ll
 - After a verified code/config change request, create a focused signed commit and push it to `origin/main` before handing the task back.
 - If `git commit` or `git push` fails because the required GPG/SSH key or permissions are unavailable, stop and report the blocker; never create an unsigned commit or work around signing/auth requirements.
 
+## Language Convention
+- When communicating in German or writing German text, do not use transliterations like `ue`, `oe`, `ae`, or `ss` as substitutes for `ü`, `ö`, `ä`, and `ß`. Write normal German with real umlauts and `ß`, unless a strictly ASCII-only interface forces an exception.
+
 ## Agent Learnings
 - Maintain `agent-learnings.md` as an append-only log for future agents.
 - After every task that changes files, append a short entry with date, what changed, pitfalls/root cause, and verification command(s) used.

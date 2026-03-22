@@ -218,7 +218,31 @@ Append-only log of implementation lessons for future agents working in this repo
 - Date: 2026-03-21
 - Change: Expanded `weasel-collect-session-debug` into a broader incident collector with system and user journals, failed-unit snapshots, DRM and USB topology, DisplayLink and `evdi` state, `niri`/`xrandr` output info, network basics, and extra user-state directories for Niri, DMS, PipeWire, WirePlumber, and Pulse.
 - Pitfall/Root cause: A support bundle aimed only at one known failure mode stops being useful as soon as a second subsystem starts failing; for distro-style issue reports, the collector has to capture enough cross-cutting state to separate compositor, kernel, device, service, and application-level regressions.
+
+### 2026-03-22 (current plan capture)
+- Date: 2026-03-22
+- Change: Created `current-plan.md` as the working plan for the Michael laptop issues, including global defaults for bindings/DisplayLink/audio, a structured debug-collection cleanup, and Hyprland cleanup notes.
+- Pitfall/Root cause: The plan needed to reflect the user's addenda before implementation started, otherwise the work would drift toward a Michael-only fix instead of the requested shared-default approach.
+- Verification: `sed -n '1,240p' current-plan.md`
 - Verification: `nix-instantiate --parse scripts/weasel-collect-session-debug.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.michapc.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.michapc-debug.config.system.build.toplevel.drvPath`, `nix build --no-link .#nixosConfigurations.michapc.config.home-manager.users.micha.home.activationPackage`, and `nix build --no-link .#nixosConfigurations.nixy-laptop.config.home-manager.users.evilweasel.home.activationPackage`
+
+### 2026-03-22 (German language convention)
+- Date: 2026-03-22
+- Change: Added an explicit repository rule in `AGENTS.md` that German communication must use real umlauts and `ß` instead of transliterations like `ue`, `oe`, `ae`, or `ss`, except where ASCII-only interfaces require a fallback.
+- Pitfall/Root cause: Without an explicit rule, German writeups can silently drift into ASCII transliterations, which makes the repo's communication style inconsistent.
+- Verification: `sed -n '1,220p' AGENTS.md`
+
+### 2026-03-22 (German transliteration cleanup)
+- Date: 2026-03-22
+- Change: Rewrote the German text in `current-plan.md` to use proper umlauts and `ß` instead of ASCII transliterations.
+- Pitfall/Root cause: The plan file had the usual `ue`/`oe`/`ae` style substitutions throughout, which is easy to miss if only the code files are checked.
+- Verification: `rg -n '\\b(fuer|ueber|noetig|laeuft|Geraete|zusaetzlich|pruefen|oeffnet|Loesungen|grosse|aufraeumen)\\b' current-plan.md README.md docs/*.md AGENTS.md agent-learnings.md`
+
+### 2026-03-22 (repo-owned MIME and DMS defaults)
+- Date: 2026-03-22
+- Change: Added a repo-owned `mimeapps.list`, moved the stable Niri/DMS default fragments into `programs/niri/dms/`, and linked them into `~/.config` with out-of-store symlinks while leaving DMS profile state mutable.
+- Pitfall/Root cause: The useful split is between stable defaults and mutable profile state; repo-owning the wrong DMS layer would fight the settings UI or runtime-generated profiles.
+- Verification: `nix-instantiate --parse programs/niri.nix`, `nix-instantiate --parse profiles/home/base.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`, and `nix flake check`
 
 ### 2026-03-21 (keyboard inventory in debug bundle)
 - Date: 2026-03-21
@@ -231,3 +255,39 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Restored an explicit `nvidia` entry for `nixy-laptop` in `profiles/system/laptop.nix` while keeping the shared DisplayLink module active, so the laptop's effective `services.xserver.videoDrivers` list becomes `["displaylink" "nvidia"]`.
 - Pitfall/Root cause: The `nixos-hardware` Yoga hybrid profile sets `services.xserver.videoDrivers = mkDefault [ "nvidia" ]`; a normal-priority shared DisplayLink entry overrode that default instead of extending it, which dropped the Nvidia driver closure from the laptop generation even though `hardware.nvidia.open = true` and PRIME offload were still configured.
 - Verification: `nix eval --json --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.services.xserver.videoDrivers`, `nix eval --json --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.hardware.nvidia.open`, `nix build --dry-run --no-link .#nixosConfigurations.nixy-laptop.config.system.build.toplevel`, and `nix build --no-link -L .#nixosConfigurations.nixy-laptop.config.system.build.toplevel`
+
+### 2026-03-22 (fastfetch logo backend switch)
+- Date: 2026-03-22
+- Change: Switched Fastfetch from `kitty-direct` to `chafa` in `programs/fastfetch/default.nix` so the logo renders as terminal text instead of Kitty graphics in scrollback.
+- Pitfall/Root cause: `fastfetch` is started from shell init in bash, zsh, and nushell; with a Kitty graphics logo, the image remains visible in scrollback and reappears when scrolling back through terminal history.
+- Verification: `nix-instantiate --parse programs/fastfetch/default.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`
+
+### 2026-03-22 (shell helper alias cleanup)
+- Date: 2026-03-22
+- Change: Updated `weasel-shell-helpers` so `v` invokes the configured `nvim` from `PATH` and `eza` wrappers pass `--color=auto` explicitly.
+- Pitfall/Root cause: The `v` helper had been bypassing the Home Manager-managed Neovim wrapper by calling the package binary directly, and the `eza` wrappers were inheriting a broken color setting from elsewhere.
+- Verification: `nix-instantiate --parse scripts/weasel-shell-helpers.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`
+
+### 2026-03-22 (Stylix removal and DMS/Matugen migration)
+- Date: 2026-03-22
+- Change: Removed Stylix from the flake graph, switched shared desktop theming to DMS + Matugen, and added repo-owned Matugen templates plus generated target files for Waybar, Rofi, SwayNC, and Wlogout.
+- Pitfall/Root cause: The DMS/Matugen config needed an explicit `[config]` table even for a dry-run, and Rofi already owns `~/.config/rofi/config.rasi` through the Home Manager module, so the final wiring had to split config ownership from the theme file itself.
+- Verification: `nix-instantiate --parse flake.nix`, `nix-instantiate --parse lib/mk-host.nix`, `nix-instantiate --parse profiles/home/base.nix`, `nix-instantiate --parse profiles/home/desktop.nix`, `nix-instantiate --parse profiles/home/laptop.nix`, `nix-instantiate --parse profiles/system/base.nix`, `nix-instantiate --parse profiles/system/laptop.nix`, `nix-instantiate --parse programs/fastfetch/default.nix`, `nix-instantiate --parse programs/niri.nix`, `nix-instantiate --parse programs/rofi/rofi.nix`, `nix-instantiate --parse programs/swaync.nix`, `nix-instantiate --parse programs/waybar.nix`, `nix-instantiate --parse programs/wlogout.nix`, `nix-instantiate --parse scripts/weasel-dms-session.nix`, `nix-instantiate --parse scripts/weasel-shell-helpers.nix`, `nix-instantiate --parse programs/matugen.nix`, `matugen image "$HOME/weasel-os/pictures/wallpapers/beautifulmountainscape.jpg" --config "$HOME/weasel-os/programs/matugen/config.toml" --dry-run --type scheme-vibrant --mode dark`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`, `nix flake check`
+
+### 2026-03-22 (theme cleanup follow-up)
+- Date: 2026-03-22
+- Change: Added Monaspace + Nerd Monaspace fonts, hooked Kitty into Matugen, added GTK `gtk.css` imports and a dark Adwaita GTK anchor, switched Qt off the missing Kvantum path to Adwaita-Dark, and corrected the DMS launcher icon theme default to Papirus-Dark.
+- Pitfall/Root cause: Several theme outputs existed but were not actually consumed (`kitty.conf` did not include the theme files, GTK only had `dank-colors.css` without `gtk.css`, Qt was forced onto Kvantum without a theme, and DMS still defaulted launcher icons to `System Default`).
+- Verification: `nix-instantiate --parse profiles/home/base.nix`, `nix-instantiate --parse profiles/system/base.nix`, `nix-instantiate --parse programs/matugen.nix`, `nix-instantiate --parse programs/matugen/config.toml`, `nix-instantiate --parse scripts/weasel-shell-helpers.nix`, `nix-instantiate --parse scripts/weasel-dms-session.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`, `nix flake check`
+
+### 2026-03-22 (DMS theme worker recovery)
+- Date: 2026-03-22
+- Change: Fixed the DMS theme worker crash path by disabling the Kitty Matugen template collision, making the Qt config files mutable again via Home Manager activation, adding app-id substitutions for Firefox/Thunar/virt-manager/Handy, pinning Kitty to the Monaspice mono font, and replacing the broken BatteryOverride `StyledText` usage with plain `Text`.
+- Pitfall/Root cause: The merged Matugen TOML contained a duplicate `dmskittytabs` key, `Apply Qt Colors` was writing to read-only symlink targets, the launcher had too few icon substitutions, and the BatteryOverride QML file referenced a type that was not resolving in the current DMS runtime.
+- Verification: `jq empty programs/dank-material-shell/settings.json`, `nix-instantiate --parse programs/matugen.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`, `nix flake check`
+
+### 2026-03-22 (DMS icon theme live-profile trap)
+- Date: 2026-03-22
+- Change: Fixed the missing app/workspace/tray icons by installing `papirus-icon-theme` into the active user profile and restarting DMS after the repo config already pointed at `Papirus-Dark`.
+- Pitfall/Root cause: The repo config was correct, but the active user profile still lacked `Papirus-Dark`, so DMS fell back to text letters for many icons. A local `nix profile add` repaired the live session only; the durable fix is the `home.packages` entry in `profiles/home/base.nix`.
+- Verification: `readlink -f /home/evilweasel/.nix-profile/share/icons/Papirus-Dark`, `pgrep -af 'quickshell|/bin/dms'`, `dms restart`

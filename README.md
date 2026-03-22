@@ -24,7 +24,8 @@ This repo is optimized for three workflows:
 - Hosts are named `nixy-*`.
 - The preferred clone location is `~/weasel-os`.
 - `programs/niri/` owns `config.kdl` and `base/*.kdl`.
-- `~/.config/niri/dms/*.kdl` stays mutable and is generated or updated by DMS.
+- `programs/niri/dms/*.kdl` owns the stable DMS defaults and is linked into `~/.config/niri/dms/*.kdl` as out-of-store symlinks.
+- `~/.config/niri/dms/profiles/*.kdl` stays mutable and is generated or updated by DMS.
 
 The repo no longer hard-requires the path `/home/evilweasel/weasel-os`, but the aliases and examples assume `~/weasel-os` unless you set `WEASEL_OS_ROOT`.
 
@@ -135,9 +136,10 @@ export WEASEL_OS_ROOT=/absolute/path/to/your/clone
 
 - `programs/niri/config.kdl` is declarative.
 - `programs/niri/base/*.kdl` is declarative.
-- `~/.config/niri/dms/*.kdl` is mutable and should not be edited declaratively in this repo.
+- `programs/niri/dms/*.kdl` is repo-owned source that Home Manager links into `~/.config/niri/dms/*.kdl`.
+- `~/.config/niri/dms/profiles/*.kdl` is mutable and should not be edited declaratively in this repo.
 
-That split is intentional. DMS owns monitor and runtime-generated fragments such as `outputs.kdl`, while the repo owns the stable base layer.
+That split is intentional. The repo owns the stable DMS defaults, while DMS still owns runtime-generated profile fragments under `profiles/*.kdl`.
 
 ## Validation
 

@@ -188,6 +188,7 @@ The flake should manage:
 
 - the top-level `~/.config/niri/config.kdl`
 - repo-owned base fragments under `~/.config/niri/base/*.kdl`
+- repo-owned stable DMS defaults under `~/.config/niri/dms/*.kdl`
 - Nix-owned Home Manager integration for the DMS package and shell startup
 
 ### Mutable content
@@ -208,7 +209,7 @@ Observed live files under `~/.config/niri/dms/` include:
 - `wpblur.kdl`
 - `profiles/*.kdl`
 
-These are DMS-managed and should remain mutable.
+The `profiles/*.kdl` files are DMS-managed and should remain mutable.
 
 ### Required structural change
 
@@ -219,19 +220,20 @@ Target:
 
 - move the current live `~/.config/niri/base/*.kdl` base layer into the repository
 - install those files declaratively
-- keep `dms/*.kdl` outside declarative ownership
+- keep `dms/profiles/*.kdl` outside declarative ownership
+- let the stable `dms/*.kdl` defaults live in the repo and link them into the home directory
 
 ### Bootstrap concern
 
-A fresh user may not have `~/.config/niri/dms/outputs.kdl` yet, but `config.kdl` includes it.
+A fresh user may not have `~/.config/niri/dms/profiles/*.kdl` yet, but the stable defaults are linked from the repo.
 
 This needs an explicit bootstrap strategy during implementation.
 
 Recommended implementation direction:
 
-- keep DMS-generated files mutable
-- add a bootstrap mechanism that creates missing mutable DMS files only when absent
-- do not symlink those DMS-owned files from the Nix store
+- keep DMS-generated profile files mutable
+- link the stable DMS defaults from repo-owned files via out-of-store symlinks
+- add a bootstrap mechanism that creates missing mutable DMS profile files only when absent
 
 This can be done with a user activation step or a small bootstrap script/service.
 
