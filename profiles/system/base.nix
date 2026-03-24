@@ -193,6 +193,15 @@ in {
         path = "/tmp/dms-greeter-${host}.log";
       };
     };
+    nix-ld = {
+      enable = true;
+      libraries = with pkgs; [
+        libcap
+        xz
+        openssl
+        zlib
+      ];
+    };
     xwayland.enable = true;
     gamescope = {
       enable = true;
@@ -247,6 +256,12 @@ in {
         thunar-archive-plugin
         thunar-volman
       ];
+    };
+    obs-studio = {
+      enable = true;
+      package = pkgs.obs-studio.override {
+        cudaSupport = true;
+      };
     };
   };
 

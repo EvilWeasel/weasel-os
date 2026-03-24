@@ -219,6 +219,12 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Expanded `weasel-collect-session-debug` into a broader incident collector with system and user journals, failed-unit snapshots, DRM and USB topology, DisplayLink and `evdi` state, `niri`/`xrandr` output info, network basics, and extra user-state directories for Niri, DMS, PipeWire, WirePlumber, and Pulse.
 - Pitfall/Root cause: A support bundle aimed only at one known failure mode stops being useful as soon as a second subsystem starts failing; for distro-style issue reports, the collector has to capture enough cross-cutting state to separate compositor, kernel, device, service, and application-level regressions.
 
+### 2026-03-23 (nixy-laptop NVIDIA branch)
+- Date: 2026-03-23
+- Change: Forced `nixy-laptop` onto `hardware.nvidia.package = nvidiaPackages.production` so it uses the stable NVIDIA branch instead of the shared `latest` default.
+- Pitfall/Root cause: The repo-level NVIDIA module still defaults to `latest`, so host-specific branch selection must be overridden in the laptop host config; the resolved package version stayed at `580.119.02` because the pinned nixpkgs revision currently exposes the same build under both aliases.
+- Verification: `nix-instantiate --parse hosts/nixy-laptop/config.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath --raw`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.hardware.nvidia.package.version --raw`, and `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.hardware.nvidia.package.name --raw`.
+
 ### 2026-03-22 (current plan capture)
 - Date: 2026-03-22
 - Change: Created `current-plan.md` as the working plan for the Michael laptop issues, including global defaults for bindings/DisplayLink/audio, a structured debug-collection cleanup, and Hyprland cleanup notes.
@@ -325,3 +331,9 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Added `background_opacity 0.85` to the repo-owned Kitty config so terminal transparency is handled locally in Kitty instead of through Matugen/DMS templates.
 - Pitfall/Root cause: Kitty opacity is an independent terminal setting; it does not belong in the Matugen theme pipeline and should not reintroduce template ownership conflicts.
 - Verification: `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`
+
+### 2026-03-24 (Zed Codex ACP on NixOS)
+- Date: 2026-03-24
+- Change: Enabled `programs.nix-ld` in the shared system base and added `libcap`, `xz`, `openssl`, and `zlib` so Zed's managed `codex-acp` binary can start on both hosts.
+- Pitfall/Root cause: Zed launches the registry agent as a non-Nix Linux binary from `~/.local/share/zed/external_agents/codex/...`, which fails on NixOS without `nix-ld` or an equivalent wrapper.
+- Verification: `nix-instantiate --parse profiles/system/base.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`
