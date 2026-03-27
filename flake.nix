@@ -218,9 +218,9 @@
       alias ncg='nix-collect-garbage --delete-old && sudo nix-collect-garbage -d && sudo /run/current-system/bin/switch-to-configuration boot'
       alias v='nvim'
       alias cat='bat'
-      alias ls='eza --icons'
-      alias ll='eza -lh --icons --grid --group-directories-first'
-      alias la='eza -lah --icons --grid --group-directories-first'
+      alias ls='eza --icons --color=auto'
+      alias ll='eza -lh --icons --grid --group-directories-first --color=auto'
+      alias la='eza -lah --icons --grid --group-directories-first --color=auto'
       alias '..'='cd ..'
       alias zj='zellij'
 

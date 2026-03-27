@@ -337,3 +337,9 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Enabled `programs.nix-ld` in the shared system base and added `libcap`, `xz`, `openssl`, and `zlib` so Zed's managed `codex-acp` binary can start on both hosts.
 - Pitfall/Root cause: Zed launches the registry agent as a non-Nix Linux binary from `~/.local/share/zed/external_agents/codex/...`, which fails on NixOS without `nix-ld` or an equivalent wrapper.
 - Verification: `nix-instantiate --parse profiles/system/base.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`
+
+### 2026-03-27 (eza color mode fix)
+- Date: 2026-03-27
+- Change: Updated the dev-shell `eza` aliases in `flake.nix` to pass `--color=auto` for `ls`, `ll`, and `la`.
+- Pitfall/Root cause: `eza` does not accept `tty` as a color mode, so a stale alias or inherited config path can trigger the `Option --color has no "tty" setting` error unless the aliases force a valid mode.
+- Verification: `nix-instantiate --parse flake.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`
