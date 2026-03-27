@@ -252,6 +252,9 @@ in {
       package = pkgsUnstable.nushell;
       shellAliases = {
         ".." = "cd ..";
+        ls = "eza --icons --color=auto";
+        ll = "eza -lh --icons --grid --group-directories-first --color=auto";
+        la = "eza -lah --icons --grid --group-directories-first --color=auto";
       };
       settings = {
         show_banner = false;
@@ -273,6 +276,9 @@ in {
       enableCompletion = true;
       shellAliases = {
         ".." = "cd ..";
+        ls = "eza --icons --color=auto";
+        ll = "eza -lh --icons --grid --group-directories-first --color=auto";
+        la = "eza -lah --icons --grid --group-directories-first --color=auto";
       };
       initExtra = lib.mkAfter ''
         ${shellCommon}
@@ -293,6 +299,9 @@ in {
       defaultKeymap = "viins";
       shellAliases = {
         ".." = "cd ..";
+        ls = "eza --icons --color=auto";
+        ll = "eza -lh --icons --grid --group-directories-first --color=auto";
+        la = "eza -lah --icons --grid --group-directories-first --color=auto";
       };
       autosuggestion.enable = true;
       syntaxHighlighting = {

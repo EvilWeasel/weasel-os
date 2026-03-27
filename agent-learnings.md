@@ -343,3 +343,9 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Updated the dev-shell `eza` aliases in `flake.nix` to pass `--color=auto` for `ls`, `ll`, and `la`.
 - Pitfall/Root cause: `eza` does not accept `tty` as a color mode, so a stale alias or inherited config path can trigger the `Option --color has no "tty" setting` error unless the aliases force a valid mode.
 - Verification: `nix-instantiate --parse flake.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`
+
+### 2026-03-27 (home shell alias override)
+- Date: 2026-03-27
+- Change: Added explicit `ls`/`ll`/`la` aliases to `programs/terminal-stack.nix` for Bash, Zsh, and Nushell so the user shell no longer inherits the system `ls --color=tty` alias.
+- Pitfall/Root cause: The live shell was still taking `ls` from the existing profile alias chain, and `ll` was just `ls -l`, so fixing only the dev-shell aliases did not touch the actual login shell behavior.
+- Verification: `nix-instantiate --parse programs/terminal-stack.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`
