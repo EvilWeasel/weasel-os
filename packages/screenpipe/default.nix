@@ -2,6 +2,8 @@
   lib,
   stdenv,
   fetchFromGitHub,
+  importNpmLock,
+  python3,
   rustPlatform,
   pkg-config,
   bun,
@@ -10,7 +12,6 @@
   cargo-tauri,
   wrapGAppsHook4,
   makeWrapper,
-  writableTmpDirAsHomeHook,
   rustc,
   cargo,
   rustfmt,
@@ -50,8 +51,10 @@
   openblas,
   bzip3,
   oniguruma,
+  vips,
   zlib,
   librsvg,
+  libpng,
 }:
 let
   version = "2.2.293";
@@ -64,9 +67,10 @@ let
     hash = "sha256-Gtv42FHImYuOHo6shySiIQDbcNeqGciLy9tmKHZ+BnY=";
   };
 
-  cargoTauri = cargo-tauri.overrideAttrs (
-    finalAttrs: oldAttrs: {
+  cargoTauri = rustPlatform.buildRustPackage (finalAttrs: {
+      pname = "tauri";
       version = "2.10.0";
+      auditable = false;
 
       src = fetchFromGitHub {
         owner = "tauri-apps";
@@ -85,47 +89,57 @@ let
         hash = "sha256-YoHQNqIfwV0zt9iZ7aKlW75KXPyeFgqkjEU5s980KW4=";
       };
 
+      nativeBuildInputs = [
+        pkg-config
+      ];
+
+      buildInputs = [
+        bzip2
+        xz
+      ]
+      ++ lib.optionals stdenv.hostPlatform.isLinux [
+        zstd
+      ];
+
+      cargoBuildFlags = [
+        "--package"
+        "tauri-cli"
+      ];
+      cargoTestFlags = finalAttrs.cargoBuildFlags;
+
+      env = lib.optionalAttrs stdenv.hostPlatform.isLinux {
+        ZSTD_SYS_USE_PKG_CONFIG = true;
+      };
+
       passthru = {
-        inherit (oldAttrs.passthru)
+        inherit (cargo-tauri)
           gst-plugin
           ;
 
-        hook = oldAttrs.passthru.hook.override {
+        hook = cargo-tauri.passthru.hook.override {
           cargo-tauri = finalAttrs.finalPackage;
         };
       };
-    }
-  );
+    });
 
-  nodeModules = stdenv.mkDerivation {
-    pname = "screenpipe-node-modules";
-    inherit version src;
-
-    sourceRoot = "source/apps/screenpipe-app-tauri";
-
-    nativeBuildInputs = [
-      bun
-      writableTmpDirAsHomeHook
-    ];
-
-    dontConfigure = true;
-
-    buildPhase = ''
-      runHook preBuild
-      bun install --frozen-lockfile --allow-scripts --no-progress
-      runHook postBuild
-    '';
-
-    installPhase = ''
-      runHook preInstall
-      mkdir -p $out
-      cp -R node_modules $out/node_modules
-      runHook postInstall
-    '';
-
-    outputHashMode = "recursive";
-    outputHashAlgo = "sha256";
-    outputHash = lib.fakeHash;
+  nodeModules = importNpmLock.buildNodeModules {
+    npmRoot = ./npm;
+    nodejs = nodejs_22;
+    derivationArgs = {
+      pname = "screenpipe-node-modules";
+      inherit version;
+      nativeBuildInputs = [
+        pkg-config
+      ];
+      buildInputs = [
+        vips
+        libpng
+      ];
+      env.SHARP_FORCE_GLOBAL_LIBVIPS = "1";
+      npmRebuildFlags = [
+        "--ignore-scripts"
+      ];
+    };
   };
 in
 rustPlatform.buildRustPackage rec {
@@ -139,12 +153,12 @@ rustPlatform.buildRustPackage rec {
 
   nativeBuildInputs = [
     cargoTauri.passthru.hook
-    bun
     nodejs_22
     jq
     pkg-config
     wrapGAppsHook4
     makeWrapper
+    python3
     rustPlatform.bindgenHook
     cmake
     clang
@@ -204,6 +218,7 @@ rustPlatform.buildRustPackage rec {
     from pathlib import Path
 
     base = Path("apps/screenpipe-app-tauri/src-tauri")
+    layout = Path("apps/screenpipe-app-tauri/app/layout.tsx")
 
     def patch_json(path, updater):
         data = json.loads(path.read_text())
@@ -229,6 +244,15 @@ rustPlatform.buildRustPackage rec {
         linux.pop("appimage", None)
 
     patch_json(base / "tauri.linux.conf.json", patch_linux)
+
+    layout_text = layout.read_text()
+    layout_text = layout_text.replace('import { Inter } from "next/font/google";\n', "")
+    layout_text = layout_text.replace('const inter = Inter({ subsets: ["latin"] });\n\n', "")
+    layout_text = layout_text.replace(
+        '<body className={`''${inter.className} scrollbar-hide ''${isSearch ? "bg-transparent" : ""}`}>',
+        '<body className={`scrollbar-hide ''${isSearch ? "bg-transparent" : ""}`}>',
+    )
+    layout.write_text(layout_text)
     PY
   '';
 
