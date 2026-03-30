@@ -361,3 +361,9 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Added `pkgsUnstable.stremio-linux-shell` to the shared Home Manager package list in `profiles/home/base.nix` so both hosts pick up Stremio from the unstable unfree pin.
 - Pitfall/Root cause: The package belongs in the shared home profile, not a host-only wrapper, because both desktop and laptop import that module and `pkgsUnstable` is already threaded through there.
 - Verification: `nix-instantiate --parse profiles/home/base.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`, and `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`.
+
+### 2026-03-30 (screenpipe desktop app packaging)
+- Date: 2026-03-30
+- Change: Added a source-built `screenpipe-app` flake package plus `nixy-laptop` Home Manager wiring, vendored frontend dependencies through `importNpmLock`, pinned a local `cargo-tauri 2.10.0`, patched upstream Tauri config for Nix builds, removed target-specific Cargo git dependencies that break Linux vendoring, and wrapped the installed app with runtime paths for `bun`, `ffmpeg`, `tesseract`, and `xdotool`.
+- Pitfall/Root cause: Upstream assumes networked Bun/Tauri builds and non-Nix Linux paths; the Linux source build needed explicit `onnxruntime` discovery to stop `ort-sys` downloads, `_POSIX_C_SOURCE`/`_GNU_SOURCE` for `antirez-asr-sys`, `libgbm` in the linker closure, and install-time detection of the actual Tauri binary name instead of assuming `bin/screenpipe`.
+- Verification: `nix build .#screenpipe-app --no-link`, `nix path-info --no-eval-cache .#screenpipe-app`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`
