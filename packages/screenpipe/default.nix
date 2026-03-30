@@ -2,6 +2,7 @@
   lib,
   stdenv,
   fetchFromGitHub,
+  runCommand,
   importNpmLock,
   python3,
   rustPlatform,
@@ -60,12 +61,59 @@ let
   version = "2.2.293";
   sourceTag = "app-v${version}";
 
-  src = fetchFromGitHub {
+  upstreamSrc = fetchFromGitHub {
     owner = "screenpipe";
     repo = "screenpipe";
     tag = sourceTag;
     hash = "sha256-Gtv42FHImYuOHo6shySiIQDbcNeqGciLy9tmKHZ+BnY=";
   };
+
+  src = runCommand "screenpipe-source-${version}" {} ''
+    cp -R ${upstreamSrc} "$out"
+    chmod -R +w "$out"
+
+    ${python3}/bin/python <<'PY'
+    import os
+    from pathlib import Path
+
+    lock_path = Path(os.environ["out"]) / "apps/screenpipe-app-tauri/src-tauri/Cargo.lock"
+    removed = {
+        "nokhwa-bindings-macos",
+        "nokhwa-core",
+        "tauri-nspanel",
+        "windows-icons",
+    }
+
+    sections = lock_path.read_text().split("\n[[package]]\n")
+    rewritten = [sections[0]]
+
+    for section in sections[1:]:
+        name = None
+        for line in section.splitlines():
+            if line.startswith('name = "'):
+                name = line[len('name = "'):-1]
+                break
+        if name in removed:
+            continue
+
+        if name == "screenpipe-app":
+            lines = []
+            for line in section.splitlines():
+                stripped = line.strip()
+                if stripped in {
+                    '"nokhwa-bindings-macos",',
+                    '"tauri-nspanel",',
+                    '"windows-icons",',
+                }:
+                    continue
+                lines.append(line)
+            section = "\n".join(lines)
+
+        rewritten.append(section)
+
+    lock_path.write_text("\n[[package]]\n".join(rewritten))
+    PY
+  '';
 
   cargoTauri = rustPlatform.buildRustPackage (finalAttrs: {
       pname = "tauri";
@@ -146,7 +194,8 @@ rustPlatform.buildRustPackage rec {
   pname = "screenpipe-app";
   inherit version src;
 
-  cargoHash = "sha256-xt70yQcVMlC1T28xUCCZWlfOpzbgeYC9EsQiNRPHbLs=";
+  cargoRoot = "apps/screenpipe-app-tauri/src-tauri";
+  cargoHash = "sha256-ttBOC3BYC4zJlvkfwdUfIkwKtMLsMM906IxmKr1yOqo=";
   buildAndTestSubdir = "apps/screenpipe-app-tauri/src-tauri";
   cargoBuildType = "release";
   doCheck = false;
