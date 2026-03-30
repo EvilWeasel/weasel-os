@@ -321,6 +321,7 @@ rustPlatform.buildRustPackage rec {
     export HOME="$TMPDIR"
     export PKG_CONFIG_PATH="${onnxruntime.dev}/lib/pkgconfig''${PKG_CONFIG_PATH:+:}$PKG_CONFIG_PATH"
     export ORT_LIB_LOCATION="${onnxruntime}"
+    export NIX_CFLAGS_COMPILE="-D_POSIX_C_SOURCE=200809L -D_GNU_SOURCE ''${NIX_CFLAGS_COMPILE:+ }$NIX_CFLAGS_COMPILE"
     mkdir -p "$TMPDIR/openblas/lib"
     ln -sf ${openblas}/lib/libopenblas.so "$TMPDIR/openblas/lib/liblibopenblas.so"
     ln -sf ${openblas}/lib/libopenblas.a "$TMPDIR/openblas/lib/liblibopenblas.a"
