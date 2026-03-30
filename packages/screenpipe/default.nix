@@ -64,16 +64,38 @@ let
     hash = "sha256-Gtv42FHImYuOHo6shySiIQDbcNeqGciLy9tmKHZ+BnY=";
   };
 
-  cargoTauri = cargo-tauri.overrideAttrs (_: rec {
-    version = "2.10.0";
-    src = fetchFromGitHub {
-      owner = "tauri-apps";
-      repo = "tauri";
-      tag = "tauri-cli-v${version}";
-      hash = "sha256-aaUr+6CiH+5e03ZzPexMTYavTmJRKqw/5PnyZqP2/f0=";
-    };
-    cargoHash = lib.fakeHash;
-  });
+  cargoTauri = cargo-tauri.overrideAttrs (
+    finalAttrs: oldAttrs: {
+      version = "2.10.0";
+
+      src = fetchFromGitHub {
+        owner = "tauri-apps";
+        repo = "tauri";
+        tag = "tauri-cli-v${finalAttrs.version}";
+        hash = "sha256-aaUr+6CiH+5e03ZzPexMTYavTmJRKqw/5PnyZqP2/f0=";
+      };
+
+      cargoDeps = rustPlatform.fetchCargoVendor {
+        inherit (finalAttrs)
+          pname
+          version
+          src
+          ;
+
+        hash = "sha256-YoHQNqIfwV0zt9iZ7aKlW75KXPyeFgqkjEU5s980KW4=";
+      };
+
+      passthru = {
+        inherit (oldAttrs.passthru)
+          gst-plugin
+          ;
+
+        hook = oldAttrs.passthru.hook.override {
+          cargo-tauri = finalAttrs.finalPackage;
+        };
+      };
+    }
+  );
 
   nodeModules = stdenv.mkDerivation {
     pname = "screenpipe-node-modules";
