@@ -45,6 +45,7 @@
   libXcursor,
   libXi,
   mesa,
+  libgbm,
   libsecret,
   libayatana-appindicator,
   libsamplerate,
@@ -250,6 +251,7 @@ rustPlatform.buildRustPackage rec {
     libXcursor
     libXi
     mesa
+    libgbm
     libsecret
     libayatana-appindicator
     libsamplerate
