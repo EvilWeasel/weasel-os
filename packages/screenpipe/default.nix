@@ -10,6 +10,7 @@
   bun,
   nodejs_22,
   jq,
+  onnxruntime,
   cargo-tauri,
   wrapGAppsHook4,
   makeWrapper,
@@ -255,6 +256,7 @@ rustPlatform.buildRustPackage rec {
     webrtc-audio-processing
     pipewire
     openblas
+    onnxruntime
     bzip3
     oniguruma
     zlib
@@ -317,6 +319,8 @@ rustPlatform.buildRustPackage rec {
 
   preBuild = ''
     export HOME="$TMPDIR"
+    export PKG_CONFIG_PATH="${onnxruntime.dev}/lib/pkgconfig''${PKG_CONFIG_PATH:+:}$PKG_CONFIG_PATH"
+    export ORT_LIB_LOCATION="${onnxruntime}"
     mkdir -p "$TMPDIR/openblas/lib"
     ln -sf ${openblas}/lib/libopenblas.so "$TMPDIR/openblas/lib/liblibopenblas.so"
     ln -sf ${openblas}/lib/libopenblas.a "$TMPDIR/openblas/lib/liblibopenblas.a"
