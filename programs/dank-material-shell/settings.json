@@ -226,7 +226,18 @@
   "appLauncherViewMode": "grid",
   "spotlightModalViewMode": "grid",
   "browserPickerViewMode": "grid",
-  "browserUsageHistory": {},
+  "browserUsageHistory": {
+    "Helium": {
+      "count": 25,
+      "lastUsed": 1774861889160,
+      "name": "Helium"
+    },
+    "firefox": {
+      "count": 2,
+      "lastUsed": 1774783613811,
+      "name": "Firefox"
+    }
+  },
   "appPickerViewMode": "grid",
   "filePickerUsageHistory": {},
   "sortAppsAlphabetically": false,
@@ -249,7 +260,7 @@
   "iconTheme": "Papirus-Dark",
   "cursorSettings": {
     "theme": "volantes_cursors",
-    "size": 56,
+    "size": 38,
     "niri": {
       "hideWhenTyping": false,
       "hideAfterInactiveMs": 0
@@ -284,7 +295,7 @@
   "useSystemSoundTheme": false,
   "soundNewNotification": true,
   "soundVolumeChanged": true,
-  "soundPluggedIn": true,
+  "soundPluggedIn": false,
   "acMonitorTimeout": 0,
   "acLockTimeout": 0,
   "acSuspendTimeout": 0,
@@ -306,6 +317,7 @@
   "brightnessDevicePins": {},
   "wifiNetworkPins": {
     "preferredWifi": [
+      "AP_Blain_local",
       "Pretty Fly for a WiFi"
     ]
   },
@@ -461,6 +473,16 @@
         ],
         "createdAt": 1772934857822,
         "updatedAt": 1772934857822
+      },
+      "profile_1774337675844_mq1vwr": {
+        "id": "profile_1774337675844_mq1vwr",
+        "name": "Arbeit",
+        "outputSet": [
+          "California Institute of Technology 0x1410 Unknown",
+          "Samsung Electric Company LC34G55T HNTY602858"
+        ],
+        "createdAt": 1774337675844,
+        "updatedAt": 1774337675844
       }
     }
   },

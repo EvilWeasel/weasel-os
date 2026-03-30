@@ -53,6 +53,7 @@ in {
       pkgs.volantes-cursors
       pkgs.kitty
       pkgsUnstable.lmstudio
+      pkgsUnstable.stremio-linux-shell
       pkgsUnstable.zed-editor
     ];
     sessionVariables = {

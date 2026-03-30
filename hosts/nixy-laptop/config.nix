@@ -1,8 +1,14 @@
-{...}: {
+{
+  config,
+  lib,
+  ...
+}: {
   imports = [
     ../../profiles/system/base.nix
     ../../profiles/system/laptop.nix
     ./hardware.nix
     ./users.nix
   ];
+
+  hardware.nvidia.package = lib.mkForce config.boot.kernelPackages.nvidiaPackages.production;
 }
