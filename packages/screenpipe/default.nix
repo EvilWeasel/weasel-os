@@ -335,7 +335,18 @@ rustPlatform.buildRustPackage rec {
   '';
 
   postInstall = ''
-    wrapProgram "$out/bin/screenpipe" \
+    screenpipeBin="$out/bin/screenpipe"
+    if [ ! -x "$screenpipeBin" ] && [ -x "$out/bin/screenpipe-app" ]; then
+      screenpipeBin="$out/bin/screenpipe-app"
+    fi
+
+    if [ ! -x "$screenpipeBin" ]; then
+      echo "screenpipe executable not found under $out/bin" >&2
+      find "$out" -maxdepth 3 \( -type f -o -type l \) | sort >&2
+      exit 1
+    fi
+
+    wrapProgram "$screenpipeBin" \
       --prefix PATH : ${lib.makeBinPath [
         bun
         ffmpeg
@@ -343,6 +354,10 @@ rustPlatform.buildRustPackage rec {
         xdotool
       ]} \
       --set TESSDATA_PREFIX "${tesseract5}/share/tessdata"
+
+    if [ "$screenpipeBin" != "$out/bin/screenpipe" ]; then
+      ln -sf "$(basename "$screenpipeBin")" "$out/bin/screenpipe"
+    fi
   '';
 
   meta = with lib; {
