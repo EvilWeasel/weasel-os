@@ -258,6 +258,7 @@
     };
   in {
     formatter.x86_64-linux = pkgsStable.alejandra;
+    packages.x86_64-linux.screenpipe-app = pkgsUnstable.callPackage ./packages/screenpipe/default.nix {};
     packages.x86_64-linux.t3code = inputs.t3code.packages.x86_64-linux.default;
 
     devShells.x86_64-linux.dev = devShell;
