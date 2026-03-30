@@ -61,7 +61,7 @@ let
     owner = "screenpipe";
     repo = "screenpipe";
     tag = sourceTag;
-    hash = lib.fakeHash;
+    hash = "sha256-Gtv42FHImYuOHo6shySiIQDbcNeqGciLy9tmKHZ+BnY=";
   };
 
   cargoTauri = cargo-tauri.overrideAttrs (_: rec {
