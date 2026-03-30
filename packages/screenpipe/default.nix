@@ -132,7 +132,7 @@ rustPlatform.buildRustPackage rec {
   pname = "screenpipe-app";
   inherit version src;
 
-  cargoHash = lib.fakeHash;
+  cargoHash = "sha256-xt70yQcVMlC1T28xUCCZWlfOpzbgeYC9EsQiNRPHbLs=";
   buildAndTestSubdir = "apps/screenpipe-app-tauri/src-tauri";
   cargoBuildType = "release";
   doCheck = false;
