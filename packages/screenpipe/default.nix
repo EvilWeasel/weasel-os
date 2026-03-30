@@ -76,6 +76,7 @@ let
     import os
     from pathlib import Path
 
+    cargo_toml_path = Path(os.environ["out"]) / "apps/screenpipe-app-tauri/src-tauri/Cargo.toml"
     lock_path = Path(os.environ["out"]) / "apps/screenpipe-app-tauri/src-tauri/Cargo.lock"
     removed = {
         "nokhwa-bindings-macos",
@@ -83,6 +84,15 @@ let
         "tauri-nspanel",
         "windows-icons",
     }
+
+    cargo_toml = cargo_toml_path.read_text()
+    for needle in (
+        'nokhwa-bindings-macos = { git = "https://github.com/CapSoftware/nokhwa", rev = "0d3d1f30a78b" }\n',
+        'tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2" }\n',
+        'windows-icons = { git = "https://github.com/tribhuwan-kumar/windows-icons.git" }\n',
+    ):
+        cargo_toml = cargo_toml.replace(needle, "")
+    cargo_toml_path.write_text(cargo_toml)
 
     sections = lock_path.read_text().split("\n[[package]]\n")
     rewritten = [sections[0]]
