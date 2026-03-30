@@ -70,7 +70,7 @@ let
       owner = "tauri-apps";
       repo = "tauri";
       tag = "tauri-cli-v${version}";
-      hash = lib.fakeHash;
+      hash = "sha256-aaUr+6CiH+5e03ZzPexMTYavTmJRKqw/5PnyZqP2/f0=";
     };
     cargoHash = lib.fakeHash;
   });
