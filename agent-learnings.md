@@ -10,6 +10,12 @@ Append-only log of implementation lessons for future agents working in this repo
 
 ## Entries
 
+### 2026-03-30
+- Date: 2026-03-30
+- Change: Enabled Tailscale once in the shared system base profile so all hosts inherit the service automatically.
+- Pitfall/Root cause: Host-level placement would have duplicated the same networking service across multiple machine configs; the shared base profile is the right single source of truth for repo-wide services.
+- Verification: `nix-instantiate --parse profiles/system/base.nix` and `nix eval --no-write-lock-file .#nixosConfigurations.<host>.config.system.build.toplevel.drvPath` for each affected host.
+
 ### 2026-02-24
 - Date: 2026-02-24
 - Change: Fixed laptop flake module wiring and added bridge netfilter sysctl values.
@@ -349,3 +355,9 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Added explicit `ls`/`ll`/`la` aliases to `programs/terminal-stack.nix` for Bash, Zsh, and Nushell so the user shell no longer inherits the system `ls --color=tty` alias.
 - Pitfall/Root cause: The live shell was still taking `ls` from the existing profile alias chain, and `ll` was just `ls -l`, so fixing only the dev-shell aliases did not touch the actual login shell behavior.
 - Verification: `nix-instantiate --parse programs/terminal-stack.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`
+
+### 2026-03-29 (stremio-linux-shell)
+- Date: 2026-03-29
+- Change: Added `pkgsUnstable.stremio-linux-shell` to the shared Home Manager package list in `profiles/home/base.nix` so both hosts pick up Stremio from the unstable unfree pin.
+- Pitfall/Root cause: The package belongs in the shared home profile, not a host-only wrapper, because both desktop and laptop import that module and `pkgsUnstable` is already threaded through there.
+- Verification: `nix-instantiate --parse profiles/home/base.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`, and `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`.

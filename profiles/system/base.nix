@@ -337,6 +337,7 @@ in {
       dataDir = "/home/${username}";
       configDir = "/home/${username}/.config/syncthing";
     };
+    tailscale.enable = true;
     pipewire = {
       enable = true;
       alsa.enable = true;
