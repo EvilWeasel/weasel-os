@@ -10,6 +10,7 @@
   bun,
   nodejs_22,
   jq,
+  desktop-file-utils,
   onnxruntime,
   cargo-tauri,
   wrapGAppsHook4,
@@ -62,6 +63,41 @@
 let
   version = "2.2.293";
   sourceTag = "app-v${version}";
+  runtimeLibraries = [
+    glib
+    gtk3
+    webkitgtk_4_1
+    libsoup_3
+    glib-networking
+    openssl
+    sqlite
+    ffmpeg
+    tesseract5
+    at-spi2-core
+    libpulseaudio
+    alsa-lib
+    libxkbcommon
+    libX11
+    libXtst
+    libXext
+    libXrandr
+    libXinerama
+    libXcursor
+    libXi
+    mesa
+    libgbm
+    libsecret
+    libayatana-appindicator
+    libsamplerate
+    webrtc-audio-processing
+    pipewire
+    openblas
+    onnxruntime
+    bzip3
+    oniguruma
+    zlib
+    librsvg
+  ];
 
   upstreamSrc = fetchFromGitHub {
     owner = "screenpipe";
@@ -229,41 +265,8 @@ rustPlatform.buildRustPackage rec {
     bzip2
     xz
     zstd
-    glib
-    gtk3
-    webkitgtk_4_1
-    libsoup_3
-    glib-networking
-    openssl
-    sqlite
-    ffmpeg
-    tesseract5
-    at-spi2-core
-    libpulseaudio
-    alsa-lib
     xdotool
-    libxkbcommon
-    libX11
-    libXtst
-    libXext
-    libXrandr
-    libXinerama
-    libXcursor
-    libXi
-    mesa
-    libgbm
-    libsecret
-    libayatana-appindicator
-    libsamplerate
-    webrtc-audio-processing
-    pipewire
-    openblas
-    onnxruntime
-    bzip3
-    oniguruma
-    zlib
-    librsvg
-  ];
+  ] ++ runtimeLibraries;
 
   env = {
     CARGO_BUILD_JOBS = "16";
@@ -349,13 +352,12 @@ rustPlatform.buildRustPackage rec {
     wrapProgram "$screenpipeBin" \
       --prefix PATH : ${lib.makeBinPath [
         bun
+        desktop-file-utils
         ffmpeg
         tesseract5
         xdotool
       ]} \
-      --prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath [
-        openblas
-      ]} \
+      --prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath runtimeLibraries} \
       --set TESSDATA_PREFIX "${tesseract5}/share/tessdata"
 
     if [ "$screenpipeBin" != "$out/bin/screenpipe" ]; then
