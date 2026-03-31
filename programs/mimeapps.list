@@ -44,3 +44,4 @@ image/x-bmp=imv.desktop
 image/x-portable-pixmap=imv.desktop
 image/x-portable-bitmap=imv.desktop
 image/x-xbitmap=imv.desktop
+x-scheme-handler/screenpipe=..screenpipe-app-wrapped-wrapped-handler.desktop

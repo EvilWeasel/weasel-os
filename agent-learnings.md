@@ -403,3 +403,9 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Added `pkgs.sops` and `pkgs.age` to `profiles/home/common.nix` so the local operator environment has permanent secret-management tooling without relying on `nix shell`.
 - Pitfall/Root cause: The repo now expects regular local editing of SOPS-managed files, and using ad-hoc shells for every secrets change adds friction and makes first-time setup easier to get wrong.
 - Verification: `nix-instantiate --parse profiles/home/common.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.michapc.config.system.build.toplevel.drvPath`
+
+### 2026-03-31 (ew-cloud tailscale auth key recorded)
+- Date: 2026-03-31
+- Change: Updated `secrets/hosts/ew-cloud/secrets.yaml` with the real Tailscale auth key through SOPS while keeping the OpenClaw token encrypted in the same host secret file.
+- Pitfall/Root cause: The Tailscale auth key must never appear in plaintext in the repo or shell history, so the correct path is editing the already-encrypted SOPS file in place rather than patching it through normal text tooling.
+- Verification: `sed -n '1,80p' secrets/hosts/ew-cloud/secrets.yaml`
