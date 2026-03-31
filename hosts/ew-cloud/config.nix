@@ -26,7 +26,7 @@ in {
     validateSopsFiles = false;
     secrets = {
       tailscale-auth-key = {
-        key = "tailscale.auth_key";
+        key = "tailscale/auth_key";
         owner = "root";
         mode = "0400";
         restartUnits = [
@@ -35,7 +35,7 @@ in {
         ];
       };
       openclaw-gateway-token = {
-        key = "openclaw.gateway_token";
+        key = "openclaw/gateway_token";
         owner = "openclaw";
         group = "openclaw";
         mode = "0400";

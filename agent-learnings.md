@@ -421,3 +421,9 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Set `programs.openclaw.exposePluginPackages = false` in `modules/nixos/roles/openclaw.nix` so the OpenClaw HM profile does not add standalone plugin CLIs on top of the already bundled `openclaw` package payload.
 - Pitfall/Root cause: The batteries-included `openclaw` package already ships some tool binaries such as `goplaces`; exposing plugin packages again through `home.packages` creates `pkgs.buildEnv` path collisions and blocks system builds.
 - Verification: `nix-instantiate --parse modules/nixos/roles/openclaw.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.ew-cloud.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.ew-cloud.config.system.build.diskoScript.drvPath`
+
+### 2026-03-31 (sops-nix nested yaml key selector)
+- Date: 2026-03-31
+- Change: Updated `hosts/ew-cloud/config.nix` to address nested YAML secrets with slash-separated selectors (`tailscale/auth_key`, `openclaw/gateway_token`) instead of dotted selectors.
+- Pitfall/Root cause: `sops-nix` does not resolve nested YAML keys via dot notation in `sops.secrets.<name>.key`; using dotted keys lets installation finish but breaks `setupSecrets` during activation, which can leave first-boot services like Tailscale unconfigured.
+- Verification: `nix-instantiate --parse hosts/ew-cloud/config.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.ew-cloud.config.system.build.toplevel.drvPath`
