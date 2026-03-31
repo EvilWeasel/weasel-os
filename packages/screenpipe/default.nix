@@ -353,6 +353,9 @@ rustPlatform.buildRustPackage rec {
         tesseract5
         xdotool
       ]} \
+      --prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath [
+        openblas
+      ]} \
       --set TESSDATA_PREFIX "${tesseract5}/share/tessdata"
 
     if [ "$screenpipeBin" != "$out/bin/screenpipe" ]; then
