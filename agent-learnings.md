@@ -397,3 +397,9 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Added the `ew-cloud` bootstrap age recipient to `.sops.yaml`, set `hosts/ew-cloud/variables.nix` to the confirmed Hostinger disk by-id path, and created `secrets/hosts/ew-cloud/secrets.yaml` encrypted with both the admin and host bootstrap recipients.
 - Pitfall/Root cause: `sops-nix` needs a decryptable secret at first boot, so a per-host bootstrap age key has to exist before installation; using the raw `/dev/sda` path would also be needlessly brittle when Hostinger already exposes a stable `/dev/disk/by-id` symlink.
 - Verification: `nix eval --no-write-lock-file .#nixosConfigurations.ew-cloud.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.ew-cloud.config.system.build.diskoScript.drvPath`
+
+### 2026-03-31 (local sops tooling in shared home profile)
+- Date: 2026-03-31
+- Change: Added `pkgs.sops` and `pkgs.age` to `profiles/home/common.nix` so the local operator environment has permanent secret-management tooling without relying on `nix shell`.
+- Pitfall/Root cause: The repo now expects regular local editing of SOPS-managed files, and using ad-hoc shells for every secrets change adds friction and makes first-time setup easier to get wrong.
+- Verification: `nix-instantiate --parse profiles/home/common.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.michapc.config.system.build.toplevel.drvPath`

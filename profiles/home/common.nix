@@ -25,6 +25,8 @@ in {
         inherit config host pkgs pkgsUnstable;
       })
       (import ../../scripts/web-search.nix {inherit pkgs;})
+      pkgs.age
+      pkgs.sops
     ];
     sessionVariables = {
       WEASEL_OS_HOST = host;
