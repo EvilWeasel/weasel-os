@@ -391,3 +391,9 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Updated `packages/screenpipe/default.nix` to bundle `bun` next to the installed Tauri executable and to time out the initial `event_driven_capture` startup screenshot after 15 seconds, then enabled explicit `xdg.portal` routing for `nixy-laptop` in `profiles/system/laptop.nix` so `niri` prefers `wlr` for `ScreenCast` and `Screenshot`.
 - Pitfall/Root cause: Screenpipe's Pi bootstrap only checks for `bun` beside `current_exe()` or in a few FHS paths, so a wrapper `PATH` entry is not enough on NixOS; separately, the Linux vision pipeline can stay stuck in `frame_status = not_started` when the first Wayland screenshot hangs, and the default `niri` portal preference was still sending screenshots to the failing GNOME backend.
 - Verification: `nix build .#screenpipe-app --no-link`, `nix path-info --no-eval-cache .#screenpipe-app`, `timeout 8s $(nix path-info --no-eval-cache .#screenpipe-app)/bin/screenpipe --help`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`
+
+### 2026-03-31 (ew-cloud bootstrap secrets prep)
+- Date: 2026-03-31
+- Change: Added the `ew-cloud` bootstrap age recipient to `.sops.yaml`, set `hosts/ew-cloud/variables.nix` to the confirmed Hostinger disk by-id path, and created `secrets/hosts/ew-cloud/secrets.yaml` encrypted with both the admin and host bootstrap recipients.
+- Pitfall/Root cause: `sops-nix` needs a decryptable secret at first boot, so a per-host bootstrap age key has to exist before installation; using the raw `/dev/sda` path would also be needlessly brittle when Hostinger already exposes a stable `/dev/disk/by-id` symlink.
+- Verification: `nix eval --no-write-lock-file .#nixosConfigurations.ew-cloud.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.ew-cloud.config.system.build.diskoScript.drvPath`

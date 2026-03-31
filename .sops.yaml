@@ -1,7 +1,13 @@
 keys:
   - &evilweasel_admin age14aqzzvhyjp0cze8xvrh0qa6n8dt9dhujszsklklx8x6ldn82zu3q0tnn7l
+  - &ew_cloud_bootstrap age1248ez7h07gjm36dunyrvkygwfy6n6t34qyvg48z7z7udy2uvuqvq9vxene
 
 creation_rules:
+  - path_regex: secrets/hosts/ew-cloud/secrets\.yaml$
+    key_groups:
+      - age:
+          - *evilweasel_admin
+          - *ew_cloud_bootstrap
   - path_regex: secrets/hosts/[^/]+/secrets\.yaml$
     key_groups:
       - age:
