@@ -409,3 +409,9 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Updated `secrets/hosts/ew-cloud/secrets.yaml` with the real Tailscale auth key through SOPS while keeping the OpenClaw token encrypted in the same host secret file.
 - Pitfall/Root cause: The Tailscale auth key must never appear in plaintext in the repo or shell history, so the correct path is editing the already-encrypted SOPS file in place rather than patching it through normal text tooling.
 - Verification: `sed -n '1,80p' secrets/hosts/ew-cloud/secrets.yaml`
+
+### 2026-03-31 (openclaw gateway auth scaffold rollback)
+- Date: 2026-03-31
+- Change: Removed the speculative `gateway.auth.tokenFile` wiring from `modules/nixos/roles/openclaw.nix` and kept the role at a minimal install-only scaffold with `gateway.mode = "local"`.
+- Pitfall/Root cause: The upstream `nix-openclaw` Home Manager module does not expose `gateway.auth.tokenFile`; forcing an assumed option shape breaks full-system evaluation and therefore blocks installation.
+- Verification: `nix-instantiate --parse modules/nixos/roles/openclaw.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.ew-cloud.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.ew-cloud.config.system.build.diskoScript.drvPath`

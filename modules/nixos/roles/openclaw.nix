@@ -57,13 +57,9 @@ in {
         launchd.enable = false;
         stateDir = "/var/lib/openclaw/.openclaw";
         workspaceDir = "/var/lib/openclaw/workspace";
-        config =
-          {
-            gateway.mode = "local";
-          }
-          // lib.optionalAttrs (cfg.gatewayTokenFile != null) {
-            gateway.auth.tokenFile = cfg.gatewayTokenFile;
-          };
+        config = {
+          gateway.mode = "local";
+        };
       };
     };
   };
