@@ -8,19 +8,9 @@
   inputs,
   ...
 }: let
-  inherit (import ../../hosts/${host}/variables.nix) gitEmail gitSigningKey gitUsername;
   repoDefaultPath = "${config.home.homeDirectory}/weasel-os";
-  signingEnabled = gitSigningKey != "";
 in {
-  nixpkgs.config = {
-    allowUnfree = true;
-    allowUnfreePredicate = _: true;
-  };
-
   home = {
-    username = username;
-    homeDirectory = "/home/${username}";
-    stateVersion = "24.11";
     file = {
       "Pictures/wallpapers" = {
         source = ../../pictures/wallpapers;
@@ -57,10 +47,6 @@ in {
       pkgsUnstable.zed-editor
     ];
     sessionVariables = {
-      WEASEL_OS_HOST = host;
-      WEASEL_OS_ROOT = repoDefaultPath;
-      WEASEL_DEBUG_HOME = "${config.home.homeDirectory}/weasel-debug";
-      WEASEL_DEBUG_STATE = "${config.home.homeDirectory}/.local/state/weasel-debug";
       GTK_THEME = "adw-gtk3-dark";
       QT_STYLE_OVERRIDE = "adwaita-dark";
       QT_QPA_PLATFORMTHEME = "gtk3";
@@ -81,17 +67,6 @@ in {
     ../../programs/rofi/config-long.nix
     ../../programs/swaync.nix
   ];
-
-  programs.git = {
-    enable = true;
-    settings.user =
-      lib.optionalAttrs (gitUsername != "") {name = gitUsername;}
-      // lib.optionalAttrs (gitEmail != "") {email = gitEmail;};
-    signing = lib.mkIf signingEnabled {
-      key = gitSigningKey;
-      signByDefault = true;
-    };
-  };
 
   xdg = {
     userDirs = {
@@ -223,14 +198,5 @@ in {
 
   systemd.user.sessionVariables = {
     QT_QPA_PLATFORMTHEME = "gtk3";
-  };
-
-  programs = {
-    gh.enable = true;
-    btop = {
-      enable = true;
-      settings.vim_keys = true;
-    };
-    home-manager.enable = true;
   };
 }

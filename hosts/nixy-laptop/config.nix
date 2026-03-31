@@ -4,6 +4,7 @@
   ...
 }: {
   imports = [
+    ../../profiles/system/common.nix
     ../../profiles/system/base.nix
     ../../profiles/system/laptop.nix
     ../../modules/networking/internal-dns.nix

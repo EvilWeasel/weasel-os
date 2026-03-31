@@ -10,6 +10,12 @@ Append-only log of implementation lessons for future agents working in this repo
 
 ## Entries
 
+### 2026-03-31
+- Date: 2026-03-31
+- Change: Migrated the flake to `flake-parts`, split shared baselines into `common` plus client/server layers, added an `ew-cloud` VPS host with `disko`, `sops-nix`, Tailscale-only defaults, and a reusable OpenClaw role scaffold.
+- Pitfall/Root cause: New files must be staged before Git-backed flake evaluation sees them; Home Manager users created inside NixOS do not automatically inherit package overlays when `home-manager.useGlobalPkgs = false`, so external packages such as `openclaw` must be passed explicitly; a first-boot `sops-nix` secret cannot rely on a host SSH key that does not exist yet.
+- Verification: `nix flake show --all-systems`, `nix flake check`, `nix-instantiate --parse profiles/system/common.nix`, `nix-instantiate --parse profiles/system/server.nix`, `nix-instantiate --parse profiles/home/common.nix`, `nix-instantiate --parse profiles/home/server.nix`, `nix-instantiate --parse hosts/ew-cloud/config.nix`, `nix-instantiate --parse hosts/ew-cloud/disko.nix`, `nix-instantiate --parse modules/nixos/roles/openclaw.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.michapc.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.michapc-debug.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.ew-cloud.config.system.build.toplevel.drvPath`, and `nix eval --no-write-lock-file .#nixosConfigurations.ew-cloud.config.system.build.diskoScript.drvPath`.
+
 ### 2026-03-30
 - Date: 2026-03-30
 - Change: Enabled Tailscale once in the shared system base profile so all hosts inherit the service automatically.

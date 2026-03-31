@@ -1,37 +1,34 @@
-{
-  inputs,
-  home-manager,
-  nixpkgs,
-  pkgsUnstable,
-}: {
+{inputs}: {
   hostName,
   system,
   username,
   extraModules ? [],
+  ...
 }:
-nixpkgs.lib.nixosSystem {
+inputs.nixpkgs.lib.nixosSystem {
   inherit system;
 
-  specialArgs = {
-    inherit
-      inputs
-      pkgsUnstable
-      username
-      ;
+  specialArgs = let
+    pkgsUnstable = import inputs.nixpkgs-unstable {
+      inherit system;
+      config.allowUnfree = true;
+    };
+  in {
+    inherit inputs pkgsUnstable username;
     host = hostName;
   };
 
   modules =
     [
       ../hosts/${hostName}/config.nix
-      home-manager.nixosModules.home-manager
+      inputs.home-manager.nixosModules.home-manager
       {
         home-manager.extraSpecialArgs = {
-          inherit
-            inputs
-            pkgsUnstable
-            username
-            ;
+          pkgsUnstable = import inputs.nixpkgs-unstable {
+            inherit system;
+            config.allowUnfree = true;
+          };
+          inherit inputs username;
           host = hostName;
         };
         home-manager.useGlobalPkgs = false;

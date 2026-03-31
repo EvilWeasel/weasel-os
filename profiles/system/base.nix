@@ -3,13 +3,12 @@
   pkgs,
   host,
   lib,
-  options,
   username,
   inputs,
   ...
 }: let
-  inherit (import ../../hosts/${host}/variables.nix) consoleKeyMap keyboardLayout;
-  commonSystemPackages = with pkgs; [
+  inherit (import ../../hosts/${host}/variables.nix) keyboardLayout;
+  clientSystemPackages = with pkgs; [
     protonvpn-gui
     warp-terminal
     code-cursor
@@ -123,11 +122,6 @@ in {
     ../../modules/vm-guest-services.nix
     ../../modules/local-hardware-clock.nix
   ];
-
-  # Keep existing hand-managed Home Manager config files as backups during
-  # activation instead of aborting the switch.
-  home-manager.backupFileExtension = "hm-backup";
-
   boot = {
     kernelModules = ["v4l2loopback"];
     extraModulePackages = [config.boot.kernelPackages.v4l2loopback];
@@ -157,26 +151,7 @@ in {
   vm.guest-services.enable = false;
 
   networking = {
-    hostName = host;
     networkmanager.enable = true;
-    timeServers = options.networking.timeServers.default ++ ["pool.ntp.org"];
-  };
-
-  time.timeZone = "Europe/Berlin";
-
-  i18n = {
-    defaultLocale = "en_US.UTF-8";
-    extraLocaleSettings = {
-      LC_ADDRESS = "de_DE.UTF-8";
-      LC_IDENTIFICATION = "de_DE.UTF-8";
-      LC_MEASUREMENT = "de_DE.UTF-8";
-      LC_MONETARY = "de_DE.UTF-8";
-      LC_NAME = "de_DE.UTF-8";
-      LC_NUMERIC = "de_DE.UTF-8";
-      LC_PAPER = "de_DE.UTF-8";
-      LC_TELEPHONE = "de_DE.UTF-8";
-      LC_TIME = "de_DE.UTF-8";
-    };
   };
 
   programs = {
@@ -267,7 +242,6 @@ in {
 
   nixpkgs = {
     config = {
-      allowUnfree = true;
       permittedInsecurePackages = [
         "ventoy-qt5-${pkgs.ventoy-full-qt.version}"
         "qtwebengine-5.15.19"
@@ -278,7 +252,7 @@ in {
   users.mutableUsers = true;
 
   environment = {
-    systemPackages = commonSystemPackages;
+    systemPackages = clientSystemPackages;
     variables = {
       STEAM_EXTRA_COMPAT_TOOLS_PATHS = "/home/${username}/.steam/root/compatibilitytools.d";
     };
@@ -319,7 +293,6 @@ in {
       autodetect = true;
     };
     libinput.enable = true;
-    fstrim.enable = true;
     gvfs.enable = true;
     openssh.enable = true;
     flatpak.enable = true;
@@ -393,31 +366,6 @@ in {
     };
   };
 
-  nix = {
-    settings = {
-      auto-optimise-store = true;
-      experimental-features = [
-        "nix-command"
-        "flakes"
-      ];
-      substituters = [
-        "https://cache.nixos.org?priority=10"
-        "https://nyx.chaotic.cx"
-        "https://nix-community.cachix.org"
-        "https://yazi.cachix.org"
-      ];
-      trusted-public-keys = [
-        "nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs="
-        "yazi.cachix.org-1:Dcdz63NZKfvUCbDGngQDAZq6kOroIrFoyO064uvLh8k="
-      ];
-    };
-    gc = {
-      automatic = true;
-      dates = "weekly";
-      options = "--delete-older-than 7d";
-    };
-  };
-
   virtualisation = {
     libvirtd = {
       enable = true;
@@ -425,8 +373,4 @@ in {
     };
     docker.enable = true;
   };
-
-  console.keyMap = consoleKeyMap;
-
-  system.stateVersion = "24.11";
 }

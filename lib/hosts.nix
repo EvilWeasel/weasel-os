@@ -1,11 +1,13 @@
 {inputs}: {
   nixy-desktop = {
+    class = "client";
     system = "x86_64-linux";
     username = "evilweasel";
     extraModules = [];
   };
 
   nixy-laptop = {
+    class = "client";
     system = "x86_64-linux";
     username = "evilweasel";
     extraModules = [
@@ -14,6 +16,7 @@
   };
 
   michapc = {
+    class = "client";
     system = "x86_64-linux";
     username = "micha";
     extraModules = [
@@ -22,10 +25,18 @@
   };
 
   michapc-debug = {
+    class = "client";
     system = "x86_64-linux";
     username = "micha";
     extraModules = [
       ../modules/michapc-nvidia.nix
     ];
+  };
+
+  ew-cloud = {
+    class = "server";
+    system = "x86_64-linux";
+    username = "evilweasel";
+    extraModules = [];
   };
 }
