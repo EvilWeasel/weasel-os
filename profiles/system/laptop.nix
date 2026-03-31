@@ -12,6 +12,33 @@
   features.displaylink.enable = true;
   services.xserver.videoDrivers = lib.mkIf (host == "nixy-laptop") [ "nvidia" ];
 
+  xdg.portal = {
+    enable = true;
+    xdgOpenUsePortal = true;
+    extraPortals = with pkgs; [
+      xdg-desktop-portal-gnome
+      xdg-desktop-portal-gtk
+      xdg-desktop-portal-wlr
+    ];
+    config.niri = {
+      default = [
+        "gnome"
+        "gtk"
+      ];
+      "org.freedesktop.impl.portal.Access" = [ "gtk" ];
+      "org.freedesktop.impl.portal.Notification" = [ "gtk" ];
+      "org.freedesktop.impl.portal.ScreenCast" = [
+        "wlr"
+        "gnome"
+      ];
+      "org.freedesktop.impl.portal.Screenshot" = [
+        "wlr"
+        "gnome"
+      ];
+      "org.freedesktop.impl.portal.Secret" = [ "gnome-keyring" ];
+    };
+  };
+
   local.hardware-clock.enable = true;
 
   networking = {
