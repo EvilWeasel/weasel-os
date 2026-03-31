@@ -415,3 +415,9 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Removed the speculative `gateway.auth.tokenFile` wiring from `modules/nixos/roles/openclaw.nix` and kept the role at a minimal install-only scaffold with `gateway.mode = "local"`.
 - Pitfall/Root cause: The upstream `nix-openclaw` Home Manager module does not expose `gateway.auth.tokenFile`; forcing an assumed option shape breaks full-system evaluation and therefore blocks installation.
 - Verification: `nix-instantiate --parse modules/nixos/roles/openclaw.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.ew-cloud.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.ew-cloud.config.system.build.diskoScript.drvPath`
+
+### 2026-03-31 (openclaw plugin package collision)
+- Date: 2026-03-31
+- Change: Set `programs.openclaw.exposePluginPackages = false` in `modules/nixos/roles/openclaw.nix` so the OpenClaw HM profile does not add standalone plugin CLIs on top of the already bundled `openclaw` package payload.
+- Pitfall/Root cause: The batteries-included `openclaw` package already ships some tool binaries such as `goplaces`; exposing plugin packages again through `home.packages` creates `pkgs.buildEnv` path collisions and blocks system builds.
+- Verification: `nix-instantiate --parse modules/nixos/roles/openclaw.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.ew-cloud.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.ew-cloud.config.system.build.diskoScript.drvPath`

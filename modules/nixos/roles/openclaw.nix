@@ -52,6 +52,7 @@ in {
         enable = true;
         package = inputs.nix-openclaw.packages.${pkgs.stdenv.hostPlatform.system}.openclaw;
         documents = cfg.documents;
+        exposePluginPackages = false;
         installApp = false;
         systemd.enable = false;
         launchd.enable = false;
