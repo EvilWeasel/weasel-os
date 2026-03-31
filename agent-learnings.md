@@ -379,3 +379,9 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Added `modules/networking/internal-dns.nix` with the Tailscale-backed `networking.hosts` overrides for the internal `*.apps.blain.de` services and imported it only from `hosts/nixy-laptop/config.nix`.
 - Pitfall/Root cause: The internal service aliases must stay host-scoped so the Tailscale IP mapping only affects `nixy-laptop` instead of every machine that imports the shared system base.
 - Verification: `nix-instantiate --parse hosts/nixy-laptop/config.nix`, `nix-instantiate --parse modules/networking/internal-dns.nix`
+
+### 2026-03-31 (screenpipe bun and niri capture follow-up)
+- Date: 2026-03-31
+- Change: Updated `packages/screenpipe/default.nix` to bundle `bun` next to the installed Tauri executable and to time out the initial `event_driven_capture` startup screenshot after 15 seconds, then enabled explicit `xdg.portal` routing for `nixy-laptop` in `profiles/system/laptop.nix` so `niri` prefers `wlr` for `ScreenCast` and `Screenshot`.
+- Pitfall/Root cause: Screenpipe's Pi bootstrap only checks for `bun` beside `current_exe()` or in a few FHS paths, so a wrapper `PATH` entry is not enough on NixOS; separately, the Linux vision pipeline can stay stuck in `frame_status = not_started` when the first Wayland screenshot hangs, and the default `niri` portal preference was still sending screenshots to the failing GNOME backend.
+- Verification: `nix build .#screenpipe-app --no-link`, `nix path-info --no-eval-cache .#screenpipe-app`, `timeout 8s $(nix path-info --no-eval-cache .#screenpipe-app)/bin/screenpipe --help`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`
