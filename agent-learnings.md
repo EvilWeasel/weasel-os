@@ -368,6 +368,12 @@ Append-only log of implementation lessons for future agents working in this repo
 - Pitfall/Root cause: Upstream assumes networked Bun/Tauri builds and non-Nix Linux paths; the Linux source build needed explicit `onnxruntime` discovery to stop `ort-sys` downloads, `_POSIX_C_SOURCE`/`_GNU_SOURCE` for `antirez-asr-sys`, `libgbm` in the linker closure, and install-time detection of the actual Tauri binary name instead of assuming `bin/screenpipe`.
 - Verification: `nix build .#screenpipe-app --no-link`, `nix path-info --no-eval-cache .#screenpipe-app`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`
 
+### 2026-03-31 (screenpipe linux runtime wrapper)
+- Date: 2026-03-31
+- Change: Extended the `screenpipe-app` wrapper to export a Linux runtime library path and added `desktop-file-utils` to the wrapped `PATH` so the packaged app can load OpenBLAS/AppIndicator at runtime and complete the deep-link desktop registration step on startup.
+- Pitfall/Root cause: `openblas` was only exposed through a temporary build-time symlink, so the final ELF had no persistent OpenBLAS runtime path; after fixing that, Linux startup still failed because `tauri_plugin_deep_link` shells out to `update-desktop-database`, which is not present on a bare NixOS PATH unless `desktop-file-utils` is added explicitly.
+- Verification: `nix build .#screenpipe-app --no-link`, `timeout 5s $(nix path-info --no-eval-cache .#screenpipe-app)/bin/screenpipe --help`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`
+
 ### 2026-03-30 (nixy-laptop internal DNS host overrides)
 - Date: 2026-03-30
 - Change: Added `modules/networking/internal-dns.nix` with the Tailscale-backed `networking.hosts` overrides for the internal `*.apps.blain.de` services and imported it only from `hosts/nixy-laptop/config.nix`.
