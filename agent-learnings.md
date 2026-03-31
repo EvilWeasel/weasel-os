@@ -427,3 +427,9 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Updated `hosts/ew-cloud/config.nix` to address nested YAML secrets with slash-separated selectors (`tailscale/auth_key`, `openclaw/gateway_token`) instead of dotted selectors.
 - Pitfall/Root cause: `sops-nix` does not resolve nested YAML keys via dot notation in `sops.secrets.<name>.key`; using dotted keys lets installation finish but breaks `setupSecrets` during activation, which can leave first-boot services like Tailscale unconfigured.
 - Verification: `nix-instantiate --parse hosts/ew-cloud/config.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.ew-cloud.config.system.build.toplevel.drvPath`
+
+### 2026-03-31 (temporary public ssh fallback for ew-cloud)
+- Date: 2026-03-31
+- Change: Temporarily opened TCP/22 on `ew-cloud` and allowed pubkey SSH for both `root` and `evilweasel` so the VPS can be debugged over normal SSH if Tailscale fails again.
+- Pitfall/Root cause: Hostinger’s SSH terminal uses the public SSH path, so once the server baseline closes public SSH before Tailscale is online there is no remote recovery path without rescue mode or a temporary fallback.
+- Verification: `nix-instantiate --parse hosts/ew-cloud/config.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.ew-cloud.config.system.build.toplevel.drvPath`
