@@ -451,3 +451,9 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Removed EFI support from `ew-cloud` and kept only BIOS GRUB with a `bios_grub` partition plus separate `/boot`.
 - Pitfall/Root cause: The VPS boots Ubuntu in BIOS mode, so installing EFI GRUB on a non-ESP `/boot` partition fails during deployment even though the BIOS bootloader itself installs successfully.
 - Verification: `ssh ew-cloud 'test -d /sys/firmware/efi && echo efi-present || echo efi-absent; sudo parted -s /dev/sda print'`, `nix-instantiate --parse hosts/ew-cloud/config.nix`, `nix-instantiate --parse hosts/ew-cloud/disko.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.ew-cloud.config.system.build.toplevel.drvPath`
+
+### 2026-04-01 (remove ew-cloud public ssh fallback)
+- Date: 2026-04-01
+- Change: Removed the temporary public SSH firewall exception and root key fallback from `ew-cloud` so only the Tailnet interface remains allowed for inbound SSH.
+- Pitfall/Root cause: Once Tailscale is online, leaving public port 22 open is unnecessary exposure. The server baseline already trusts only `tailscale0`, so the remaining task is to reapply that baseline to the host.
+- Verification: `nix-instantiate --parse hosts/ew-cloud/config.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.ew-cloud.config.system.build.toplevel.drvPath`
