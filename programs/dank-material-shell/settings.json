@@ -23,7 +23,7 @@
   "mangoLayoutRadiusOverride": -1,
   "mangoLayoutBorderSize": -1,
   "use24HourClock": true,
-  "showSeconds": false,
+  "showSeconds": true,
   "padHours12Hour": false,
   "useFahrenheit": false,
   "windSpeedUnit": "kmh",
@@ -36,7 +36,7 @@
   "modalAnimationSpeed": 1,
   "modalCustomAnimationDuration": 150,
   "enableRippleEffects": true,
-  "wallpaperFillMode": "Fill",
+  "wallpaperFillMode": "Fit",
   "blurredWallpaperLayer": false,
   "blurWallpaperOnOverview": true,
   "showLauncherButton": true,
@@ -220,13 +220,19 @@
     }
   ],
   "centeringMode": "index",
-  "clockDateFormat": "ddd dd.MM.yyyy",
+  "clockDateFormat": "dddd, d MMMM yyyy",
   "lockDateFormat": "",
   "mediaSize": 1,
   "appLauncherViewMode": "grid",
   "spotlightModalViewMode": "grid",
   "browserPickerViewMode": "grid",
-  "browserUsageHistory": {},
+  "browserUsageHistory": {
+    "google-chrome": {
+      "count": 1,
+      "lastUsed": 1775068996353,
+      "name": "Google Chrome"
+    }
+  },
   "appPickerViewMode": "grid",
   "filePickerUsageHistory": {},
   "sortAppsAlphabetically": false,
@@ -244,7 +250,7 @@
   "dankLauncherV2ShowFooter": true,
   "dankLauncherV2UnloadOnClose": false,
   "useAutoLocation": false,
-  "weatherEnabled": true,
+  "weatherEnabled": false,
   "networkPreference": "wifi",
   "iconTheme": "Papirus-Dark",
   "cursorSettings": {
@@ -270,8 +276,8 @@
   "launcherLogoBrightness": 0.5,
   "launcherLogoContrast": 1,
   "launcherLogoSizeOffset": 4,
-  "fontFamily": "MonaspiceAr Nerd Font",
-  "monoFontFamily": "MonaspiceKr Nerd Font Mono",
+  "fontFamily": "Monaspace Argon",
+  "monoFontFamily": "Monaspace Neon",
   "fontWeight": 400,
   "fontScale": 1,
   "notepadUseMonospace": true,
@@ -306,6 +312,7 @@
   "brightnessDevicePins": {},
   "wifiNetworkPins": {
     "preferredWifi": [
+      "FRITZ!Box 7530 WC",
       "Pretty Fly for a WiFi"
     ]
   },
@@ -452,17 +459,7 @@
   "niriOutputSettings": {},
   "hyprlandOutputSettings": {},
   "displayProfiles": {
-    "niri": {
-      "profile_1772934857822_g7fg4r": {
-        "id": "profile_1772934857822_g7fg4r",
-        "name": "laptop-only",
-        "outputSet": [
-          "eDP-1"
-        ],
-        "createdAt": 1772934857822,
-        "updatedAt": 1772934857822
-      }
-    }
+    "niri": {}
   },
   "activeDisplayProfile": {
     "niri": "profile_1772934857822_g7fg4r"
@@ -556,7 +553,7 @@
           "showPrinterIcon": false
         }
       ],
-      "spacing": 2,
+      "spacing": 4,
       "innerPadding": 0,
       "bottomGap": 0,
       "transparency": 0.75,
@@ -581,7 +578,8 @@
       "visible": true,
       "popupGapsAuto": true,
       "popupGapsManual": 4,
-      "maximizeDetection": true
+      "maximizeDetection": true,
+      "widgetPadding": 8
     }
   ],
   "desktopClockEnabled": false,

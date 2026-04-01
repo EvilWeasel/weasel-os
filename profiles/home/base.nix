@@ -54,7 +54,8 @@ in {
       pkgs.kitty
       pkgsUnstable.lmstudio
       pkgsUnstable.zed-editor
-    ];
+      pkgsUnstable.code-cursor
+   ];
     sessionVariables = {
       WEASEL_OS_HOST = host;
       WEASEL_OS_ROOT = repoDefaultPath;
