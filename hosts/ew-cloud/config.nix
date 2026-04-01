@@ -6,6 +6,7 @@
 }: let
   secretFile = ../../secrets/hosts/ew-cloud/secrets.yaml;
   hasSecrets = builtins.pathExists secretFile;
+  inherit (import ./variables.nix) grubDevice;
 in {
   imports = [
     ../../profiles/system/common.nix
@@ -19,7 +20,23 @@ in {
 
   weasel.roles.openclaw.enable = true;
 
-  boot.loader.systemd-boot.configurationLimit = 10;
+  boot.loader = {
+    efi.canTouchEfiVariables = false;
+    grub = {
+      enable = true;
+      device = grubDevice;
+      efiSupport = true;
+      efiInstallAsRemovable = true;
+      configurationLimit = 10;
+    };
+  };
+
+  networking = {
+    useDHCP = lib.mkForce false;
+    useNetworkd = lib.mkForce false;
+    interfaces.eth0.useDHCP = true;
+    interfaces.ens18.useDHCP = true;
+  };
 
   # Temporary debug fallback so the host stays reachable even if Tailscale fails
   # during first boot. Remove once Tailscale bootstrapping is verified.

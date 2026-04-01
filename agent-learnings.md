@@ -433,3 +433,9 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Temporarily opened TCP/22 on `ew-cloud` and allowed pubkey SSH for both `root` and `evilweasel` so the VPS can be debugged over normal SSH if Tailscale fails again.
 - Pitfall/Root cause: Hostinger’s SSH terminal uses the public SSH path, so once the server baseline closes public SSH before Tailscale is online there is no remote recovery path without rescue mode or a temporary fallback.
 - Verification: `nix-instantiate --parse hosts/ew-cloud/config.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.ew-cloud.config.system.build.toplevel.drvPath`
+
+### 2026-04-01 (ew-cloud boot mode mismatch)
+- Date: 2026-04-01
+- Change: Moved bootloader choice out of the shared server baseline and switched `ew-cloud` to BIOS-safe GRUB with a dedicated `bios_grub` partition, separate `/boot`, and a public SSH pubkey fallback. Also forced `ew-cloud` back to scripted DHCP instead of `systemd-networkd`.
+- Pitfall/Root cause: The Hostinger VPS currently boots Ubuntu in BIOS mode on GPT (`/sys/firmware/efi` absent, `bios_grub` partition present, `grub-pc` installed). Installing EFI-only `systemd-boot` there likely left the machine unbootable, which explains why neither public SSH nor Tailscale ever came up after the first reboot.
+- Verification: `ssh ew-cloud 'test -d /sys/firmware/efi && echo efi-present || echo efi-absent; sudo parted -s /dev/sda print; dpkg -l \"grub*\" | sed -n \"1,40p\"'`, `nix-instantiate --parse profiles/system/server.nix`, `nix-instantiate --parse hosts/ew-cloud/config.nix`, `nix-instantiate --parse hosts/ew-cloud/disko.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.ew-cloud.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.ew-cloud.config.system.build.diskoScript.drvPath`
