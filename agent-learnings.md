@@ -445,3 +445,9 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Replaced the temporary DHCP fallback on `ew-cloud` with an explicit static `systemd-networkd` uplink definition matched by MAC address and populated from the live Ubuntu cloud-init config.
 - Pitfall/Root cause: The Hostinger Ubuntu image configures the public NIC through cloud-init/netplan with static IPv4/IPv6 addresses, routes, and DNS. Assuming DHCP on the NixOS side risks bringing up neither public SSH nor Tailscale even if the system itself boots correctly.
 - Verification: `ssh ew-cloud 'networkctl status eth0 --no-pager; sudo cat /etc/netplan/50-cloud-init.yaml'`, `nix-instantiate --parse hosts/ew-cloud/config.nix`, `nix-instantiate --parse hosts/ew-cloud/variables.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.ew-cloud.config.system.build.toplevel.drvPath`
+
+### 2026-04-01 (ew-cloud BIOS GRUB only)
+- Date: 2026-04-01
+- Change: Removed EFI support from `ew-cloud` and kept only BIOS GRUB with a `bios_grub` partition plus separate `/boot`.
+- Pitfall/Root cause: The VPS boots Ubuntu in BIOS mode, so installing EFI GRUB on a non-ESP `/boot` partition fails during deployment even though the BIOS bootloader itself installs successfully.
+- Verification: `ssh ew-cloud 'test -d /sys/firmware/efi && echo efi-present || echo efi-absent; sudo parted -s /dev/sda print'`, `nix-instantiate --parse hosts/ew-cloud/config.nix`, `nix-instantiate --parse hosts/ew-cloud/disko.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.ew-cloud.config.system.build.toplevel.drvPath`

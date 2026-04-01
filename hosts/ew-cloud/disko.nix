@@ -12,21 +12,8 @@ in {
           size = "4M";
         };
 
-        ESP = {
-          type = "EF00";
-          size = "512M";
-          content = {
-            type = "filesystem";
-            format = "vfat";
-            mountpoint = "/boot/efi";
-            mountOptions = [
-              "umask=0077"
-            ];
-          };
-        };
-
         boot = {
-          size = "1G";
+          size = "512M";
           content = {
             type = "filesystem";
             format = "ext4";
@@ -71,6 +58,5 @@ in {
   };
 
   fileSystems."/boot".neededForBoot = true;
-  fileSystems."/boot/efi".neededForBoot = true;
   fileSystems."/persist".neededForBoot = true;
 }

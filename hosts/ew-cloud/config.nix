@@ -25,8 +25,7 @@ in {
     grub = {
       enable = true;
       device = grubDevice;
-      efiSupport = true;
-      efiInstallAsRemovable = true;
+      efiSupport = false;
       configurationLimit = 10;
     };
   };
