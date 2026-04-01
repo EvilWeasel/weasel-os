@@ -6,7 +6,7 @@
 }: let
   secretFile = ../../secrets/hosts/ew-cloud/secrets.yaml;
   hasSecrets = builtins.pathExists secretFile;
-  inherit (import ./variables.nix) grubDevice;
+  inherit (import ./variables.nix) grubDevice uplink;
 in {
   imports = [
     ../../profiles/system/common.nix
@@ -33,9 +33,37 @@ in {
 
   networking = {
     useDHCP = lib.mkForce false;
-    useNetworkd = lib.mkForce false;
-    interfaces.eth0.useDHCP = true;
-    interfaces.ens18.useDHCP = true;
+    useNetworkd = lib.mkForce true;
+  };
+
+  systemd.network = {
+    enable = true;
+    networks."10-uplink" = {
+      matchConfig = {
+        MACAddress = uplink.macAddress;
+        Type = "ether";
+      };
+      address = [
+        uplink.ipv4Address
+        uplink.ipv6Address
+      ];
+      routes = [
+        {
+          Gateway = uplink.ipv4Gateway;
+          GatewayOnLink = true;
+        }
+        {
+          Gateway = uplink.ipv6Gateway;
+          GatewayOnLink = true;
+        }
+      ];
+      networkConfig = {
+        DNS = uplink.dns;
+        DHCP = "no";
+        IPv6AcceptRA = false;
+      };
+      linkConfig.RequiredForOnline = "routable";
+    };
   };
 
   # Temporary debug fallback so the host stays reachable even if Tailscale fails
