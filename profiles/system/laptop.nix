@@ -18,7 +18,6 @@
     extraPortals = with pkgs; [
       xdg-desktop-portal-gnome
       xdg-desktop-portal-gtk
-      xdg-desktop-portal-wlr
     ];
     config.niri = {
       default = [
@@ -27,14 +26,8 @@
       ];
       "org.freedesktop.impl.portal.Access" = [ "gtk" ];
       "org.freedesktop.impl.portal.Notification" = [ "gtk" ];
-      "org.freedesktop.impl.portal.ScreenCast" = [
-        "wlr"
-        "gnome"
-      ];
-      "org.freedesktop.impl.portal.Screenshot" = [
-        "wlr"
-        "gnome"
-      ];
+      "org.freedesktop.impl.portal.ScreenCast" = [ "gnome" ];
+      "org.freedesktop.impl.portal.Screenshot" = [ "gnome" ];
       "org.freedesktop.impl.portal.Secret" = [ "gnome-keyring" ];
     };
   };

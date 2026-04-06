@@ -47,6 +47,7 @@
   environment.systemPackages = with pkgs; [
     btop
     fastfetch
+    kitty.terminfo
     neovim
     tmux
     yazi

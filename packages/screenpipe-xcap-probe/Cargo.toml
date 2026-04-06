@@ -1,0 +1,8 @@
+[package]
+name = "screenpipe-xcap-probe"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+image = "0.25"
+xcap = "0.9"
