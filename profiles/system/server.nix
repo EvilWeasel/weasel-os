@@ -3,7 +3,8 @@
   lib,
   pkgs,
   ...
-}: {
+}:
+{
   imports = [
     inputs.sops-nix.nixosModules.sops
   ];
@@ -19,8 +20,8 @@
     firewall = {
       enable = true;
       allowPing = false;
-      trustedInterfaces = ["tailscale0"];
-      interfaces.tailscale0.allowedTCPPorts = [22];
+      trustedInterfaces = [ "tailscale0" ];
+      interfaces.tailscale0.allowedTCPPorts = [ 22 ];
     };
   };
 
@@ -38,7 +39,7 @@
     };
     tailscale = {
       enable = true;
-      extraSetFlags = ["--ssh"];
+      extraSetFlags = [ "--ssh" ];
     };
   };
 

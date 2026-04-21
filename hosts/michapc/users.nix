@@ -2,8 +2,9 @@
   pkgs,
   username,
   ...
-}: {
-  users.groups.llama = {};
+}:
+{
+  users.groups.llama = { };
   users.users = {
     "${username}" = {
       homeMode = "755";
@@ -21,7 +22,7 @@
       ];
       shell = pkgs.bash;
       ignoreShellProgramCheck = true;
-      packages = with pkgs; [];
+      packages = with pkgs; [ ];
     };
   };
 }

@@ -1,4 +1,5 @@
-{username, ...}: {
+{ username, ... }:
+{
   drivers = {
     amdgpu.enable = false;
     nvidia.enable = true;

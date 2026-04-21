@@ -1,4 +1,5 @@
-{...}: {
+{ ... }:
+{
   imports = [
     ../../profiles/home/common.nix
     ../../profiles/home/server.nix

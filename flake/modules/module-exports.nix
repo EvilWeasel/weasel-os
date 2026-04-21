@@ -1,4 +1,5 @@
-{...}: {
+{ ... }:
+{
   flake = {
     nixosModules = {
       common = import ../../profiles/system/common.nix;

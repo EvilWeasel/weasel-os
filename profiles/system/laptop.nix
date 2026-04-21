@@ -7,7 +7,8 @@
   lib,
   username,
   ...
-}: {
+}:
+{
   features.canbus.enable = true;
   features.displaylink.enable = true;
   services.xserver.videoDrivers = lib.mkIf (host == "nixy-laptop") [ "nvidia" ];
@@ -123,8 +124,8 @@
   hardware = {
     sane = {
       enable = true;
-      extraBackends = [pkgs.sane-airscan];
-      disabledDefaultBackends = ["escl"];
+      extraBackends = [ pkgs.sane-airscan ];
+      disabledDefaultBackends = [ "escl" ];
     };
     bluetooth = {
       enable = true;
@@ -133,7 +134,7 @@
   };
 
   services.udev = {
-    packages = [pkgs.sane-airscan];
+    packages = [ pkgs.sane-airscan ];
     extraRules = ''
       ATTRS{name}=="Sony Interactive Entertainment DualSense Wireless Controller Touchpad", ENV{LIBINPUT_IGNORE_DEVICE}="1"
       ATTRS{name}=="DualSense Wireless Controller Touchpad", ENV{LIBINPUT_IGNORE_DEVICE}="1"

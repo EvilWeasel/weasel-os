@@ -3,14 +3,16 @@
   options,
   pkgs,
   ...
-}: let
+}:
+let
   inherit (import ../../hosts/${host}/variables.nix) consoleKeyMap;
-in {
+in
+{
   home-manager.backupFileExtension = "hm-backup";
 
   networking = {
     hostName = host;
-    timeServers = options.networking.timeServers.default ++ ["pool.ntp.org"];
+    timeServers = options.networking.timeServers.default ++ [ "pool.ntp.org" ];
   };
 
   time.timeZone = "Europe/Berlin";

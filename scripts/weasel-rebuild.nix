@@ -1,4 +1,8 @@
-{config, host, pkgs}:
+{
+  config,
+  host,
+  pkgs,
+}:
 let
   repoDefaultPath = "${config.home.homeDirectory}/weasel-os";
   resolveRoot = ''
@@ -18,7 +22,11 @@ let
       printf '%s\n' "${repoDefaultPath}"
     }
   '';
-  mkCommand = {name, update ? false}:
+  mkCommand =
+    {
+      name,
+      update ? false,
+    }:
     pkgs.writeShellScriptBin name ''
       set -euo pipefail
       ${resolveRoot}
@@ -31,9 +39,14 @@ let
         "${host}"
       )
 
-      ${if update then ''
-        nh_args+=(--update)
-      '' else ""}
+      ${
+        if update then
+          ''
+            nh_args+=(--update)
+          ''
+        else
+          ""
+      }
 
       exec ${pkgs.nh}/bin/nh "''${nh_args[@]}" "$repo_root"
     '';
@@ -41,7 +54,10 @@ in
 pkgs.symlinkJoin {
   name = "weasel-rebuild";
   paths = [
-    (mkCommand {name = "fr";})
-    (mkCommand {name = "fu"; update = true;})
+    (mkCommand { name = "fr"; })
+    (mkCommand {
+      name = "fu";
+      update = true;
+    })
   ];
 }

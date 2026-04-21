@@ -7,9 +7,11 @@
   username,
   inputs,
   ...
-}: let
+}:
+let
   repoDefaultPath = "${config.home.homeDirectory}/weasel-os";
-in {
+in
+{
   home = {
     file = {
       "Pictures/wallpapers" = {
@@ -19,20 +21,25 @@ in {
       "Pictures/face.png".source = ../../pictures/weasel.png;
     };
     packages = [
-      (import ../../scripts/emopicker9000.nix {inherit pkgs;})
-      (import ../../scripts/squirtle.nix {inherit pkgs;})
-      (import ../../scripts/nvidia-offload.nix {inherit pkgs;})
+      (import ../../scripts/emopicker9000.nix { inherit pkgs; })
+      (import ../../scripts/squirtle.nix { inherit pkgs; })
+      (import ../../scripts/nvidia-offload.nix { inherit pkgs; })
       (import ../../scripts/wallsetter.nix {
         inherit pkgs username;
       })
       (import ../../scripts/weasel-shell-helpers.nix {
-        inherit config host pkgs pkgsUnstable;
+        inherit
+          config
+          host
+          pkgs
+          pkgsUnstable
+          ;
       })
-      (import ../../scripts/weasel-dms-session.nix {inherit pkgs;})
-      (import ../../scripts/weasel-collect-session-debug.nix {inherit pkgs;})
-      (import ../../scripts/web-search.nix {inherit pkgs;})
-      (import ../../scripts/rofi-launcher.nix {inherit pkgs;})
-      (import ../../scripts/screenshootin.nix {inherit pkgs;})
+      (import ../../scripts/weasel-dms-session.nix { inherit pkgs; })
+      (import ../../scripts/weasel-collect-session-debug.nix { inherit pkgs; })
+      (import ../../scripts/web-search.nix { inherit pkgs; })
+      (import ../../scripts/rofi-launcher.nix { inherit pkgs; })
+      (import ../../scripts/screenshootin.nix { inherit pkgs; })
       pkgs.helix
       pkgs.adw-gtk3
       pkgs.bibata-cursors
@@ -54,7 +61,7 @@ in {
     };
   };
 
-    imports = [
+  imports = [
     inputs.dms.homeModules."dank-material-shell"
     ../../programs/emoji.nix
     ../../programs/fastfetch
@@ -103,13 +110,13 @@ in {
   home.file = {
     ".config/gtk-3.0/gtk.css" = {
       text = ''
-      @import url("dank-colors.css");
+        @import url("dank-colors.css");
       '';
       force = true;
     };
     ".config/gtk-4.0/gtk.css" = {
       text = ''
-      @import url("dank-colors.css");
+        @import url("dank-colors.css");
       '';
       force = true;
     };
@@ -131,7 +138,7 @@ in {
     source = config.lib.file.mkOutOfStoreSymlink "${repoDefaultPath}/programs/kitty.desktop";
   };
 
-  home.activation.ensureThemeIconDirs = lib.hm.dag.entryAfter ["writeBoundary"] ''
+  home.activation.ensureThemeIconDirs = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
     install -d "$HOME/.local/share/icons"
 
     ln -sfn "${pkgs.adwaita-icon-theme}/share/icons/Adwaita" "$HOME/.local/share/icons/Adwaita"
@@ -176,8 +183,8 @@ in {
 
   dconf.settings = {
     "org/virt-manager/virt-manager/connections" = {
-      autoconnect = ["qemu:///system"];
-      uris = ["qemu:///system"];
+      autoconnect = [ "qemu:///system" ];
+      uris = [ "qemu:///system" ];
     };
   };
 

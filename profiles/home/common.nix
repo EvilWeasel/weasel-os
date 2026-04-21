@@ -6,11 +6,13 @@
   lib,
   username,
   ...
-}: let
+}:
+let
   inherit (import ../../hosts/${host}/variables.nix) gitEmail gitSigningKey gitUsername;
   repoDefaultPath = "${config.home.homeDirectory}/weasel-os";
   signingEnabled = gitSigningKey != "";
-in {
+in
+{
   nixpkgs.config = {
     allowUnfree = true;
     allowUnfreePredicate = _: true;
@@ -22,9 +24,14 @@ in {
     stateVersion = "24.11";
     packages = [
       (import ../../scripts/weasel-shell-helpers.nix {
-        inherit config host pkgs pkgsUnstable;
+        inherit
+          config
+          host
+          pkgs
+          pkgsUnstable
+          ;
       })
-      (import ../../scripts/web-search.nix {inherit pkgs;})
+      (import ../../scripts/web-search.nix { inherit pkgs; })
       pkgs.age
       pkgs.sops
     ];
@@ -39,8 +46,8 @@ in {
   programs.git = {
     enable = true;
     settings.user =
-      lib.optionalAttrs (gitUsername != "") {name = gitUsername;}
-      // lib.optionalAttrs (gitEmail != "") {email = gitEmail;};
+      lib.optionalAttrs (gitUsername != "") { name = gitUsername; }
+      // lib.optionalAttrs (gitEmail != "") { email = gitEmail; };
     signing = lib.mkIf signingEnabled {
       key = gitSigningKey;
       signByDefault = true;

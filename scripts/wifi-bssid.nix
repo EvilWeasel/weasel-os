@@ -1,4 +1,4 @@
-{pkgs}:
+{ pkgs }:
 
 pkgs.writeShellScriptBin "wifi-bssid" ''
   # Print the BSSID of the first connected wireless interface.

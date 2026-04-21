@@ -1,4 +1,5 @@
-{pkgs, ...}: {
+{ pkgs, ... }:
+{
   imports = [
     ../../programs/neovim.nix
     ../../programs/terminal-stack.nix

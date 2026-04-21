@@ -3,9 +3,11 @@
   pkgs,
   pkgsUnstable,
   ...
-}: let
+}:
+let
   sshInitKeysCmd = "systemctl --user start ssh-agent.service >/dev/null 2>&1; export SSH_AUTH_SOCK=/run/user/$UID/ssh-agent; find \"$HOME/.ssh\" -maxdepth 1 -type f ! -name '*.pub' ! -name 'authorized_keys*' ! -name 'known_hosts*' ! -name 'config' -exec sh -c 'for key do ssh-keygen -yf \"$key\" >/dev/null 2>&1 && ssh-add \"$key\"; done' sh {} +";
-in {
+in
+{
   home = {
     file.".npmrc".text = ''
       prefix=${config.home.homeDirectory}/.npm-global

@@ -1,6 +1,8 @@
-{host, lib, ...}: let
+{ host, lib, ... }:
+let
   inherit (import ./variables.nix) diskDevice;
-in {
+in
+{
   disko.devices.disk.main = {
     type = "disk";
     device = lib.mkDefault diskDevice;
@@ -28,27 +30,42 @@ in {
           size = "100%";
           content = {
             type = "btrfs";
-            extraArgs = ["-f"];
+            extraArgs = [ "-f" ];
             subvolumes = {
               "/root" = {
                 mountpoint = "/";
-                mountOptions = ["compress=zstd" "noatime"];
+                mountOptions = [
+                  "compress=zstd"
+                  "noatime"
+                ];
               };
               "/nix" = {
                 mountpoint = "/nix";
-                mountOptions = ["compress=zstd" "noatime"];
+                mountOptions = [
+                  "compress=zstd"
+                  "noatime"
+                ];
               };
               "/home" = {
                 mountpoint = "/home";
-                mountOptions = ["compress=zstd" "noatime"];
+                mountOptions = [
+                  "compress=zstd"
+                  "noatime"
+                ];
               };
               "/persist" = {
                 mountpoint = "/persist";
-                mountOptions = ["compress=zstd" "noatime"];
+                mountOptions = [
+                  "compress=zstd"
+                  "noatime"
+                ];
               };
               "/log" = {
                 mountpoint = "/var/log";
-                mountOptions = ["compress=zstd" "noatime"];
+                mountOptions = [
+                  "compress=zstd"
+                  "noatime"
+                ];
               };
             };
           };

@@ -1,4 +1,4 @@
-{pkgs}:
+{ pkgs }:
 pkgs.writeShellScriptBin "weasel-dms-session" ''
   set -euo pipefail
 

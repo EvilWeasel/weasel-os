@@ -1,7 +1,8 @@
 {
   pkgs,
   ...
-}: {
+}:
+{
   users.users.evilweasel = {
     isNormalUser = true;
     description = "evilweasel";

@@ -1,4 +1,10 @@
-{config, lib, modulesPath, ...}: {
+{
+  config,
+  lib,
+  modulesPath,
+  ...
+}:
+{
   imports = [
     (modulesPath + "/installer/scan/not-detected.nix")
   ];
@@ -12,9 +18,9 @@
     "sd_mod"
     "alcor"
   ];
-  boot.initrd.kernelModules = [];
-  boot.kernelModules = ["kvm-intel"];
-  boot.extraModulePackages = [];
+  boot.initrd.kernelModules = [ ];
+  boot.kernelModules = [ "kvm-intel" ];
+  boot.extraModulePackages = [ ];
 
   fileSystems."/" = {
     device = "/dev/disk/by-uuid/631e5c36-32a7-4e59-ac97-d7bd7fdccd1f";

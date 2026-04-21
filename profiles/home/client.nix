@@ -1,4 +1,5 @@
-{lib, pkgs, ...}: {
+{ lib, pkgs, ... }:
+{
   home.packages = [
     pkgs.deskflow
     pkgs.krita

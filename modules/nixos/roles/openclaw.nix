@@ -4,9 +4,11 @@
   lib,
   pkgs,
   ...
-}: let
+}:
+let
   cfg = config.weasel.roles.openclaw;
-in {
+in
+{
   options.weasel.roles.openclaw = {
     enable = lib.mkEnableOption "OpenClaw server role";
     gatewayTokenFile = lib.mkOption {
@@ -22,7 +24,7 @@ in {
   };
 
   config = lib.mkIf cfg.enable {
-    users.groups.openclaw = {};
+    users.groups.openclaw = { };
     users.users.openclaw = {
       isNormalUser = true;
       description = "OpenClaw service user";
@@ -39,7 +41,7 @@ in {
     ];
 
     home-manager.users.openclaw = {
-      imports = [inputs.nix-openclaw.homeManagerModules.openclaw];
+      imports = [ inputs.nix-openclaw.homeManagerModules.openclaw ];
 
       home = {
         username = "openclaw";

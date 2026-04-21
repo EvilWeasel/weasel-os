@@ -1,11 +1,12 @@
-{config, lib, ...}: let
+{ config, lib, ... }:
+let
   repoPath = "${config.home.homeDirectory}/weasel-os";
   matugenRoot = "${repoPath}/programs/matugen";
   configText =
-    builtins.replaceStrings ["@REPO_ROOT@" "@HOME@"]
-    [repoPath config.home.homeDirectory]
-    (builtins.readFile ./matugen/config.toml);
-in {
+    builtins.replaceStrings [ "@REPO_ROOT@" "@HOME@" ] [ repoPath config.home.homeDirectory ]
+      (builtins.readFile ./matugen/config.toml);
+in
+{
   xdg.configFile = {
     "matugen/config.toml" = {
       text = configText;
@@ -41,7 +42,7 @@ in {
     };
   };
 
-  home.activation.ensureMatugenDirectories = lib.hm.dag.entryAfter ["writeBoundary"] ''
+  home.activation.ensureMatugenDirectories = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
     mkdir -p \
       "$HOME/.config/matugen/templates" \
       "$HOME/.config/rofi" \
@@ -55,7 +56,7 @@ in {
       "$HOME/.config/DankMaterialShell"
   '';
 
-  home.activation.ensureMutableQtConfigs = lib.hm.dag.entryAfter ["writeBoundary"] ''
+  home.activation.ensureMutableQtConfigs = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
     install -d "$HOME/.config/qt5ct" "$HOME/.config/qt6ct"
 
     for target in \

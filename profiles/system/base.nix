@@ -6,15 +6,18 @@
   username,
   inputs,
   ...
-}: let
+}:
+let
   inherit (import ../../hosts/${host}/variables.nix) keyboardLayout;
   alarmClockApplet = pkgs.alarm-clock-applet.overrideAttrs (old: {
-    nativeBuildInputs = (old.nativeBuildInputs or []) ++ [pkgs.makeWrapper];
+    nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ pkgs.makeWrapper ];
     postFixup = (old.postFixup or "") + ''
       wrapProgram "$out/bin/alarm-clock-applet" \
-        --prefix GST_PLUGIN_SYSTEM_PATH_1_0 : ${lib.makeSearchPath "lib/gstreamer-1.0" [
-        pkgs.gst_all_1.gst-plugins-good
-      ]}
+        --prefix GST_PLUGIN_SYSTEM_PATH_1_0 : ${
+          lib.makeSearchPath "lib/gstreamer-1.0" [
+            pkgs.gst_all_1.gst-plugins-good
+          ]
+        }
     '';
   });
   clientSystemPackages = with pkgs; [
@@ -118,7 +121,8 @@
     neovide
     tuigreet
   ];
-in {
+in
+{
   imports = [
     inputs.dms.nixosModules.greeter
     ../../modules/canbus.nix
@@ -132,8 +136,8 @@ in {
     ../../modules/local-hardware-clock.nix
   ];
   boot = {
-    kernelModules = ["v4l2loopback"];
-    extraModulePackages = [config.boot.kernelPackages.v4l2loopback];
+    kernelModules = [ "v4l2loopback" ];
+    extraModulePackages = [ config.boot.kernelPackages.v4l2loopback ];
     extraModprobeConfig = ''
       options v4l2loopback devices=1 video_nr=1 card_label="OBS Cam" exclusive_caps=1
     '';
@@ -276,12 +280,12 @@ in {
       noto-fonts-cjk-sans
       font-awesome
       symbola
-    material-icons
-    monaspace
-    nerd-fonts.monaspace
-    adwaita-qt
-    adwaita-qt6
-  ];
+      material-icons
+      monaspace
+      nerd-fonts.monaspace
+      adwaita-qt
+      adwaita-qt6
+    ];
     enableDefaultPackages = true;
     fontconfig = {
       enable = true;
@@ -332,11 +336,11 @@ in {
   };
 
   systemd.services.greetd = {
-    after = ["systemd-udev-settle.service"];
-    wants = ["systemd-udev-settle.service"];
+    after = [ "systemd-udev-settle.service" ];
+    wants = [ "systemd-udev-settle.service" ];
   };
   systemd.services.flatpak-repo = {
-    path = [pkgs.flatpak];
+    path = [ pkgs.flatpak ];
     script = ''
       flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
     '';

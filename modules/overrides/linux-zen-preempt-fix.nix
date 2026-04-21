@@ -2,7 +2,8 @@
   lib,
   pkgs,
   ...
-}: {
+}:
+{
   # Temporary workaround for nixpkgs linux_zen PREEMPT regression on release-25.11.
   # Remove once upstream issue/PR is resolved:
   # - https://github.com/NixOS/nixpkgs/issues/498620

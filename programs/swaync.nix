@@ -1,4 +1,5 @@
-{...}: {
+{ ... }:
+{
   home.file.".config/swaync/config.json".text = ''
     {
       "$schema": "/etc/xdg/swaync/configSchema.json",

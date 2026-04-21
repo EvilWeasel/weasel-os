@@ -1,7 +1,14 @@
-{config, host, pkgs, pkgsUnstable, ...}:
+{
+  config,
+  host,
+  pkgs,
+  pkgsUnstable,
+  ...
+}:
 let
   repoDefaultPath = "${config.home.homeDirectory}/weasel-os";
-  mkScript = {name, body}:
+  mkScript =
+    { name, body }:
     pkgs.writeShellScriptBin name ''
       set -euo pipefail
       ${body}
@@ -13,7 +20,7 @@ pkgs.symlinkJoin {
     (import ./weasel-rebuild.nix {
       inherit config host pkgs;
     })
-    (import ./wifi-bssid.nix {inherit pkgs;})
+    (import ./wifi-bssid.nix { inherit pkgs; })
     (mkScript {
       name = "sv";
       body = "exec ${pkgs.sudo}/bin/sudo ${pkgs.neovim}/bin/nvim \"$@\"";

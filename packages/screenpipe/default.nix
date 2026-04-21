@@ -106,85 +106,64 @@ let
     hash = "sha256-Gtv42FHImYuOHo6shySiIQDbcNeqGciLy9tmKHZ+BnY=";
   };
 
-  src = runCommand "screenpipe-source-${version}" {} ''
-    cp -R ${upstreamSrc} "$out"
-    chmod -R +w "$out"
+  src = runCommand "screenpipe-source-${version}" { } ''
+        cp -R ${upstreamSrc} "$out"
+        chmod -R +w "$out"
 
-    ${python3}/bin/python <<'PY'
-import os
-from pathlib import Path
+        ${python3}/bin/python <<'PY'
+    import os
+    from pathlib import Path
 
-cargo_toml_path = Path(os.environ["out"]) / "apps/screenpipe-app-tauri/src-tauri/Cargo.toml"
-lock_path = Path(os.environ["out"]) / "apps/screenpipe-app-tauri/src-tauri/Cargo.lock"
-event_driven_capture_path = Path(os.environ["out"]) / "crates/screenpipe-engine/src/event_driven_capture.rs"
-removed = {
-    "nokhwa-bindings-macos",
-    "nokhwa-core",
-    "tauri-nspanel",
-    "windows-icons",
-}
+    cargo_toml_path = Path(os.environ["out"]) / "apps/screenpipe-app-tauri/src-tauri/Cargo.toml"
+    lock_path = Path(os.environ["out"]) / "apps/screenpipe-app-tauri/src-tauri/Cargo.lock"
+    event_driven_capture_path = Path(os.environ["out"]) / "crates/screenpipe-engine/src/event_driven_capture.rs"
+    removed = {
+        "nokhwa-bindings-macos",
+        "nokhwa-core",
+        "tauri-nspanel",
+        "windows-icons",
+    }
 
-cargo_toml = cargo_toml_path.read_text()
-for needle in (
-    'nokhwa-bindings-macos = { git = "https://github.com/CapSoftware/nokhwa", rev = "0d3d1f30a78b" }\n',
-    'tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2" }\n',
-    'windows-icons = { git = "https://github.com/tribhuwan-kumar/windows-icons.git" }\n',
-):
-    cargo_toml = cargo_toml.replace(needle, "")
-cargo_toml_path.write_text(cargo_toml)
+    cargo_toml = cargo_toml_path.read_text()
+    for needle in (
+        'nokhwa-bindings-macos = { git = "https://github.com/CapSoftware/nokhwa", rev = "0d3d1f30a78b" }\n',
+        'tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", branch = "v2" }\n',
+        'windows-icons = { git = "https://github.com/tribhuwan-kumar/windows-icons.git" }\n',
+    ):
+        cargo_toml = cargo_toml.replace(needle, "")
+    cargo_toml_path.write_text(cargo_toml)
 
-sections = lock_path.read_text().split("\n[[package]]\n")
-rewritten = [sections[0]]
+    sections = lock_path.read_text().split("\n[[package]]\n")
+    rewritten = [sections[0]]
 
-for section in sections[1:]:
-    name = None
-    for line in section.splitlines():
-        if line.startswith('name = "'):
-            name = line[len('name = "'):-1]
-            break
-    if name in removed:
-        continue
-
-    if name == "screenpipe-app":
-        lines = []
+    for section in sections[1:]:
+        name = None
         for line in section.splitlines():
-            stripped = line.strip()
-            if stripped in {
-                '"nokhwa-bindings-macos",',
-                '"tauri-nspanel",',
-                '"windows-icons",',
-            }:
-                continue
-            lines.append(line)
-        section = "\n".join(lines)
+            if line.startswith('name = "'):
+                name = line[len('name = "'):-1]
+                break
+        if name in removed:
+            continue
 
-    rewritten.append(section)
+        if name == "screenpipe-app":
+            lines = []
+            for line in section.splitlines():
+                stripped = line.strip()
+                if stripped in {
+                    '"nokhwa-bindings-macos",',
+                    '"tauri-nspanel",',
+                    '"windows-icons",',
+                }:
+                    continue
+                lines.append(line)
+            section = "\n".join(lines)
 
-lock_path.write_text("\n[[package]]\n".join(rewritten))
+        rewritten.append(section)
 
-event_driven_capture = event_driven_capture_path.read_text()
-old = """        match do_capture(
-            &db,
-            &monitor,
-            monitor_id,
-            &device_name,
-            &snapshot_writer,
-            &tree_walker_config,
-            &CaptureTrigger::Manual,
-            use_pii_removal,
-            pause_on_drm_content,
-            &languages,
-            None, // first capture — no previous hash
-            last_db_write,
-            None, // first capture — no elements ref
-            &mut walk_budget,
-        )
-        .await
-        {
-"""
-new = """        match tokio::time::timeout(
-            Duration::from_secs(15),
-            do_capture(
+    lock_path.write_text("\n[[package]]\n".join(rewritten))
+
+    event_driven_capture = event_driven_capture_path.read_text()
+    old = """        match do_capture(
                 &db,
                 &monitor,
                 monitor_id,
@@ -199,96 +178,117 @@ new = """        match tokio::time::timeout(
                 last_db_write,
                 None, // first capture — no elements ref
                 &mut walk_budget,
-            ),
-        )
-        .await
-        {
-            Ok(Ok(output)) => {
-"""
-if old not in event_driven_capture:
-    raise SystemExit("failed to patch startup capture block in event_driven_capture.rs")
-event_driven_capture = event_driven_capture.replace(old, new, 1)
-event_driven_capture = event_driven_capture.replace(
-    """            Ok(output) => {
-""",
-    "",
-    1,
-)
-event_driven_capture = event_driven_capture.replace(
-    """            Err(e) => {
-                warn!("startup capture failed for monitor {}: {}", monitor_id, e);
-            }
-""",
-    """            Ok(Err(e)) => {
-                warn!("startup capture failed for monitor {}: {}", monitor_id, e);
-            }
-            Err(_) => {
-                warn!(
-                    "startup capture timed out for monitor {} after 15s",
-                    monitor_id
-                );
-            }
-""",
-    1,
-)
-event_driven_capture_path.write_text(event_driven_capture)
-PY
+            )
+            .await
+            {
+    """
+    new = """        match tokio::time::timeout(
+                Duration::from_secs(15),
+                do_capture(
+                    &db,
+                    &monitor,
+                    monitor_id,
+                    &device_name,
+                    &snapshot_writer,
+                    &tree_walker_config,
+                    &CaptureTrigger::Manual,
+                    use_pii_removal,
+                    pause_on_drm_content,
+                    &languages,
+                    None, // first capture — no previous hash
+                    last_db_write,
+                    None, // first capture — no elements ref
+                    &mut walk_budget,
+                ),
+            )
+            .await
+            {
+                Ok(Ok(output)) => {
+    """
+    if old not in event_driven_capture:
+        raise SystemExit("failed to patch startup capture block in event_driven_capture.rs")
+    event_driven_capture = event_driven_capture.replace(old, new, 1)
+    event_driven_capture = event_driven_capture.replace(
+        """            Ok(output) => {
+    """,
+        "",
+        1,
+    )
+    event_driven_capture = event_driven_capture.replace(
+        """            Err(e) => {
+                    warn!("startup capture failed for monitor {}: {}", monitor_id, e);
+                }
+    """,
+        """            Ok(Err(e)) => {
+                    warn!("startup capture failed for monitor {}: {}", monitor_id, e);
+                }
+                Err(_) => {
+                    warn!(
+                        "startup capture timed out for monitor {} after 15s",
+                        monitor_id
+                    );
+                }
+    """,
+        1,
+    )
+    event_driven_capture_path.write_text(event_driven_capture)
+    PY
   '';
 
   cargoTauri = rustPlatform.buildRustPackage (finalAttrs: {
-      pname = "tauri";
-      version = "2.10.0";
-      auditable = false;
+    pname = "tauri";
+    version = "2.10.0";
+    auditable = false;
 
-      src = fetchFromGitHub {
-        owner = "tauri-apps";
-        repo = "tauri";
-        tag = "tauri-cli-v${finalAttrs.version}";
-        hash = "sha256-aaUr+6CiH+5e03ZzPexMTYavTmJRKqw/5PnyZqP2/f0=";
+    src = fetchFromGitHub {
+      owner = "tauri-apps";
+      repo = "tauri";
+      tag = "tauri-cli-v${finalAttrs.version}";
+      hash = "sha256-aaUr+6CiH+5e03ZzPexMTYavTmJRKqw/5PnyZqP2/f0=";
+    };
+
+    cargoDeps = rustPlatform.fetchCargoVendor {
+      inherit (finalAttrs)
+        pname
+        version
+        src
+        ;
+
+      hash = "sha256-YoHQNqIfwV0zt9iZ7aKlW75KXPyeFgqkjEU5s980KW4=";
+    };
+
+    nativeBuildInputs = [
+      pkg-config
+    ];
+
+    buildInputs = [
+      bzip2
+      xz
+    ]
+    ++ lib.optionals stdenv.hostPlatform.isLinux [
+      zstd
+    ];
+
+    cargoBuildFlags = [
+      "--package"
+      "tauri-cli"
+    ];
+    cargoTestFlags = finalAttrs.cargoBuildFlags;
+
+    env = lib.optionalAttrs stdenv.hostPlatform.isLinux {
+      ZSTD_SYS_USE_PKG_CONFIG = true;
+    };
+
+    passthru = {
+      inherit (cargo-tauri)
+        gst-plugin
+        ;
+
+      hook = cargo-tauri.passthru.hook.override {
+        cargo-tauri = finalAttrs.finalPackage;
       };
-
-      cargoDeps = rustPlatform.fetchCargoVendor {
-        inherit (finalAttrs)
-          pname
-          version
-          src
-          ;
-
-        hash = "sha256-YoHQNqIfwV0zt9iZ7aKlW75KXPyeFgqkjEU5s980KW4=";
-      };
-
-      nativeBuildInputs = [
-        pkg-config
-      ];
-
-      buildInputs = [
-        bzip2
-        xz
-      ]
-      ++ lib.optionals stdenv.hostPlatform.isLinux [
-        zstd
-      ];
-
-      cargoBuildFlags = [
-        "--package"
-        "tauri-cli"
-      ];
-      cargoTestFlags = finalAttrs.cargoBuildFlags;
-
-      env = lib.optionalAttrs stdenv.hostPlatform.isLinux {
-        ZSTD_SYS_USE_PKG_CONFIG = true;
-      };
-
-      passthru = {
-        inherit (cargo-tauri)
-          gst-plugin
-          ;
-
-        hook = cargo-tauri.passthru.hook.override {
-          cargo-tauri = finalAttrs.finalPackage;
-        };
-      };
-    });
+    };
+  });
 
   nodeModules = importNpmLock.buildNodeModules {
     npmRoot = ./npm;
@@ -338,7 +338,8 @@ rustPlatform.buildRustPackage rec {
     xz
     zstd
     xdotool
-  ] ++ runtimeLibraries;
+  ]
+  ++ runtimeLibraries;
 
   env = {
     CARGO_BUILD_JOBS = "16";
@@ -424,13 +425,15 @@ rustPlatform.buildRustPackage rec {
     ln -sf ${bun}/bin/bun "$out/bin/bun"
 
     wrapProgram "$screenpipeBin" \
-      --prefix PATH : ${lib.makeBinPath [
-        bun
-        desktop-file-utils
-        ffmpeg
-        tesseract5
-        xdotool
-      ]} \
+      --prefix PATH : ${
+        lib.makeBinPath [
+          bun
+          desktop-file-utils
+          ffmpeg
+          tesseract5
+          xdotool
+        ]
+      } \
       --prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath runtimeLibraries} \
       --set TESSDATA_PREFIX "${tesseract5}/share/tessdata"
 

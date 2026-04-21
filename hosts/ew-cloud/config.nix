@@ -3,11 +3,13 @@
   inputs,
   lib,
   ...
-}: let
+}:
+let
   secretFile = ../../secrets/hosts/ew-cloud/secrets.yaml;
   hasSecrets = builtins.pathExists secretFile;
   inherit (import ./variables.nix) grubDevice uplink;
-in {
+in
+{
   imports = [
     ../../profiles/system/common.nix
     ../../profiles/system/server.nix

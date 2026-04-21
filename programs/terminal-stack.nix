@@ -3,7 +3,8 @@
   lib,
   pkgsUnstable,
   ...
-}: let
+}:
+let
   repoDefaultPath = "${config.home.homeDirectory}/weasel-os";
 
   shellCommon = ''
@@ -25,7 +26,8 @@
       printf '%s\n' "${repoDefaultPath}"
     }
   '';
-in {
+in
+{
   home.sessionVariables = {
     EDITOR = "nvim";
     VISUAL = "nvim";
@@ -167,33 +169,33 @@ in {
         input.prepend_keymap = [
           {
             run = "close";
-            on = ["<C-q>"];
+            on = [ "<C-q>" ];
           }
           {
             run = "close --submit";
-            on = ["<Enter>"];
+            on = [ "<Enter>" ];
           }
           {
             run = "escape";
-            on = ["<Esc>"];
+            on = [ "<Esc>" ];
           }
           {
             run = "backspace";
-            on = ["<Backspace>"];
+            on = [ "<Backspace>" ];
           }
         ];
         manager.prepend_keymap = [
           {
             run = "escape";
-            on = ["<Esc>"];
+            on = [ "<Esc>" ];
           }
           {
             run = "quit";
-            on = ["q"];
+            on = [ "q" ];
           }
           {
             run = "close";
-            on = ["<C-q>"];
+            on = [ "<C-q>" ];
           }
         ];
       };

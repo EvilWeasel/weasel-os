@@ -2,7 +2,8 @@
   config,
   lib,
   ...
-}: {
+}:
+{
   drivers.nvidia.enable = true;
 
   drivers.nvidia-prime = {
@@ -11,7 +12,7 @@
     nvidiaBusID = "PCI:1:0:0";
   };
 
-  services.xserver.videoDrivers = ["nvidia"];
+  services.xserver.videoDrivers = [ "nvidia" ];
 
   hardware = {
     enableRedistributableFirmware = true;

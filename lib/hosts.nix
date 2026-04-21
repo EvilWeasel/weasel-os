@@ -1,9 +1,10 @@
-{inputs}: {
+{ inputs }:
+{
   nixy-desktop = {
     class = "client";
     system = "x86_64-linux";
     username = "evilweasel";
-    extraModules = [];
+    extraModules = [ ];
   };
 
   nixy-laptop = {
@@ -37,6 +38,6 @@
     class = "server";
     system = "x86_64-linux";
     username = "evilweasel";
-    extraModules = [];
+    extraModules = [ ];
   };
 }

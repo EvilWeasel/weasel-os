@@ -1,4 +1,5 @@
-{...}: {
+{ ... }:
+{
   programs = {
     "dank-material-shell" = {
       enableSystemMonitoring = false;
