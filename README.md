@@ -1,6 +1,7 @@
 # WeaselOS
 
 WeaselOS is my personal NixOS flake for `nixy-laptop` and `nixy-desktop`.
+The flake is composed through `flake-parts`, with host data flowing into reusable modules instead of per-host handwritten wiring.
 The current desktop stack is Niri plus Dank Material Shell (DMS), with shared system and Home Manager profiles layered underneath the host directories.
 
 This repo is optimized for three workflows:
@@ -12,6 +13,8 @@ This repo is optimized for three workflows:
 ## Repository Layout
 
 - `hosts/<host>/`: host entrypoints and machine-specific facts.
+- `flake/modules/`: `flake-parts` modules and top-level output wiring.
+- `lib/`: host composition helpers used by the flake-parts layer.
 - `profiles/system/`: shared NixOS policy.
 - `profiles/home/`: shared Home Manager policy.
 - `programs/`: program-specific Home Manager modules.
@@ -154,7 +157,7 @@ nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.b
 
 ## Status
 
-The repo is mid-migration toward the target architecture documented in:
+The repo now uses a dendritic `flake-parts` composition layer and is still aligned with the target architecture documented in:
 
 - `docs/migration-plan.md`
 - `docs/target-architecture.md`

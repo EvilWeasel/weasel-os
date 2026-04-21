@@ -6,8 +6,9 @@
   imports = [
     ../../profiles/system/common.nix
     ../../profiles/system/base.nix
+    ../../profiles/system/client.nix
     ../../profiles/system/laptop.nix
-    ../../modules/networking/internal-dns.nix
+    # ../../modules/networking/internal-dns.nix
     ./hardware.nix
     ./users.nix
   ];

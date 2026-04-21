@@ -218,6 +218,18 @@ Append-only log of implementation lessons for future agents working in this repo
 - Date: 2026-03-21
 - Change: Reworked `modules/displaylink.nix` to use the official NixOS DisplayLink module path (`services.xserver.videoDrivers = [ "displaylink" ]`) for all laptop hosts, but overrode `pkgs.displaylink.src` with a fixed-output `fetchurl` to the Synaptics 6.2 archive so the proprietary driver builds without a manual `requireFile` prefetch step.
 - Pitfall/Root cause: The earlier half-measure only enabled `evdi`, which did not activate the full DisplayLink userspace stack; the real fix is to keep the upstream module behavior and replace only the source acquisition step that was failing on the EULA gate.
+
+### 2026-04-20
+- Date: 2026-04-20
+- Change: Wrapped `alarm-clock-applet` so `GST_PLUGIN_SYSTEM_PATH_1_0` also includes `gst-plugins-good`, which provides `autoaudiosink` for the alarm preview/playback path.
+- Pitfall/Root cause: The package wrapper already set `GST_PLUGIN_SYSTEM_PATH_1_0`, but only to `gstreamer` plus `gst-plugins-base`; `autoaudiosink` lives in `gst-plugins-good`, so the app failed with `No such element or plugin 'autoaudiosink'`.
+- Verification: `GST_PLUGIN_SYSTEM_PATH_1_0=$(nix eval --raw .#nixosConfigurations.nixy-desktop.pkgs.gst_all_1.gst-plugins-base.outPath)/lib/gstreamer-1.0 $(nix eval --raw .#nixosConfigurations.nixy-desktop.pkgs.gst_all_1.gstreamer.outPath)/bin/gst-inspect-1.0 autoaudiosink`, `nix-instantiate --parse profiles/system/base.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`, and `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`.
+
+### 2026-04-20 (formatter comparison fixture)
+- Date: 2026-04-20
+- Change: Added a temporary `fmt-eval.nix` fixture and formatted it with `nixfmt-rfc-style`, `alejandra`, and `nixpkgs-fmt` to compare layout, line breaking, and attrset/lambda style on the same input.
+- Pitfall/Root cause: `alejandra` and `nixpkgs-fmt` rewrite in place, while `nixfmt-rfc-style` also needed a real file input; using throwaway working copies avoids accidentally destroying the baseline fixture.
+- Verification: `nix run nixpkgs#nixfmt-rfc-style -- fmt-eval.nixfmt-rfc-style.work.nix`, `nix run nixpkgs#alejandra -- fmt-eval.alejandra.work.nix`, and `nix run nixpkgs#nixpkgs-fmt -- fmt-eval.nixpkgs-fmt.work.nix`.
 - Verification: `nix-prefetch-url --name displaylink-620.zip https://www.synaptics.com/sites/default/files/exe_files/2025-09/DisplayLink%20USB%20Graphics%20Software%20for%20Ubuntu6.2-EXE.zip`, `nix-instantiate --parse modules/displaylink.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix build --dry-run --no-link .#nixosConfigurations.nixy-laptop.config.system.build.toplevel`, `nix build --no-link -L .#nixosConfigurations.nixy-laptop.config.system.build.toplevel`, `nix eval --no-write-lock-file .#nixosConfigurations.michapc.config.system.build.toplevel.drvPath`, and `nix eval --no-write-lock-file .#nixosConfigurations.michapc-debug.config.system.build.toplevel.drvPath`
 
 ### 2026-03-21 (audio-aware session debug bundle)
@@ -457,3 +469,57 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Removed the temporary public SSH firewall exception and root key fallback from `ew-cloud` so only the Tailnet interface remains allowed for inbound SSH.
 - Pitfall/Root cause: Once Tailscale is online, leaving public port 22 open is unnecessary exposure. The server baseline already trusts only `tailscale0`, so the remaining task is to reapply that baseline to the host.
 - Verification: `nix-instantiate --parse hosts/ew-cloud/config.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.ew-cloud.config.system.build.toplevel.drvPath`
+
+### 2026-04-17 (deskflow on desktop/laptop only)
+- Date: 2026-04-17
+- Change: Added `pkgs.deskflow` to the shared desktop and laptop Home Manager profiles so `nixy-desktop` and `nixy-laptop` pick it up without affecting server hosts.
+- Pitfall/Root cause: Host-specific desktop packages belong in the `profiles/home/desktop.nix` and `profiles/home/laptop.nix` layers, not in `common.nix`, otherwise servers inherit client-only software.
+- Verification: `nix-instantiate --parse profiles/home/desktop.nix` and `nix-instantiate --parse profiles/home/laptop.nix`
+
+### 2026-04-17 (Sony WF-1000XM5 Bluetooth audio)
+- Date: 2026-04-17
+- Change: Added a client-only Bluetooth audio module that enables Bluetooth on the desktop host, keeps it enabled on the laptop host, turns on BlueZ experimental mode, and pushes WirePlumber Bluetooth roles/codecs toward LE Audio plus native HFP/HSP handling.
+- Pitfall/Root cause: `nixy-desktop` had Bluetooth disabled entirely, and the default A2DP/HFP setup will always trade mic support against playback quality unless the headset can use LE Audio/BAP paths.
+- Verification: `nix-instantiate --parse profiles/system/bluetooth-audio.nix`, `nix-instantiate --parse profiles/system/desktop.nix`, and `nix-instantiate --parse profiles/system/laptop.nix`
+
+### 2026-04-17 (Bluetooth autoswitch refinement)
+- Date: 2026-04-17
+- Change: Enabled WirePlumber’s `bluetooth.autoswitch-to-headset-profile` policy so microphone-using apps can trigger headset-profile switching automatically on the client hosts.
+- Pitfall/Root cause: Manual profile switching in `pavucontrol` is often not the real missing piece; if the headset was paired before BlueZ experimental mode was enabled, it usually needs to be removed and paired again before the new policy/endpoint set is visible.
+- Verification: `nix-instantiate --parse profiles/system/bluetooth-audio.nix`
+
+### 2026-04-17 (Bluetooth stack uplift for WF-1000XM5)
+- Date: 2026-04-17
+- Change: Switched the client hosts to `pkgsUnstable` BlueZ, PipeWire, and WirePlumber in the Bluetooth audio module so the WF-1000XM5 can negotiate newer Bluetooth audio paths on NixOS.
+- Pitfall/Root cause: The stable 25.11 stack exposed only classic A2DP/HFP profiles in practice; the missing LE Audio path was not fixable from `pavucontrol` alone.
+- Verification: `nix-instantiate --parse profiles/system/bluetooth-audio.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`
+
+### 2026-04-17 (Bluetooth controller settings for LE pairing)
+- Date: 2026-04-17
+- Change: Added BlueZ main.conf settings for `ControllerMode = dual`, `Privacy = device`, `KernelExperimental = true`, and `AutoEnable = true` on the client Bluetooth module to remove common LE pairing blockers.
+- Pitfall/Root cause: Even with a modern userspace stack, LE Audio can stay hidden if BlueZ is not allowed to use dual-mode/experimental controller behavior or if privacy defaults prevent LE identity matching.
+- Verification: `nix-instantiate --parse profiles/system/bluetooth-audio.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`
+
+### 2026-04-17 (Enable bluetoothd kernel experimental features)
+- Date: 2026-04-17
+- Change: Overrode `systemd.services.bluetooth` to start `bluetoothd` with `-E -K` in the client Bluetooth module.
+- Pitfall/Root cause: The runtime logs showed `profiles/audio/bap.c:bap_adapter_probe() BAP requires ISO Socket which is not enabled`, while the shipped unit still launched `bluetoothd -f /etc/bluetooth/main.conf` without `-K`; the daemon never toggled the kernel ISO-socket experimental feature, so LE Audio/BAP never came up even though the headset advertised LE Audio UUIDs.
+- Verification: `systemctl cat bluetooth.service`, `bluetoothctl info 80:99:E7:D5:DA:B2`, `journalctl -b -u bluetooth --no-pager | rg -i 'bap|iso'`, `nix-instantiate --parse profiles/system/bluetooth-audio.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`
+
+### 2026-04-20 (docs aligned with flake-parts)
+- Date: 2026-04-20
+- Change: Updated `README.md`, `docs/target-architecture.md`, and `docs/migration-plan.md` to explicitly describe the dendritic `flake-parts` composition layer; updated `AGENTS.md` to mention `flake/modules/` and `lib/`, and replaced the German transliteration rule with umlaut-preserving wording.
+- Pitfall/Root cause: The repo already had the modular flake wiring, but the user-facing docs still read as if the old manual host wiring was the reference model; `AGENTS.md` also still carried an ASCII-only German instruction.
+- Verification: `rg -n "flake parts|dendritic|modular|flake module|flake-part|parts" README.md docs/*.md AGENTS.md flake.nix flake/modules/*.nix`, `sed -n '1,220p' README.md`, `sed -n '1,220p' docs/target-architecture.md`, `sed -n '1,220p' docs/migration-plan.md`, `sed -n '1,220p' AGENTS.md`
+
+### 2026-04-20 (krita on all client hosts)
+- Date: 2026-04-20
+- Change: Added `pkgs.krita` to the shared desktop and laptop Home Manager profiles so all non-server hosts inherit it, including the `michapc` variants through the laptop profile chain.
+- Pitfall/Root cause: The cleanest place for a client-only app is the shared client profiles, not individual host files; otherwise `nixy-desktop`, `nixy-laptop`, and the derived `michapc` hosts drift apart.
+- Verification: `nix-instantiate --parse profiles/home/desktop.nix`, `nix-instantiate --parse profiles/home/laptop.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.michapc.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.michapc-debug.config.system.build.toplevel.drvPath`
+
+### 2026-04-20 (shared client modules)
+- Date: 2026-04-20
+- Change: Introduced shared `profiles/home/client.nix` and `profiles/system/client.nix` modules, moved common client Home Manager state there (`deskflow`, `krita`, DMS defaults, and the shared VS Code baseline), and reduced the desktop/laptop profiles to their host-specific deltas.
+- Pitfall/Root cause: New flake files must be staged before git-backed Nix evaluation can see them; the first `nix eval` run failed until the new client modules were added to the index.
+- Verification: `nix-instantiate --parse profiles/home/client.nix`, `nix-instantiate --parse profiles/system/client.nix`, `nix-instantiate --parse profiles/home/desktop.nix`, `nix-instantiate --parse profiles/home/laptop.nix`, `nix-instantiate --parse profiles/system/desktop.nix`, `nix-instantiate --parse profiles/system/laptop.nix`, `nix-instantiate --parse hosts/nixy-desktop/home.nix`, `nix-instantiate --parse hosts/nixy-laptop/home.nix`, `nix-instantiate --parse hosts/nixy-desktop/config.nix`, `nix-instantiate --parse hosts/nixy-laptop/config.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.michapc.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.michapc-debug.config.system.build.toplevel.drvPath`

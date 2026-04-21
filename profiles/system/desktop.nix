@@ -25,13 +25,7 @@
     blueman.enable = false;
   };
 
-  hardware = {
-    openrazer.enable = true;
-    bluetooth = {
-      enable = false;
-      powerOnBoot = false;
-    };
-  };
+  hardware.openrazer.enable = true;
 
   fileSystems."/home/${username}/fastboi" = {
     device = "/dev/disk/by-uuid/c2164edc-6381-4245-8022-bf7c849686f2";

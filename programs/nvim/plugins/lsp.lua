@@ -86,10 +86,10 @@ setup("lua_ls", {
 setup("marksman")
 setup("nixd", {
   settings = {
-    nixd = {
-      formatting = {
-        command = { "alejandra" },
-      },
+      nixd = {
+        formatting = {
+          command = { "nixfmt" },
+        },
       options = {
         nixos = {
           expr = string.format(

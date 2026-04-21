@@ -7,7 +7,7 @@
     env = mkDevEnvironment system;
     screenpipeApp = env.pkgsUnstable.callPackage ../../packages/screenpipe/default.nix {};
   in {
-    formatter = env.pkgsStable.alejandra;
+    formatter = env.pkgsStable.nixfmt-tree;
 
     packages = {
       screenpipe-app = screenpipeApp;

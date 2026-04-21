@@ -8,6 +8,15 @@
   ...
 }: let
   inherit (import ../../hosts/${host}/variables.nix) keyboardLayout;
+  alarmClockApplet = pkgs.alarm-clock-applet.overrideAttrs (old: {
+    nativeBuildInputs = (old.nativeBuildInputs or []) ++ [pkgs.makeWrapper];
+    postFixup = (old.postFixup or "") + ''
+      wrapProgram "$out/bin/alarm-clock-applet" \
+        --prefix GST_PLUGIN_SYSTEM_PATH_1_0 : ${lib.makeSearchPath "lib/gstreamer-1.0" [
+        pkgs.gst_all_1.gst-plugins-good
+      ]}
+    '';
+  });
   clientSystemPackages = with pkgs; [
     protonvpn-gui
     warp-terminal
@@ -32,7 +41,7 @@
     vkd3d-proton
     keymapp
     wally-cli
-    alarm-clock-applet
+    alarmClockApplet
     alacritty
     google-chrome
     zellij
@@ -180,7 +189,7 @@ in {
     xwayland.enable = true;
     gamescope = {
       enable = true;
-      capSysNice = false;
+      capSysNice = true;
     };
     gamemode = {
       enable = true;

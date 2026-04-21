@@ -100,7 +100,7 @@
   "[typescriptreact]": {
     "editor.defaultFormatter": "esbenp.prettier-vscode"
   },
-  "nix.formatterPath": "alejandra",
+  "nix.formatterPath": "nixfmt",
   "extensions.experimental.affinity": {
     "asvetliakov.vscode-neovim": 1
   },
@@ -150,23 +150,6 @@
       "connectTimeout": 30,
       "applicationName": "vscode-mssql",
       "applicationIntent": "ReadWrite",
-      "server": "blain-sql19",
-      "database": "",
-      "user": "ProduktionUser",
-      "password": "",
-      "commandTimeout": 30,
-      "encrypt": "Mandatory",
-      "groupId": "1A7B36EE-AA15-4698-A540-8EE54A5436F1",
-      "profileName": "BlainProdAll",
-      "trustServerCertificate": true,
-      "savePassword": true,
-      "id": "D18EC002-5AD4-4174-8996-20EB2AB47AA1"
-    },
-    {
-      "authenticationType": "SqlLogin",
-      "connectTimeout": 30,
-      "applicationName": "vscode-mssql",
-      "applicationIntent": "ReadWrite",
       "server": "127.0.0.1",
       "database": "BlainProduktion",
       "user": "sa",
@@ -180,6 +163,41 @@
       "id": "9DAAE982-5459-4713-AD0E-C14F1BE87FFB",
       "profileSource": 0,
       "containerName": "blainos-mssql"
+    },
+    {
+      "authenticationType": "SqlLogin",
+      "connectTimeout": 30,
+      "applicationName": "vscode-mssql",
+      "applicationIntent": "ReadWrite",
+      "server": "blain-sql19",
+      "database": "",
+      "user": "BlainReadOnly",
+      "password": "",
+      "commandTimeout": 30,
+      "encrypt": "Mandatory",
+      "groupId": "1A7B36EE-AA15-4698-A540-8EE54A5436F1",
+      "profileName": "BlainREADONLY",
+      "trustServerCertificate": true,
+      "savePassword": true,
+      "id": "D18EC002-5AD4-4174-8996-20EB2AB47AA1",
+      "profileSource": 0
+    },
+    {
+      "authenticationType": "SqlLogin",
+      "connectTimeout": 30,
+      "applicationName": "vscode-mssql",
+      "applicationIntent": "ReadWrite",
+      "server": "blain-sql19",
+      "database": "OL_Blain",
+      "user": "blainuser",
+      "password": "",
+      "commandTimeout": 30,
+      "encrypt": "Mandatory",
+      "groupId": "1A7B36EE-AA15-4698-A540-8EE54A5436F1",
+      "profileName": "BlainAdm",
+      "trustServerCertificate": true,
+      "savePassword": true,
+      "id": "a816a5fe-6a6e-4daa-9a20-13f6a8fbd1f0"
     }
   ],
   "mssql.autoDisableNonTSqlLanguageService": false,

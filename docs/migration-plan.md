@@ -4,6 +4,8 @@ This plan describes how to move the repository from the current state to the tar
 
 The plan is intentionally detailed enough that another agent could continue the work.
 
+Status note: the `flake-parts` and dendritic host-composition layer is already in place; the remaining items in this document track follow-up cleanup and portability work.
+
 ## Scope
 
 ### Primary goals

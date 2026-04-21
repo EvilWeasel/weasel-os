@@ -33,6 +33,7 @@ in {
       (import ../../scripts/web-search.nix {inherit pkgs;})
       (import ../../scripts/rofi-launcher.nix {inherit pkgs;})
       (import ../../scripts/screenshootin.nix {inherit pkgs;})
+      pkgs.helix
       pkgs.adw-gtk3
       pkgs.bibata-cursors
       pkgs.capitaine-cursors
@@ -60,8 +61,10 @@ in {
     ../../programs/matugen.nix
     ../../programs/niri.nix
     ../../programs/neovim.nix
+    ../../programs/helix.nix
     ../../programs/terminal-stack.nix
     ../../programs/vscode.nix
+    ../../programs/zed.nix
     ../../programs/rofi/rofi.nix
     ../../programs/rofi/config-emoji.nix
     ../../programs/rofi/config-long.nix

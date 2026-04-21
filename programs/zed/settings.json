@@ -1,0 +1,13 @@
+{
+  "format_on_save": "on",
+  "languages": {
+    "Nix": {
+      "formatter": {
+        "external": {
+          "command": "nixfmt"
+        }
+      },
+      "format_on_save": "on"
+    }
+  }
+}

@@ -45,3 +45,9 @@ image/x-portable-pixmap=imv.desktop
 image/x-portable-bitmap=imv.desktop
 image/x-xbitmap=imv.desktop
 x-scheme-handler/screenpipe=..screenpipe-app-wrapped-wrapped-handler.desktop
+x-scheme-handler/tg=org.telegram.desktop.desktop
+x-scheme-handler/tonsite=org.telegram.desktop.desktop
+
+[Added Associations]
+x-scheme-handler/tg=org.telegram.desktop.desktop;
+x-scheme-handler/tonsite=org.telegram.desktop.desktop;

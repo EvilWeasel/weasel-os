@@ -14,7 +14,7 @@ in {
       pkgsUnstable = mkPkgs inputs.nixpkgs-unstable system;
 
       devPackages = with pkgsUnstable; [
-        alejandra
+        nixfmt-rfc-style
         atuin
         bash-completion
         bashInteractive

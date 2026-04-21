@@ -13,6 +13,7 @@ in {
     packages = [
       pkgs.mcp-nixos
       pkgs.playwright-driver
+      pkgs.sweethome3d.application
     ];
     sessionPath = [
       "${config.home.homeDirectory}/.npm-global/bin"
@@ -25,15 +26,9 @@ in {
 
   programs = {
     "dank-material-shell" = {
-      enable = true;
-      systemd = {
-        enable = false;
-        restartIfChanged = true;
-      };
       enableSystemMonitoring = true;
       dgop.package = pkgsUnstable.dgop;
       enableVPN = true;
-      enableDynamicTheming = true;
       enableAudioWavelength = true;
       enableCalendarEvents = true;
       plugins = {
@@ -75,10 +70,7 @@ in {
         };
       };
     };
-    vscode = {
-      enable = true;
-      package = pkgsUnstable.vscode.fhs;
-    };
+    vscode.package = pkgsUnstable.vscode.fhs;
     direnv = {
       enable = true;
       nix-direnv.enable = true;

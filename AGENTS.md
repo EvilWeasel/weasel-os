@@ -1,8 +1,10 @@
 # Repository Guidelines
 
 ## Project Structure & Module Organization
-This repo is a Nix flake for two NixOS hosts: `nixy-desktop` and `nixy-laptop`.
+This repo is a Nix flake composed through `flake-parts` for two NixOS hosts: `nixy-desktop` and `nixy-laptop`.
 - `hosts/<host>/`: host entrypoints (`config.nix`, `home.nix`, `hardware.nix`, `users.nix`, `variables.nix`).
+- `flake/modules/`: `flake-parts` modules and output wiring.
+- `lib/`: host composition helpers used by the flake layer.
 - `modules/`: reusable NixOS modules (drivers, certs, hardware support, Apple Silicon overlays).
 - `programs/`: Home Manager program configs (Hyprland, Waybar, Neovim, VS Code, etc.).
 - `packages/`: custom derivations/flake packages.
@@ -11,7 +13,7 @@ This repo is a Nix flake for two NixOS hosts: `nixy-desktop` and `nixy-laptop`.
 
 ## Build, Test, and Development Commands
 Run commands from repo root.
-- `nix fmt`: format all Nix files (uses `alejandra`, also run by `.githooks/pre-commit`).
+- `nix fmt`: format all Nix files (uses `nixfmt-tree`, also run by `.githooks/pre-commit`).
 - `nix flake check`: evaluate flake outputs and basic checks.
 - `nix build .#certs`: build the custom package exposed by this flake.
 - `nix build .#nixosConfigurations.nixy-desktop.config.system.build.toplevel`: validate desktop system build.
@@ -25,8 +27,8 @@ Preferred day-to-day rebuild commands are defined in `hosts/nixy-laptop/home.nix
 Use these aliases when available; use the full `nixos-rebuild`/`nh` commands in non-interactive or fresh environments.
 
 ## Coding Style & Naming Conventions
-- Nix code is formatted with `alejandra`; do not hand-format around it.
-- Use 2-space indentation and trailing-semicolon style that `alejandra` produces.
+- Nix code is formatted with `nixfmt-rfc-style`; do not hand-format around it.
+- Use the standard RFC-style layout that `nixfmt-rfc-style` produces.
 - Prefer lowercase kebab-case file names (examples: `nvidia-drivers.nix`, `local-hardware-clock.nix`).
 - Keep host-specific logic in `hosts/<host>/`; move reusable logic to `modules/` or `programs/`.
 
@@ -51,7 +53,7 @@ Git history uses short, imperative, scope-first messages (for example: `added ll
 - If `git commit` or `git push` fails because the required GPG/SSH key or permissions are unavailable, stop and report the blocker; never create an unsigned commit or work around signing/auth requirements.
 
 ## Language Convention
-- When communicating in German or writing German text, do not use transliterations like `ue`, `oe`, `ae`, or `ss` as substitutes for `ü`, `ö`, `ä`, and `ß`. Write normal German with real umlauts and `ß`, unless a strictly ASCII-only interface forces an exception.
+- When communicating in German or writing German text, use normal German with real umlauts and `ß`. Only fall back to ASCII transliterations when the interface strictly requires it.
 
 ## Agent Learnings
 - Maintain `agent-learnings.md` as an append-only log for future agents.

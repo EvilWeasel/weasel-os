@@ -158,6 +158,7 @@ This reduces drift between laptop and desktop immediately.
 ## Flake Composition Model
 
 The flake should define a host registry with data, not hand-written per-host wiring.
+The intended pattern is dendritic: `flake-parts` assembles the root outputs, shared modules provide composition, and leaf hosts contribute facts and small overrides.
 
 Each host entry should declare things like:
 
@@ -171,7 +172,7 @@ Each host entry should declare things like:
 - `extraHomeModules`
 - `useUnstable`
 
-Then `lib/mk-host.nix` assembles:
+Then `lib/mk-host.nix` and the `flake-parts` layer assemble:
 
 - NixOS modules
 - Home Manager modules
