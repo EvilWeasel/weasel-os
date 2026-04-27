@@ -88,6 +88,10 @@ in
         source = config.lib.file.mkOutOfStoreSymlink "${repoDefaultPath}/programs/mimeapps.list";
         force = true;
       };
+      "kitty/open-actions.conf" = {
+        source = config.lib.file.mkOutOfStoreSymlink "${repoDefaultPath}/programs/kitty/open-actions.conf";
+        force = true;
+      };
       "DankMaterialShell/settings.json" = {
         source = config.lib.file.mkOutOfStoreSymlink "${repoDefaultPath}/programs/dank-material-shell/settings.json";
         force = true;
