@@ -2,6 +2,7 @@
 {
   home.packages = [
     pkgs.deskflow
+    pkgs.glab
     pkgs.krita
     pkgs.telegram-desktop
   ];
