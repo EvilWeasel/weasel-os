@@ -219,6 +219,12 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Reworked `modules/displaylink.nix` to use the official NixOS DisplayLink module path (`services.xserver.videoDrivers = [ "displaylink" ]`) for all laptop hosts, but overrode `pkgs.displaylink.src` with a fixed-output `fetchurl` to the Synaptics 6.2 archive so the proprietary driver builds without a manual `requireFile` prefetch step.
 - Pitfall/Root cause: The earlier half-measure only enabled `evdi`, which did not activate the full DisplayLink userspace stack; the real fix is to keep the upstream module behavior and replace only the source acquisition step that was failing on the EULA gate.
 
+### 2026-04-22 (Helium URL handling)
+- Date: 2026-04-22
+- Change: Fixed the Helium desktop entry in `packages/helium/flake.nix` to pass `%U` through `Exec` and advertise the browser MIME types so terminal link clicks open the target URL instead of a blank window.
+- Pitfall/Root cause: The desktop file was launching the wrapper without any URL placeholder, so `xdg-open` could start Helium but had nothing to hand it when a link was clicked.
+- Verification: `nix-instantiate --parse packages/helium/flake.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.michapc.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.michapc-debug.config.system.build.toplevel.drvPath`, and `nix eval --no-write-lock-file .#nixosConfigurations.ew-cloud.config.system.build.toplevel.drvPath`.
+
 ### 2026-04-20
 - Date: 2026-04-20
 - Change: Wrapped `alarm-clock-applet` so `GST_PLUGIN_SYSTEM_PATH_1_0` also includes `gst-plugins-good`, which provides `autoaudiosink` for the alarm preview/playback path.
@@ -529,3 +535,22 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Switched the repo formatter workflow to `nixfmt-rfc-style` via `nixfmt-tree`, updated editor formatter config for VS Code, Neovim, Helix, and Zed, then applied a repo-wide `nix fmt`; later committed the updated `programs/niri/dms/outputs.kdl` layout separately.
 - Pitfall/Root cause: `nix fmt` needed access to the local Nix cache outside the sandbox, and parallel `nix eval` runs contended on the same eval cache SQLite DB, so the host checks had to be retried until they completed cleanly.
 - Verification: `nix fmt`, `nix eval --no-write-lock-file .#nixosConfigurations.ew-cloud.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.michapc.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`
+
+### 2026-04-22 (kitty hyperlink handler)
+- Date: 2026-04-22
+- Change: Added `programs/kitty/open-actions.conf` and wired it into Home Manager so Kitty opens `http/https` links directly with Helium via a background launch action instead of relying on `xdg-open`.
+- Pitfall/Root cause: The browser desktop entry fix was not enough for Kitty hyperlinks; Kitty handles `Ctrl+Shift+Click` through its own open-actions path, so the click was still going through the OS default handler and ending up as a blank Helium window.
+- Verification: `nix-instantiate --parse profiles/home/base.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.michapc.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.michapc-debug.config.system.build.toplevel.drvPath`, and `nix eval --no-write-lock-file .#nixosConfigurations.ew-cloud.config.system.build.toplevel.drvPath`.
+
+### 2026-04-27 (OpenClaw Codex OAuth model repair)
+- Date: 2026-04-27
+- Change: Repaired the live `claw` VPS OpenClaw config by replacing hallucinated `openai-codex/gpt-5.5*` and older legacy allowlist entries with the installed Codex OAuth catalog entries `openai-codex/gpt-5.4`, `openai-codex/gpt-5.4-mini`, and `openai-codex/gpt-5.4-pro`; set `gpt-5.4` primary and restarted `openclaw-gateway.service`.
+- Pitfall/Root cause: OpenAI API docs list `gpt-5.5`, but this OpenClaw v2026.4.22 Codex OAuth integration did not expose it; `openclaw models status --probe` returned `Unknown model: openai-codex/gpt-5.5`, while `gpt-5.4` probed successfully.
+- Verification: `ssh claw 'openclaw models list --all --provider openai-codex --plain'`, `ssh claw 'openclaw models status --probe --probe-provider openai-codex --probe-timeout 30000 --probe-max-tokens 16'`, `ssh claw 'systemctl --user restart openclaw-gateway.service && systemctl --user status openclaw-gateway.service'`
+
+### 2026-04-27 (OpenClaw stable update and GPT-5.5 enablement)
+- Date: 2026-04-27
+- Change: Updated the live `claw` VPS OpenClaw npm install from 2026.4.22 to 2026.4.24, set `openai-codex/gpt-5.5` as primary with `gpt-5.4` fallbacks, and disabled the optional Bonjour plugin on the VPS.
+- Pitfall/Root cause: The update exposed `openai-codex/gpt-5.5`, but the first post-update gateway restarts crashed on the VPS with Bonjour/CIAO probing cancellations; Tailscale Serve already provides remote access, so disabling Bonjour avoids the local mDNS crash path.
+- Verification: `ssh claw 'openclaw --version'`, `ssh claw 'openclaw models status --probe --probe-provider openai-codex --probe-timeout 45000 --probe-max-tokens 16'`, `ssh claw 'openclaw models status --plain'`, `ssh claw 'systemctl --user status openclaw-gateway.service'`
+- 2026-04-27: Added GitLab CLI (`pkgs.glab`) to shared client Home Manager packages for desktop/laptop via `profiles/home/client.nix`. Verification: `nix-instantiate --parse profiles/home/client.nix`; `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`; `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`.
