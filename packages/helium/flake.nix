@@ -40,8 +40,9 @@
             [Desktop Entry]
             Name=Helium
             Comment=Helium Browser
-            Exec=$out/bin/helium
+            Exec=$out/bin/helium %U
             Icon=$out/Helium.AppImage
+            MimeType=text/html;x-scheme-handler/http;x-scheme-handler/https;x-scheme-handler/about;x-scheme-handler/unknown;
             Terminal=false
             Type=Application
             Categories=Network;WebBrowser;
