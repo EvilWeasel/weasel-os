@@ -7,7 +7,7 @@ let
   vscodeSettingsPath = "${config.home.homeDirectory}/weasel-os/programs/vscode/settings.json";
 in
 {
-  home.packages = [ pkgs.nixfmt-rfc-style ];
+  home.packages = [ pkgs.nixfmt ];
 
   xdg.configFile."Code/User/settings.json" = {
     force = true;

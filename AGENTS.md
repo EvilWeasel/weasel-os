@@ -27,8 +27,8 @@ Preferred day-to-day rebuild commands are defined in `hosts/nixy-laptop/home.nix
 Use these aliases when available; use the full `nixos-rebuild`/`nh` commands in non-interactive or fresh environments.
 
 ## Coding Style & Naming Conventions
-- Nix code is formatted with `nixfmt-rfc-style`; do not hand-format around it.
-- Use the standard RFC-style layout that `nixfmt-rfc-style` produces.
+- Nix code is formatted with `nixfmt`; do not hand-format around it.
+- Use the standard RFC-style layout that `nixfmt` produces.
 - Prefer lowercase kebab-case file names (examples: `nvidia-drivers.nix`, `local-hardware-clock.nix`).
 - Keep host-specific logic in `hosts/<host>/`; move reusable logic to `modules/` or `programs/`.
 

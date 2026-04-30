@@ -105,7 +105,7 @@ let
     inxi
     playerctl
     nh
-    nixfmt-rfc-style
+    nixfmt
     swww
     matugen
     grim
