@@ -572,3 +572,9 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Added `kitty.terminfo` to the flake devshell and exported a devshell-local `TERMINFO_DIRS` for generated Bash and Zsh startup files.
 - Pitfall/Root cause: Remote hosts can inherit `TERM=xterm-kitty` without having Kitty's terminfo database installed, which breaks terminal/readline behavior inside the shell.
 - Verification: `nix-instantiate --parse flake/modules/shared.nix`, `nix fmt`, `nix eval --no-write-lock-file .#devShells.x86_64-linux.default.drvPath`, `env TERM=xterm-kitty nix develop --no-write-lock-file .#default --command bash -lc 'printf "%s\n" "$TERMINFO_DIRS"; infocmp -x xterm-kitty >/dev/null && echo terminfo-ok'`, `env TERM=xterm-kitty nix develop --no-write-lock-file .#default --command bash -lc 'env -u TERMINFO_DIRS TERM=xterm-kitty ZDOTDIR="$ZDOTDIR" zsh -lc '\''printf "%s\n" "$TERMINFO_DIRS"; infocmp -x xterm-kitty >/dev/null && echo zsh-terminfo-ok'\'''`.
+
+### 2026-04-30 (portable devshell bootstrap)
+- Date: 2026-04-30
+- Change: Added `scripts/bootstrap-devshell.sh` for curl/wget bootstrapping on non-NixOS hosts and documented the one-line command in `README.md`.
+- Pitfall/Root cause: SSH-only servers need a repeatable setup path that installs/sources Nix, clones or updates `~/weasel-os`, and appends the auto-enter Bash block without hand-editing each host.
+- Verification: `bash -n scripts/bootstrap-devshell.sh`; `nix shell nixpkgs#shellcheck -c shellcheck scripts/bootstrap-devshell.sh`.

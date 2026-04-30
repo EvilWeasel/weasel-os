@@ -129,6 +129,22 @@ nix run .#dev
 
 For Neovim and the portable shell workflow, see [docs/neovim-quick-start.md](docs/neovim-quick-start.md).
 
+## Portable Devshell Bootstrap
+
+On a non-NixOS server with a sudo-capable user, this installs Nix if needed, clones or updates this repo at `~/weasel-os`, adds the SSH auto-enter block to `~/.bashrc`, and enters the latest devshell:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/EvilWeasel/weasel-os/main/scripts/bootstrap-devshell.sh | bash
+```
+
+If `curl` is not installed:
+
+```bash
+wget -qO- https://raw.githubusercontent.com/EvilWeasel/weasel-os/main/scripts/bootstrap-devshell.sh | bash
+```
+
+Set `WEASEL_OS_REPO`, `WEASEL_OS_BRANCH`, `WEASEL_OS_ROOT`, or `WEASEL_ENTER_NOW=0` before running it to override the defaults.
+
 If the repo is not at `~/weasel-os`, set:
 
 ```bash
