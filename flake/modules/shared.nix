@@ -17,6 +17,10 @@ in
       let
         pkgsStable = mkPkgs inputs.nixpkgs system;
         pkgsUnstable = mkPkgs inputs.nixpkgs-unstable system;
+        devTerminfoDirs = pkgsUnstable.lib.makeSearchPath "share/terminfo" [
+          pkgsUnstable.kitty.terminfo
+          pkgsUnstable.ncurses
+        ];
 
         devPackages = with pkgsUnstable; [
           nixfmt
@@ -40,6 +44,7 @@ in
           fzf
           git
           jq
+          kitty.terminfo
           glow
           nh
           lua-language-server
@@ -129,6 +134,7 @@ in
           mkdir -p "$out"
           cat > "$out/.zshenv" <<EOF
           export STARSHIP_CONFIG=${devStarshipConfig}
+          export TERMINFO_DIRS=${devTerminfoDirs}:\''${TERMINFO_DIRS:-}
           EOF
           cat > "$out/.zshrc" <<'EOF'
           if [[ -t 1 ]]; then
@@ -152,6 +158,7 @@ in
           export WEASEL_OS_HOST="''${WEASEL_OS_HOST:-''${HOSTNAME:-nixy-laptop}}"
           export STARSHIP_CONFIG=${devStarshipConfig}
           export ZDOTDIR=${devZshDotDir}
+          export TERMINFO_DIRS=${devTerminfoDirs}:''${TERMINFO_DIRS:-}
 
           if [[ -t 1 ]]; then
             fastfetch || true
