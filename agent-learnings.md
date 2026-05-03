@@ -590,3 +590,9 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Updated the local `packages/t3code` flake to T3 Code `0.0.20` and switched the main Helium input from `path:./packages/helium` to `github:schembriaiden/helium-browser-nix-flake`; kept the local Helium package in the repo.
 - Pitfall/Root cause: T3 Code `0.0.20` is the latest stable GitHub release as of 2026-05-03; newer `0.0.21` builds are nightly/pre-release. The maintained Helium flake now packages Helium `0.11.7.1` from upstream tarballs instead of the older local AppImage wrapper.
 - Verification: `nix-instantiate --parse flake.nix`, `nix-instantiate --parse packages/t3code/flake.nix`, `nixfmt flake.nix packages/t3code/flake.nix hosts/nixy-laptop/home.nix`. Skipped host evaluation at user request.
+
+### 2026-05-03 (remove screenpipe from laptop packages)
+- Date: 2026-05-03
+- Change: Removed `pkgs.screen-pipe` from `nixy-laptop` Home Manager packages and left the repo-local screenpipe package outputs untouched.
+- Pitfall/Root cause: The nixpkgs `screen-pipe` package was too old for the intended desktop app test, so the laptop should not install either nixpkgs `screen-pipe` or the local `screenpipe-app`.
+- Verification: `nix-instantiate --parse hosts/nixy-laptop/home.nix`, `nixfmt hosts/nixy-laptop/home.nix`. Skipped host evaluation at user request.
