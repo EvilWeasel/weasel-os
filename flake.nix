@@ -35,7 +35,7 @@
       inputs.nixpkgs.follows = "nixpkgs-unstable";
     };
     helium = {
-      url = "path:./packages/helium";
+      url = "github:schembriaiden/helium-browser-nix-flake";
       inputs.nixpkgs.follows = "nixpkgs-unstable";
     };
     t3code = {

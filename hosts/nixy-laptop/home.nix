@@ -1,8 +1,4 @@
-{
-  inputs,
-  pkgs,
-  ...
-}:
+{ pkgs, ... }:
 {
   imports = [
     ../../profiles/home/common.nix
@@ -12,6 +8,6 @@
   ];
 
   home.packages = [
-    inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.screenpipe-app
+    pkgs.screen-pipe
   ];
 }

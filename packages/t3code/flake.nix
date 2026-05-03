@@ -17,10 +17,10 @@
       let
         pkgs = import nixpkgs { inherit system; };
 
-        version = "0.0.13";
+        version = "0.0.20";
         src = pkgs.fetchurl {
           url = "https://github.com/pingdotgg/t3code/releases/download/v${version}/T3-Code-${version}-x86_64.AppImage";
-          hash = "sha256-oHKIh+aHsbGVHEoLLjItl6AbVRwvWVlZaIWyHKiekVc=";
+          hash = "sha256-glYnF8UA5s4rrpUJuvk4HlQtyMikbckIkmMIhnJugO4=";
         };
 
         desktopFile = pkgs.writeText "t3code.desktop" ''
@@ -46,7 +46,7 @@
           meta = with pkgs.lib; {
             description = "T3 Code desktop app";
             homepage = "https://github.com/pingdotgg/t3code";
-            license = licenses.asl20;
+            license = licenses.mit;
             mainProgram = "t3code";
             platforms = [ "x86_64-linux" ];
           };
