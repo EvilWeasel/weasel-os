@@ -60,7 +60,6 @@ in
       ];
       substituters = [
         "https://cache.nixos.org?priority=10"
-        "https://nyx.chaotic.cx"
         "https://nix-community.cachix.org"
         "https://yazi.cachix.org"
       ];

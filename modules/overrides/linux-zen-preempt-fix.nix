@@ -1,20 +1,6 @@
+{ pkgs, ... }:
 {
-  lib,
-  pkgs,
-  ...
-}:
-{
-  # Temporary workaround for nixpkgs linux_zen PREEMPT regression on release-25.11.
-  # Remove once upstream issue/PR is resolved:
-  # - https://github.com/NixOS/nixpkgs/issues/498620
-  # - https://github.com/NixOS/nixpkgs/pull/499620
-  boot.kernelPackages = pkgs.linuxPackagesFor (
-    pkgs.linuxPackages_zen.kernel.override {
-      structuredExtraConfig = with lib.kernel; {
-        PREEMPT = lib.mkOverride 90 no;
-        PREEMPT_LAZY = lib.mkOverride 90 (option yes);
-        PREEMPT_VOLUNTARY = lib.mkOverride 90 (option yes);
-      };
-    }
-  );
+  # Keep a non-EOL 6.x kernel for out-of-tree modules such as EVDI/DisplayLink.
+  # linuxPackages_zen moved to 7.0.x in nixpkgs and evdi 1.14.12 does not build there.
+  boot.kernelPackages = pkgs.linuxPackages_6_18;
 }

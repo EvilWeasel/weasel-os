@@ -596,3 +596,15 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Removed `pkgs.screen-pipe` from `nixy-laptop` Home Manager packages and left the repo-local screenpipe package outputs untouched.
 - Pitfall/Root cause: The nixpkgs `screen-pipe` package was too old for the intended desktop app test, so the laptop should not install either nixpkgs `screen-pipe` or the local `screenpipe-app`.
 - Verification: `nix-instantiate --parse hosts/nixy-laptop/home.nix`, `nixfmt hosts/nixy-laptop/home.nix`. Skipped host evaluation at user request.
+
+### 2026-05-03 (remove failing Chaotic substituter)
+- Date: 2026-05-03
+- Change: Removed `https://nyx.chaotic.cx` from shared Nix substituters.
+- Pitfall/Root cause: The Chaotic NYX endpoint returned repeated HTTP 525 responses during `queryMissing`; Nix 2.31.2 crashed the daemon instead of failing gracefully. The cache also had no matching trusted public key in this config, so it was not useful with `require-sigs = true`.
+- Verification: `nix-instantiate --parse profiles/system/common.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix build --no-link --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel --option substituters 'https://cache.nixos.org?priority=10 https://nix-community.cachix.org https://yazi.cachix.org'`.
+
+### 2026-05-03 (pin kernel below 7.0 for DisplayLink)
+- Date: 2026-05-03
+- Change: Changed the shared kernel override from `linuxPackages_zen` to `linuxPackages_6_18`.
+- Pitfall/Root cause: After input updates, `linuxPackages_zen` advanced to Linux `7.0.3`; `evdi 1.14.12` failed to compile against it, blocking DisplayLink and the laptop system build.
+- Verification: `nix-instantiate --parse modules/overrides/linux-zen-preempt-fix.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.boot.kernelPackages.kernel.version`, `nix build --no-link --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel --option substituters 'https://cache.nixos.org?priority=10 https://nix-community.cachix.org https://yazi.cachix.org'`.
