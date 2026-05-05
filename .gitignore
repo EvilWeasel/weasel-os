@@ -1,3 +1,7 @@
 certs
 result
 **/.env*
+
+# Local WLAN debugging artifacts
+/wifi-ap-*-diagnostics-*.log
+/wifi-connect-*.sh

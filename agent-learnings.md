@@ -608,3 +608,9 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Changed the shared kernel override from `linuxPackages_zen` to `linuxPackages_6_18`.
 - Pitfall/Root cause: After input updates, `linuxPackages_zen` advanced to Linux `7.0.3`; `evdi 1.14.12` failed to compile against it, blocking DisplayLink and the laptop system build.
 - Verification: `nix-instantiate --parse modules/overrides/linux-zen-preempt-fix.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.boot.kernelPackages.kernel.version`, `nix build --no-link --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel --option substituters 'https://cache.nixos.org?priority=10 https://nix-community.cachix.org https://yazi.cachix.org'`.
+
+### 2026-05-05 (Millennium Steam package)
+- Date: 2026-05-05
+- Change: Added the Millennium flake input and overlay, set the shared Steam module package to `pkgs.millennium-steam`, and ignored local WLAN debug artifacts.
+- Pitfall/Root cause: Millennium's Nix package pulled in a 32-bit build path that compiled `python3-3.11.14-i686-linux`; activation built successfully but stopped at the sudo password prompt.
+- Verification: `nix-instantiate --parse flake.nix`, `nix-instantiate --parse profiles/system/base.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.michapc.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.michapc-debug.config.system.build.toplevel.drvPath`, `nh os switch --hostname nixy-laptop /home/evilweasel/weasel-os` (built; activation blocked on sudo password).

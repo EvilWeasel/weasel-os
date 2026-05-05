@@ -38,6 +38,7 @@
       url = "github:schembriaiden/helium-browser-nix-flake";
       inputs.nixpkgs.follows = "nixpkgs-unstable";
     };
+    millennium.url = "github:SteamClientHomebrew/Millennium?dir=packages/nix";
     t3code = {
       url = "path:./packages/t3code";
       inputs.nixpkgs.follows = "nixpkgs-unstable";

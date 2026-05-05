@@ -236,6 +236,7 @@ in
     virt-manager.enable = true;
     steam = {
       enable = true;
+      package = pkgs.millennium-steam;
       remotePlay.openFirewall = true;
     };
     thunar = {
@@ -254,6 +255,9 @@ in
   };
 
   nixpkgs = {
+    overlays = [
+      inputs.millennium.overlays.default
+    ];
     config = {
       permittedInsecurePackages = [
         "ventoy-qt5-${pkgs.ventoy-full-qt.version}"
