@@ -638,3 +638,9 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Committed pending DMS settings, Niri/DMS output layout, and Zed panel docking updates on a PR branch.
 - Pitfall/Root cause: Shared Home Manager settings are consumed by multiple host configs, so even UI-oriented JSON/KDL changes need broad host evaluation before publishing.
 - Verification: `nix eval --no-write-lock-file .#nixosConfigurations.ew-cloud.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.michapc.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.michapc-debug.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`
+
+### 2026-05-09 (bootstrap persisted overrides)
+- Date: 2026-05-09
+- Change: Updated `scripts/bootstrap-devshell.sh` so the generated Bash auto-enter block persists the install-time `WEASEL_OS_ROOT`, `WEASEL_OS_REPO`, and `WEASEL_OS_BRANCH` defaults.
+- Pitfall/Root cause: The bootstrap clone honored overrides only during installation; the single-quoted heredoc wrote hardcoded fallback defaults into `.bashrc`, so later SSH logins could auto-enter a different checkout.
+- Verification: `bash -n scripts/bootstrap-devshell.sh`; `WEASEL_ENTER_NOW=0 WEASEL_BASHRC="$(mktemp /tmp/weasel-bootstrap-bashrc.XXXXXX)" WEASEL_OS_ROOT="$PWD" WEASEL_OS_REPO="git@github.com:EvilWeasel/weasel-os.git" WEASEL_OS_BRANCH="codex-update-desktop-shell-editor-settings" bash scripts/bootstrap-devshell.sh`

@@ -66,6 +66,12 @@ git_cmd() {
 }
 
 write_bashrc_block() {
+  local root_literal repo_literal branch_literal
+
+  printf -v root_literal "%q" "$root"
+  printf -v repo_literal "%q" "$repo_url"
+  printf -v branch_literal "%q" "$branch"
+
   mkdir -p "$(dirname "$bashrc")"
   touch "$bashrc"
 
@@ -96,9 +102,19 @@ if [[ -n "${SSH_CONNECTION:-}" \
     fi
   fi
 
-  WEASEL_OS_ROOT="${WEASEL_OS_ROOT:-$HOME/weasel-os}"
-  WEASEL_OS_REPO="${WEASEL_OS_REPO:-https://github.com/EvilWeasel/weasel-os.git}"
-  WEASEL_OS_BRANCH="${WEASEL_OS_BRANCH:-main}"
+EOF
+
+  cat >>"$bashrc" <<EOF
+  WEASEL_OS_DEFAULT_ROOT=$root_literal
+  WEASEL_OS_DEFAULT_REPO=$repo_literal
+  WEASEL_OS_DEFAULT_BRANCH=$branch_literal
+EOF
+
+  cat >>"$bashrc" <<'EOF'
+
+  WEASEL_OS_ROOT="${WEASEL_OS_ROOT:-$WEASEL_OS_DEFAULT_ROOT}"
+  WEASEL_OS_REPO="${WEASEL_OS_REPO:-$WEASEL_OS_DEFAULT_REPO}"
+  WEASEL_OS_BRANCH="${WEASEL_OS_BRANCH:-$WEASEL_OS_DEFAULT_BRANCH}"
 
   weasel_git() {
     if command -v git >/dev/null 2>&1; then
