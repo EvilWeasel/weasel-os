@@ -10,6 +10,24 @@ Append-only log of implementation lessons for future agents working in this repo
 
 ## Entries
 
+### 2026-05-05 (AP diagnostics workflow)
+- Date: 2026-05-05
+- Change: Reworked `wifi-connect-ap-blain-local.sh` into a full AP diagnostics runner that switches to `AP_Blain_local`, captures NM/IP/DNS/ping/curl/journal evidence, and always reconnects to `Blain_Guest` afterward.
+- Pitfall/Root cause: The earlier helper only reported MAC state; the actual failure looked like a DNS/routing issue, so the script now collects the data needed to distinguish DHCP, gateway, and resolver problems before returning to the guest network.
+- Verification: `bash -n wifi-connect-ap-blain-local.sh`
+
+### 2026-05-05 (wifi helper fix)
+- Date: 2026-05-05
+- Change: Hardened `wifi-connect-ap-blain-local.sh` so it uses a unique NM connection name, falls back to explicit wifi profile creation for secured APs, and reports MAC status from `/sys/class/net/<iface>/addr_assign_type` instead of the nonexistent `GENERAL.PERM-HWADDR` field.
+- Pitfall/Root cause: `nmcli device show` on this version does not expose a permanent-hardware-address field, and reusing an existing WPA2 profile can surface `802-11-wireless-security.key-mgmt` errors when `nmcli dev wifi connect` tries to infer security from a stale profile.
+- Verification: `bash -n wifi-connect-ap-blain-local.sh`
+
+### 2026-05-05
+- Date: 2026-05-05
+- Change: Added a repo-root Wi-Fi helper script for `AP_Blain_local` that connects via `nmcli` and prints the current and permanent MAC address plus a simple static-vs-dynamic assessment.
+- Pitfall/Root cause: The repo already contains Wi-Fi helper patterns, but the user needed a short copy-pasteable entrypoint instead of a long inline shell command.
+- Verification: `bash -n wifi-connect-ap-blain-local.sh`
+
 ### 2026-03-31
 - Date: 2026-03-31
 - Change: Migrated the flake to `flake-parts`, split shared baselines into `common` plus client/server layers, added an `ew-cloud` VPS host with `disko`, `sops-nix`, Tailscale-only defaults, and a reusable OpenClaw role scaffold.
@@ -614,3 +632,9 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Added the Millennium flake input and overlay, set the shared Steam module package to `pkgs.millennium-steam`, and ignored local WLAN debug artifacts.
 - Pitfall/Root cause: Millennium's Nix package pulled in a 32-bit build path that compiled `python3-3.11.14-i686-linux`; activation built successfully but stopped at the sudo password prompt.
 - Verification: `nix-instantiate --parse flake.nix`, `nix-instantiate --parse profiles/system/base.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.michapc.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.michapc-debug.config.system.build.toplevel.drvPath`, `nh os switch --hostname nixy-laptop /home/evilweasel/weasel-os` (built; activation blocked on sudo password).
+
+### 2026-05-09 (desktop shell and editor layout settings)
+- Date: 2026-05-09
+- Change: Committed pending DMS settings, Niri/DMS output layout, and Zed panel docking updates on a PR branch.
+- Pitfall/Root cause: Shared Home Manager settings are consumed by multiple host configs, so even UI-oriented JSON/KDL changes need broad host evaluation before publishing.
+- Verification: `nix eval --no-write-lock-file .#nixosConfigurations.ew-cloud.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.michapc.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.michapc-debug.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`

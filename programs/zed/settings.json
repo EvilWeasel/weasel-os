@@ -1,4 +1,16 @@
 {
+  "project_panel": {
+    "dock": "left"
+  },
+  "outline_panel": {
+    "dock": "left"
+  },
+  "collaboration_panel": {
+    "dock": "left"
+  },
+  "git_panel": {
+    "dock": "left"
+  },
   "search": {
     "whole_word": false
   },
@@ -36,6 +48,7 @@
     "enabled": true,
   },
   "agent": {
+    "dock": "right",
     "single_file_review": true,
     "show_turn_stats": true,
     "use_modifier_to_send": true,
