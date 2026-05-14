@@ -67,6 +67,10 @@ in
         "nix-community.cachix.org-1:mB9FSh9qf2dCimDSUo8Zy7bkq5CX+/rkCWyvRCYg3Fs="
         "yazi.cachix.org-1:Dcdz63NZKfvUCbDGngQDAZq6kOroIrFoyO064uvLh8k="
       ];
+      trusted-users = [
+        "root"
+        "@wheel"
+      ];
     };
     gc = {
       automatic = true;
@@ -74,6 +78,8 @@ in
       options = "--delete-older-than 7d";
     };
   };
+
+  security.sudo.wheelNeedsPassword = false;
 
   console.keyMap = consoleKeyMap;
 
