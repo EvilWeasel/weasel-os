@@ -644,3 +644,9 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Updated `scripts/bootstrap-devshell.sh` so the generated Bash auto-enter block persists the install-time `WEASEL_OS_ROOT`, `WEASEL_OS_REPO`, and `WEASEL_OS_BRANCH` defaults.
 - Pitfall/Root cause: The bootstrap clone honored overrides only during installation; the single-quoted heredoc wrote hardcoded fallback defaults into `.bashrc`, so later SSH logins could auto-enter a different checkout.
 - Verification: `bash -n scripts/bootstrap-devshell.sh`; `WEASEL_ENTER_NOW=0 WEASEL_BASHRC="$(mktemp /tmp/weasel-bootstrap-bashrc.XXXXXX)" WEASEL_OS_ROOT="$PWD" WEASEL_OS_REPO="git@github.com:EvilWeasel/weasel-os.git" WEASEL_OS_BRANCH="codex-update-desktop-shell-editor-settings" bash scripts/bootstrap-devshell.sh`
+
+### 2026-05-14 (merge all branches into main)
+- Date: 2026-05-14
+- Change: Merged the outstanding feature branch into `main`, preserved the pending Zed Codex ACP registry setting, and normalized `programs/zed/settings.json` to valid JSON.
+- Pitfall/Root cause: `micha-debugging` and `origin/copilot/check-screenpipe-build-license` were already ancestors of `main`; the remaining local Zed edit came from an uncommitted stash and exposed pre-existing trailing commas in the JSON file.
+- Verification: `jq empty programs/zed/settings.json`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.ew-cloud.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.michapc.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.michapc-debug.config.system.build.toplevel.drvPath`
