@@ -662,3 +662,9 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Stopped forcing BlueZ `KernelExperimental` in `main.conf`, removed invalid `General.AutoEnable`, and stopped forcing mSBC for Bluetooth HFP while keeping Sony headset microphone profiles enabled.
 - Pitfall/Root cause: WF-1000XM5 microphone capture still fails in classic HFP with WirePlumber/PipeWire transport errors, and `bluez5.disable-dummy-call = true` made WirePlumber crash. LE Audio UUIDs were visible but BlueZ did not expose BAP/LC3 profiles to WirePlumber.
 - Verification: `nix-instantiate --parse profiles/system/bluetooth-audio.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`
+
+### 2026-05-15 (LocalSend client package)
+- Date: 2026-05-15
+- Change: Added `pkgs.localsend` to the shared Home Manager base package list so client homes get LocalSend while the server profile remains unchanged.
+- Pitfall/Root cause: The narrower Home Manager client profile is not imported by every client-class host; `profiles/home/base.nix` is the shared client home layer and is not imported by `ew-cloud`.
+- Verification: `nix-instantiate --parse profiles/home/base.nix`, `nix fmt`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.michapc.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.michapc-debug.config.system.build.toplevel.drvPath`
