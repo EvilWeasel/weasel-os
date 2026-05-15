@@ -45,9 +45,20 @@ in
 
   programs.git = {
     enable = true;
-    settings.user =
-      lib.optionalAttrs (gitUsername != "") { name = gitUsername; }
-      // lib.optionalAttrs (gitEmail != "") { email = gitEmail; };
+    settings = {
+      core.pager = "delta";
+      delta = {
+        line-numbers = true;
+        navigate = true;
+        side-by-side = true;
+      };
+      diff.colorMoved = "default";
+      interactive.diffFilter = "delta --color-only";
+      merge.conflictStyle = "zdiff3";
+      user =
+        lib.optionalAttrs (gitUsername != "") { name = gitUsername; }
+        // lib.optionalAttrs (gitEmail != "") { email = gitEmail; };
+    };
     signing = lib.mkIf signingEnabled {
       key = gitSigningKey;
       signByDefault = true;

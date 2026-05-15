@@ -674,3 +674,9 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Added common classic and modern CLI diagnostic packages to `profiles/system/common.nix`, and expanded `weasel-shell-aliases` with a sectioned cheatsheet for less obvious tools.
 - Pitfall/Root cause: Several useful utilities were only in client-specific profiles or absent entirely, so putting the baseline in `profiles/system/common.nix` keeps both NixOS hosts consistent.
 - Verification: `nix-instantiate --parse profiles/system/common.nix`, `nix-instantiate --parse scripts/weasel-shell-helpers.nix`, `nix fmt`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`
+
+### 2026-05-15 (delta git pager)
+- Date: 2026-05-15
+- Change: Configured Git through Home Manager to use `delta` as the pager and interactive diff filter, with line numbers, side-by-side diffs, navigation, moved-line coloring, and `zdiff3` conflict style.
+- Pitfall/Root cause: Installing modern CLI tools does not configure applications to use them; Git needs explicit pager/filter settings even when `delta` is already in the system profile.
+- Verification: `nix-instantiate --parse profiles/home/common.nix`, `nix fmt`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`
