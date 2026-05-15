@@ -656,3 +656,9 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Added `@wheel` to trusted Nix users and disabled sudo password prompts for wheel users in the shared system profile.
 - Pitfall/Root cause: `nh os switch` and `nixos-rebuild-ng` can run different root commands during activation, so narrowly whitelisting individual sudoers command paths is brittle for `fr`, `fu`, and `ncg`.
 - Verification: `nix-instantiate --parse profiles/system/common.nix`, `nix fmt`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.ew-cloud.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.michapc.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.michapc-debug.config.system.build.toplevel.drvPath`
+
+### 2026-05-15 (Sony WF-1000XM5 HFP debugging)
+- Date: 2026-05-15
+- Change: Stopped forcing BlueZ `KernelExperimental` in `main.conf`, removed invalid `General.AutoEnable`, and stopped forcing mSBC for Bluetooth HFP while keeping Sony headset microphone profiles enabled.
+- Pitfall/Root cause: WF-1000XM5 microphone capture still fails in classic HFP with WirePlumber/PipeWire transport errors, and `bluez5.disable-dummy-call = true` made WirePlumber crash. LE Audio UUIDs were visible but BlueZ did not expose BAP/LC3 profiles to WirePlumber.
+- Verification: `nix-instantiate --parse profiles/system/bluetooth-audio.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`

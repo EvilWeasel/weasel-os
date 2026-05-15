@@ -9,10 +9,8 @@
     powerOnBoot = true;
     package = pkgsUnstable.bluez;
     settings.General = {
-      AutoEnable = true;
       ControllerMode = "dual";
       Experimental = true;
-      KernelExperimental = true;
       Privacy = "device";
     };
   };
@@ -47,7 +45,7 @@
         "aac"
       ];
       "bluez5.enable-sbc-xq" = true;
-      "bluez5.enable-msbc" = true;
+      "bluez5.enable-msbc" = false;
       "bluez5.hfphsp-backend" = "native";
     };
   };
