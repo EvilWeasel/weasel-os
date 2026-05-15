@@ -33,18 +33,45 @@ in
   };
 
   environment.systemPackages = with pkgs; [
+    bandwhich
     bat
+    bottom
+    btop
     curl
+    delta
+    dmidecode
+    doggo
+    duf
+    dust
+    dnsutils
+    ethtool
     eza
     fd
     git
     htop
+    hyperfine
+    inxi
     jq
+    lshw
+    lsof
+    moreutils
+    mtr
     nh
+    ncdu
+    nmap
+    pciutils
+    procs
+    psmisc
     ripgrep
+    sd
+    strace
+    tcpdump
+    tokei
     tree
+    usbutils
     vim
     wget
+    whois
   ];
 
   services.fstrim.enable = true;

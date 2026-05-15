@@ -668,3 +668,9 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Added `pkgs.localsend` to the shared Home Manager base package list so client homes get LocalSend while the server profile remains unchanged.
 - Pitfall/Root cause: The narrower Home Manager client profile is not imported by every client-class host; `profiles/home/base.nix` is the shared client home layer and is not imported by `ew-cloud`.
 - Verification: `nix-instantiate --parse profiles/home/base.nix`, `nix fmt`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.michapc.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.michapc-debug.config.system.build.toplevel.drvPath`
+
+### 2026-05-15 (shared CLI utility baseline)
+- Date: 2026-05-15
+- Change: Added common classic and modern CLI diagnostic packages to `profiles/system/common.nix`, and expanded `weasel-shell-aliases` with a sectioned cheatsheet for less obvious tools.
+- Pitfall/Root cause: Several useful utilities were only in client-specific profiles or absent entirely, so putting the baseline in `profiles/system/common.nix` keeps both NixOS hosts consistent.
+- Verification: `nix-instantiate --parse profiles/system/common.nix`, `nix-instantiate --parse scripts/weasel-shell-helpers.nix`, `nix fmt`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`
