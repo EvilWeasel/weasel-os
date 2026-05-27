@@ -5,6 +5,7 @@
   ...
 }:
 let
+  repoDefaultPath = "${config.home.homeDirectory}/weasel-os";
   sshInitKeysCmd = "systemctl --user start ssh-agent.service >/dev/null 2>&1; export SSH_AUTH_SOCK=/run/user/$UID/ssh-agent; find \"$HOME/.ssh\" -maxdepth 1 -type f ! -name '*.pub' ! -name 'authorized_keys*' ! -name 'known_hosts*' ! -name 'config' -exec sh -c 'for key do ssh-keygen -yf \"$key\" >/dev/null 2>&1 && ssh-add \"$key\"; done' sh {} +";
 in
 {
@@ -98,5 +99,10 @@ in
       shader-log = "tail -f ~/.steam/root/logs/shader_log.txt";
       ssh-initkeys = sshInitKeysCmd;
     };
+  };
+
+  xdg.configFile."ratty/ratty.toml" = {
+    source = config.lib.file.mkOutOfStoreSymlink "${repoDefaultPath}/programs/ratty/ratty.toml";
+    force = true;
   };
 }

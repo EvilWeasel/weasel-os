@@ -1,0 +1,83 @@
+# WeaselOS Ratty defaults for nixy-laptop.
+
+[window]
+width = 1200
+height = 760
+scale_factor = 1.0
+opacity = 0.92
+
+[terminal]
+default_cols = 120
+default_rows = 34
+scrollback = 2000
+
+[env]
+TERM = "xterm-256color"
+
+[font]
+family = "MonaspiceKr Nerd Font Mono"
+style = "Regular"
+size = 20
+
+[cursor.model]
+path = "CairoSpinyMouse.obj"
+scale_factor = 5.4
+brightness = 0.8
+x_offset = 0.2
+plane_offset = 18.0
+visible = true
+
+[cursor.animation]
+spin_speed = 1.0
+bob_speed = 1.6
+bob_amplitude = 0.06
+
+[bindings]
+keys = [
+  { key = "C", with = "Control | Alt", action = "Copy" },
+  { key = "V", with = "Control | Alt", action = "Paste" },
+
+  { key = "PageUp", with = "Alt", action = "ScrollPageUp" },
+  { key = "PageDown", with = "Alt", action = "ScrollPageDown" },
+  { key = "Up", with = "Alt", action = "ScrollUp" },
+  { key = "Down", with = "Alt", action = "ScrollDown" },
+
+  { key = "Equal", with = "Control", action = "IncreaseFontSize" },
+  { key = "Equal", with = "Control | Shift", action = "IncreaseFontSize" },
+  { key = "NumpadAdd", with = "Control", action = "IncreaseFontSize" },
+  { key = "Up", with = "Control | Shift", action = "IncreaseFontSize" },
+  { key = "Minus", with = "Control", action = "DecreaseFontSize" },
+  { key = "NumpadSubtract", with = "Control", action = "DecreaseFontSize" },
+  { key = "Down", with = "Control | Shift", action = "DecreaseFontSize" },
+  { key = "0", with = "Control", action = "ResetFontSize" },
+
+  { key = "Enter", with = "Control | Alt", action = "Toggle3DMode" },
+  { key = "M", with = "Control | Alt", action = "ToggleMobiusMode" },
+  { key = "Up", with = "Control | Alt", action = "IncreaseWarp" },
+  { key = "Down", with = "Control | Alt", action = "DecreaseWarp" },
+]
+
+[theme]
+foreground = "#cdd6f4"
+background = "#1e1e2e"
+cursor = "#f5e0dc"
+
+[theme.normal]
+black = "#45475a"
+red = "#f38ba8"
+green = "#a6e3a1"
+yellow = "#f9e2af"
+blue = "#89b4fa"
+magenta = "#f5c2e7"
+cyan = "#94e2d5"
+white = "#bac2de"
+
+[theme.bright]
+black = "#585b70"
+red = "#f38ba8"
+green = "#a6e3a1"
+yellow = "#f9e2af"
+blue = "#89b4fa"
+magenta = "#f5c2e7"
+cyan = "#94e2d5"
+white = "#a6adc8"

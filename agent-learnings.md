@@ -692,3 +692,9 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Added `libxkbcommon` to the laptop system package list for `xkbcli`, and documented the manual Prism/Fabric/Waylandcraft setup under `docs/waylandcraft.md`.
 - Pitfall/Root cause: Prism Launcher and `xwayland-satellite` were already installed, but Waylandcraft explicitly requires the xkbcommon tools; Prism instance creation remains better left to the launcher.
 - Verification: `nix-instantiate --parse profiles/system/laptop.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`
+
+### 2026-05-27 (Ratty laptop configuration)
+- Date: 2026-05-27
+- Change: Added a repo-owned Ratty TOML config for nixy-laptop and linked it through Home Manager.
+- Pitfall/Root cause: Ratty 0.3.0 keybinding config only parses a small set of Bevy key names; German physical plus/minus keys are not directly configurable like Kitty, so reliable zoom fallbacks use `Ctrl+Shift+Up/Down`.
+- Verification: `nix-instantiate --parse profiles/home/laptop.nix`, `nix eval --impure --no-write-lock-file --expr 'builtins.fromTOML (builtins.readFile ./programs/ratty/ratty.toml)'`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`
