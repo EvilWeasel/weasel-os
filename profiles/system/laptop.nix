@@ -66,6 +66,7 @@
       python3Packages.pip
       snapper
       btrfs-progs
+      libxkbcommon
       nil
       xwayland-satellite
       cava

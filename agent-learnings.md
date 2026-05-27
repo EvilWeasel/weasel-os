@@ -686,3 +686,9 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Added `pkgsUnstable.ratty` to the laptop Home Manager package list and advanced only the `nixpkgs-unstable` input to a revision containing Ratty.
 - Pitfall/Root cause: The previously pinned `nixpkgs-unstable` revision did not expose `ratty`; current `nixos-unstable` has Ratty 0.3.0.
 - Verification: `nix-instantiate --parse profiles/home/laptop.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`
+
+### 2026-05-27 (Waylandcraft laptop prerequisites)
+- Date: 2026-05-27
+- Change: Added `libxkbcommon` to the laptop system package list for `xkbcli`, and documented the manual Prism/Fabric/Waylandcraft setup under `docs/waylandcraft.md`.
+- Pitfall/Root cause: Prism Launcher and `xwayland-satellite` were already installed, but Waylandcraft explicitly requires the xkbcommon tools; Prism instance creation remains better left to the launcher.
+- Verification: `nix-instantiate --parse profiles/system/laptop.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`
