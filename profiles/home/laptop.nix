@@ -16,6 +16,7 @@ in
       pkgs.mcp-nixos
       pkgs.playwright-driver
       pkgs.sweethome3d.application
+      pkgsUnstable.ratty
     ];
     sessionPath = [
       "${config.home.homeDirectory}/.npm-global/bin"

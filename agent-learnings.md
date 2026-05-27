@@ -680,3 +680,9 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Configured Git through Home Manager to use `delta` as the pager and interactive diff filter, with line numbers, side-by-side diffs, navigation, moved-line coloring, and `zdiff3` conflict style.
 - Pitfall/Root cause: Installing modern CLI tools does not configure applications to use them; Git needs explicit pager/filter settings even when `delta` is already in the system profile.
 - Verification: `nix-instantiate --parse profiles/home/common.nix`, `nix fmt`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`
+
+### 2026-05-27 (Ratty terminal on laptop)
+- Date: 2026-05-27
+- Change: Added `pkgsUnstable.ratty` to the laptop Home Manager package list and advanced only the `nixpkgs-unstable` input to a revision containing Ratty.
+- Pitfall/Root cause: The previously pinned `nixpkgs-unstable` revision did not expose `ratty`; current `nixos-unstable` has Ratty 0.3.0.
+- Verification: `nix-instantiate --parse profiles/home/laptop.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`
