@@ -162,9 +162,11 @@ in
   };
 
   vm.guest-services.enable = false;
-
   networking = {
-    networkmanager.enable = true;
+    networkmanager = {
+      enable = true;
+      plugins = [ pkgs.networkmanager-openvpn ];
+    };
   };
 
   programs = {

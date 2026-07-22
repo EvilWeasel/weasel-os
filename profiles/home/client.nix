@@ -6,6 +6,7 @@ in
   home.packages = [
     (import ../../scripts/ai-gen-runpod.nix { inherit pkgs; })
     (import ../../scripts/kai-codex-usage.nix { inherit pkgs; })
+    (import ../../scripts/sophos-vpn.nix { inherit pkgs; })
     pkgs.deskflow
     pkgs.glab
     pkgs.krita
@@ -40,6 +41,46 @@ in
     recursive = true;
     force = true;
   };
+
+  xdg.configFile."DankMaterialShell/plugins/SophosVPN" = {
+    source = config.lib.file.mkOutOfStoreSymlink "${repoDefaultPath}/programs/dank-material-shell/plugins/SophosVPN";
+    recursive = true;
+    force = true;
+  };
+
+  home.activation.enableSophosVpnPlugin = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+    plugin_settings="$HOME/.config/DankMaterialShell/plugin_settings.json"
+    plugin_tmp="$plugin_settings.hm-sophos-vpn"
+    mkdir -p "$HOME/.config/DankMaterialShell"
+
+    if [ -f "$plugin_settings" ]; then
+      ${pkgs.jq}/bin/jq '.sophosVpn.enabled = true' "$plugin_settings" > "$plugin_tmp"
+    else
+      printf '%s\n' '{"sophosVpn":{"enabled":true}}' > "$plugin_tmp"
+    fi
+
+    chmod 0644 "$plugin_tmp"
+    mv -f "$plugin_tmp" "$plugin_settings"
+  '';
+
+  home.activation.enableSophosVpnBarWidget = lib.hm.dag.entryAfter [ "enableSophosVpnPlugin" ] ''
+    dms_settings="$HOME/.config/DankMaterialShell/settings.json"
+    dms_tmp="$dms_settings.hm-sophos-vpn"
+
+    if [ -f "$dms_settings" ]; then
+      ${pkgs.jq}/bin/jq '
+        def widget_id: if type == "object" then .id else . end;
+        def has_widget($widgets; $id): any($widgets[]?; widget_id == $id);
+        .barConfigs |= map(
+          if .id == "default" and (.rightWidgets | has_widget(.; "sophosVpn") | not) then
+            .rightWidgets |= (map(if widget_id == "runPodControl" then [{"id":"sophosVpn","enabled":true}, .] else . end) | flatten)
+          else . end
+        )
+      ' "$dms_settings" > "$dms_tmp"
+      chmod 0644 "$dms_tmp"
+      mv -f "$dms_tmp" "$dms_settings"
+    fi
+  '';
 
   home.activation.enableRunPodControlPlugin = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
     settings="$HOME/.config/DankMaterialShell/plugin_settings.json"

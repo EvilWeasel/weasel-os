@@ -1,0 +1,18 @@
+{
+  "id": "sophosVpn",
+  "name": "Sophos VPN",
+  "description": "Compact Sophos OpenVPN control for DankMaterialShell via NetworkManager",
+  "version": "1.0.0",
+  "license": "MIT",
+  "author": "Codex",
+  "icon": "vpn_lock",
+  "component": "./SophosVPNWidget.qml",
+  "permissions": [
+    "process"
+  ],
+  "type": "widget",
+  "capabilities": [
+    "dankbar-widget"
+  ],
+  "requires_dms": ">=1.4.0"
+}
