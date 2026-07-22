@@ -43,6 +43,7 @@
       url = "path:./packages/t3code";
       inputs.nixpkgs.follows = "nixpkgs-unstable";
     };
+    hermes-agent.url = "github:NousResearch/hermes-agent/v2026.7.20";
     handy-nixpkgs.url = "github:NixOS/nixpkgs/d6c71932130818840fc8fe9509cf50be8c64634f";
     handy = {
       # Pin to a known-good revision because latest upstream currently breaks Nix builds

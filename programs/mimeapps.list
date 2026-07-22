@@ -51,3 +51,4 @@ x-scheme-handler/tonsite=org.telegram.desktop.desktop
 [Added Associations]
 x-scheme-handler/tg=org.telegram.desktop.desktop;
 x-scheme-handler/tonsite=org.telegram.desktop.desktop;
+image/jpeg=com.google.Chrome.desktop;

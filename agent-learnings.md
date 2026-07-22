@@ -698,3 +698,9 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Added a repo-owned Ratty TOML config for nixy-laptop and linked it through Home Manager.
 - Pitfall/Root cause: Ratty 0.3.0 keybinding config only parses a small set of Bevy key names; German physical plus/minus keys are not directly configurable like Kitty, so reliable zoom fallbacks use `Ctrl+Shift+Up/Down`.
 - Verification: `nix-instantiate --parse profiles/home/laptop.nix`, `nix eval --impure --no-write-lock-file --expr 'builtins.fromTOML (builtins.readFile ./programs/ratty/ratty.toml)'`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`
+
+### 2026-05-30 (Factorio Steam launch)
+- Date: 2026-05-30
+- Change: Removed `gamemoderun` from Factorio app `427520` Steam launch options in the local Steam user config, leaving `%command% > logfile.txt`.
+- Pitfall/Root cause: Factorio was not reaching its own log; Steam showed `gamemoderun` exiting 139, and coredumps pointed at Steam overlay/Millennium preload frames before the game started.
+- Verification: `factorio --version` via the Steam install path, `steam -applaunch 427520`, `pgrep -af 'Factorio|factorio|SteamLaunch AppId=427520'`, and fresh `gameprocess_log.txt` entries showing Factorio tracked without the immediate 139 exit.

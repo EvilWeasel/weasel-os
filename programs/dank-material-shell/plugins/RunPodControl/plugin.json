@@ -1,0 +1,18 @@
+{
+  "id": "runPodControl",
+  "name": "RunPod Control",
+  "description": "Control the image-generation RunPod and show current spend from the DMS bar",
+  "version": "1.0.0",
+  "license": "MIT",
+  "author": "Codex",
+  "icon": "cloud",
+  "component": "./RunPodControlWidget.qml",
+  "permissions": [
+    "process"
+  ],
+  "type": "widget",
+  "capabilities": [
+    "dankbar-widget"
+  ],
+  "requires_dms": ">=1.4.0"
+}

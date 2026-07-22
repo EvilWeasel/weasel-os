@@ -1,0 +1,18 @@
+{
+  "id": "codexUsage",
+  "name": "Codex Usage",
+  "description": "Show Codex 5-hour and weekly usage budget from CodexBar",
+  "version": "1.0.0",
+  "license": "MIT",
+  "author": "Codex",
+  "icon": "data_usage",
+  "component": "./CodexUsageWidget.qml",
+  "permissions": [
+    "process"
+  ],
+  "type": "widget",
+  "capabilities": [
+    "dankbar-widget"
+  ],
+  "requires_dms": ">=1.4.0"
+}

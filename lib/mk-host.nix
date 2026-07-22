@@ -1,6 +1,7 @@
 { inputs }:
 {
   hostName,
+  class,
   system,
   username,
   extraModules ? [ ],
@@ -25,6 +26,7 @@ inputs.nixpkgs.lib.nixosSystem {
     ../hosts/${hostName}/config.nix
     inputs.home-manager.nixosModules.home-manager
     {
+      nixpkgs.config.allowUnfree = true;
       home-manager.extraSpecialArgs = {
         pkgsUnstable = import inputs.nixpkgs-unstable {
           inherit system;
@@ -37,6 +39,14 @@ inputs.nixpkgs.lib.nixosSystem {
       home-manager.useUserPackages = true;
       home-manager.users.${username} = import ../hosts/${hostName}/home.nix;
     }
+    (
+      { lib, pkgs, ... }:
+      lib.mkIf (class == "client") {
+        environment.systemPackages = [
+          pkgs.anydesk
+        ];
+      }
+    )
   ]
   ++ extraModules;
 }

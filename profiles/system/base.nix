@@ -345,8 +345,18 @@ in
   };
   systemd.services.flatpak-repo = {
     path = [ pkgs.flatpak ];
+    wantedBy = [ "multi-user.target" ];
+    after = [ "network-online.target" ];
+    wants = [ "network-online.target" ];
     script = ''
       flatpak remote-add --if-not-exists flathub https://flathub.org/repo/flathub.flatpakrepo
+      flatpak remote-add --if-not-exists GeForceNOW https://international.download.nvidia.com/GFNLinux/flatpak/geforcenow.flatpakrepo
+
+      if flatpak info --system com.nvidia.geforcenow >/dev/null 2>&1; then
+        flatpak update --system -y --noninteractive com.nvidia.geforcenow
+      else
+        flatpak install --system -y --noninteractive GeForceNOW com.nvidia.geforcenow
+      fi
     '';
   };
 

@@ -337,8 +337,9 @@
   },
   "bluetoothDevicePins": {
     "preferredDevice": [
-      "F6:2A:7C:C2:40:D8",
-      "B0:38:E2:50:08:37"
+      "CC:4B:61:EB:62:8A",
+      "80:99:E7:D5:DA:B2",
+      "F6:2A:7C:C2:40:D8"
     ]
   },
   "audioInputDevicePins": {},
@@ -576,17 +577,8 @@
           "enabled": true
         },
         {
-          "id": "cpuTemp",
-          "enabled": true
-        },
-        {
           "id": "cpuUsage",
           "enabled": true
-        },
-        {
-          "id": "memUsage",
-          "enabled": true,
-          "showSwap": false
         },
         {
           "id": "notificationButton",
@@ -598,6 +590,14 @@
         },
         {
           "id": "batteryPercent",
+          "enabled": true
+        },
+        {
+          "id": "codexUsage",
+          "enabled": true
+        },
+        {
+          "id": "runPodControl",
           "enabled": true
         },
         {
