@@ -57,6 +57,7 @@
       bubblewrap
       claude-code
       openssl
+      openvpn
       proton-pass
       azuredatastudio
       teams-for-linux
