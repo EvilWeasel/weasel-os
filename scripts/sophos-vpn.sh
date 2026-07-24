@@ -271,7 +271,7 @@ import_profile() {
   local profile_path=${1:-}
   local import_name=$CONNECTION_NAME
   local import_username=$DEFAULT_IMPORT_USERNAME
-  local before_file after_file stderr_file tmpdir new_uuid imported_uuid_count
+  local before_file after_file stderr_file tmpdir import_profile_path new_uuid imported_uuid_count
 
   [[ -n $profile_path ]] || {
     json_error import "missing .ovpn path"
@@ -304,11 +304,26 @@ import_profile() {
   before_file=$tmpdir/before
   after_file=$tmpdir/after
   stderr_file=$tmpdir/nmcli.stderr
+  import_profile_path=$tmpdir/profile.ovpn
   trap 'rm -rf -- "${tmpdir:-}"' RETURN
+
+  # NetworkManager rejects OpenVPN's remote_host route placeholder. It already
+  # keeps the VPN server reachable through the pre-tunnel gateway itself.
+  awk '
+    {
+      normalized = $0
+      sub(/^[[:space:]]+/, "", normalized)
+      count = split(normalized, field, /[[:space:]]+/)
+      if (count == 4 && field[1] == "route" && field[2] == "remote_host" && field[4] == "net_gateway") {
+        next
+      }
+      print
+    }
+  ' "$profile_path" > "$import_profile_path"
 
   "$NMCLI_BIN" -t -f UUID,TYPE connection show 2>/dev/null | awk -F: '$2 == "vpn" { print $1 }' | sort > "$before_file"
 
-  if ! "$NMCLI_BIN" connection import type openvpn file "$profile_path" > /dev/null 2>"$stderr_file"; then
+  if ! "$NMCLI_BIN" connection import type openvpn file "$import_profile_path" > /dev/null 2>"$stderr_file"; then
     json_error import "$(tail -n 1 "$stderr_file" | tr -d '\r')"
     return 1
   fi
