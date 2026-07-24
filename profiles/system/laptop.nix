@@ -96,6 +96,7 @@
       pkgsUnstable.dgop
       pkgsUnstable.dsearch
       inputs.helium.packages.${pkgs.stdenv.hostPlatform.system}.default
+      inputs.zen-browser.packages.${pkgs.stdenv.hostPlatform.system}.default
       inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.t3code
       inputs.handy.packages.${pkgs.stdenv.hostPlatform.system}.handy
     ];
