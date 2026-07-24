@@ -61,7 +61,7 @@ output=$(
   FAKE_NM_STATE="$state" \
   FAKE_NM_LOG="$log" \
   FAKE_SOURCE_PROFILE="$profile" \
-  "$repo_root/scripts/sophos-vpn.sh" import "$profile" --name "Sophos VPN" --username "test.user"
+  bash "$repo_root/scripts/sophos-vpn.sh" import "$profile" --name "Sophos VPN" --username "test.user"
 )
 
 jq -e '.ok == true and .state == "imported" and .username == "test.user"' <<< "$output" >/dev/null
