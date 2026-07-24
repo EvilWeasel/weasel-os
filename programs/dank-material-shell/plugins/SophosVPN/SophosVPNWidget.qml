@@ -21,6 +21,10 @@ PluginComponent {
     property string deviceText: ""
     property string ip4Text: ""
     property bool connected: false
+    property bool bridgeConnected: false
+    property bool bridgeManaged: false
+    property string bridgeLocal: "127.0.0.1:13389"
+    property string bridgeTarget: "10.145.5.50:3389"
     property bool hasBasePassword: false
     property bool busy: false
     property string pendingAction: ""
@@ -34,10 +38,17 @@ PluginComponent {
     }
 
     function statusColor() {
-        if (state === "connected") return Theme.success
+        if (state === "connected" || state === "bridge-connected") return Theme.success
         if (state === "connecting") return Theme.warning
-        if (state === "error" || state === "missing") return Theme.error
+        if (state === "error" || state === "missing" || state === "conflict") return Theme.error
         return Theme.surfaceVariantText
+    }
+
+    function statusIcon() {
+        if (connected) return "vpn_lock"
+        if (bridgeConnected) return "desktop_windows"
+        if (busy) return "sync"
+        return "vpn_key"
     }
 
     function sanitizedMessage(value) {
@@ -64,7 +75,11 @@ PluginComponent {
 
         if (data.connection) connectionName = data.connection
         state = data.state || (data.connected ? "connected" : "disconnected")
-        connected = Boolean(data.connected)
+        connected = Boolean(data.vpn_connected !== undefined ? data.vpn_connected : data.connected)
+        bridgeConnected = Boolean(data.bridge_connected)
+        bridgeManaged = Boolean(data.bridge_managed)
+        bridgeLocal = data.bridge_local || bridgeLocal
+        bridgeTarget = data.bridge_target || bridgeTarget
         hasBasePassword = Boolean(data.has_base_password)
         barText = data.bar_text || (connected ? "VPN ON" : "VPN OFF")
         detailText = data.detail_text || data.message || ""
@@ -153,10 +168,44 @@ PluginComponent {
         actionProcess.running = true
     }
 
+    function connectBridge() {
+        busy = true
+        pendingAction = "bridge-connect"
+        actionErrorText = ""
+        actionProcess.stdinEnabled = false
+        actionProcess.command = ["sophos-vpn", "bridge-connect"]
+        actionProcess.environment = helperEnv()
+        actionProcess.running = true
+    }
+
+    function disconnectBridge() {
+        busy = true
+        pendingAction = "bridge-disconnect"
+        actionErrorText = ""
+        actionProcess.stdinEnabled = false
+        actionProcess.command = ["sophos-vpn", "bridge-disconnect"]
+        actionProcess.environment = helperEnv()
+        actionProcess.running = true
+    }
+
+    function toggleVpn() {
+        if (busy || actionProcess.running) return
+        if (connected) disconnectVpn()
+        else connectVpn()
+    }
+
+    function toggleBridge() {
+        if (busy || actionProcess.running) return
+        if (bridgeConnected) disconnectBridge()
+        else connectBridge()
+    }
+
     function toggleQuickAction() {
         if (busy || actionProcess.running) return
         if (connected) {
             disconnectVpn()
+        } else if (bridgeConnected) {
+            disconnectBridge()
         } else if (hasBasePassword) {
             connectVpn()
         } else {
@@ -281,7 +330,7 @@ PluginComponent {
             spacing: Theme.spacingXS
 
             DankIcon {
-                name: root.connected ? "vpn_lock" : root.busy ? "sync" : "vpn_key"
+                name: root.statusIcon()
                 size: Theme.iconSize - 6
                 color: root.statusColor()
                 anchors.verticalCenter: parent.verticalCenter
@@ -309,7 +358,7 @@ PluginComponent {
             spacing: Theme.spacingXS
 
             DankIcon {
-                name: root.connected ? "vpn_lock" : root.busy ? "sync" : "vpn_key"
+                name: root.statusIcon()
                 size: Theme.iconSize - 6
                 color: root.statusColor()
                 anchors.horizontalCenter: parent.horizontalCenter
@@ -353,7 +402,7 @@ PluginComponent {
                             spacing: Theme.spacingM
 
                             DankIcon {
-                                name: root.connected ? "vpn_lock" : root.busy ? "sync" : "vpn_key"
+                                name: root.statusIcon()
                                 size: Theme.iconSize
                                 color: root.statusColor()
                                 anchors.verticalCenter: parent.verticalCenter
@@ -394,6 +443,10 @@ PluginComponent {
                             StyledText { text: root.hasBasePassword ? "Stored" : "Missing"; color: root.hasBasePassword ? Theme.success : Theme.warning; font.pixelSize: Theme.fontSizeSmall }
                             StyledText { text: "Tunnel"; color: Theme.surfaceVariantText; font.pixelSize: Theme.fontSizeSmall }
                             StyledText { text: root.deviceText || "-"; color: Theme.surfaceText; font.pixelSize: Theme.fontSizeSmall }
+                            StyledText { text: "RDP endpoint"; color: Theme.surfaceVariantText; font.pixelSize: Theme.fontSizeSmall }
+                            StyledText { text: root.bridgeLocal; color: Theme.surfaceText; font.pixelSize: Theme.fontSizeSmall }
+                            StyledText { text: "RDP target"; color: Theme.surfaceVariantText; font.pixelSize: Theme.fontSizeSmall }
+                            StyledText { text: root.bridgeTarget; color: Theme.surfaceText; font.pixelSize: Theme.fontSizeSmall }
                         }
                     }
                 }
@@ -473,16 +526,16 @@ PluginComponent {
 
                     ActionButton {
                         Layout.fillWidth: true
-                        text: "Connect"
-                        accentColor: Theme.success
-                        onClicked: root.connectVpn()
+                        text: root.connected ? "OpenVPN: ON" : "OpenVPN: OFF"
+                        accentColor: root.connected ? Theme.error : Theme.success
+                        onClicked: root.toggleVpn()
                     }
 
                     ActionButton {
                         Layout.fillWidth: true
-                        text: "Disconnect"
-                        accentColor: Theme.error
-                        onClicked: root.disconnectVpn()
+                        text: root.bridgeConnected ? "RDP bridge: ON" : "RDP bridge: OFF"
+                        accentColor: root.bridgeConnected ? Theme.error : Theme.secondary
+                        onClicked: root.toggleBridge()
                     }
                 }
 
@@ -510,8 +563,8 @@ PluginComponent {
                         anchors.fill: parent
                         anchors.margins: Theme.spacingM
                         wrapMode: Text.Wrap
-                        text: root.messageText || "Right-click the bar pill for a quick connect/disconnect toggle."
-                        color: root.state === "error" || root.state === "missing" ? Theme.error : Theme.surfaceVariantText
+                        text: root.messageText || "OpenVPN and the RDP SSH bridge are mutually exclusive. RDP connects through 127.0.0.1:13389."
+                        color: root.state === "error" || root.state === "missing" || root.state === "conflict" ? Theme.error : Theme.surfaceVariantText
                         font.pixelSize: Theme.fontSizeSmall
                     }
                 }

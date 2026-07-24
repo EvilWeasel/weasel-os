@@ -10,6 +10,14 @@ SECRET_ACCOUNT=${SOPHOS_VPN_SECRET_ACCOUNT:-default}
 DEFAULT_IMPORT_USERNAME=${SOPHOS_VPN_USERNAME:-}
 NMCLI_BIN=${NMCLI_BIN:-nmcli}
 SECRET_TOOL_BIN=${SECRET_TOOL_BIN:-secret-tool}
+SSH_BIN=${SSH_BIN:-ssh}
+SS_BIN=${SS_BIN:-ss}
+BRIDGE_SSH_HOST=${SOPHOS_VPN_BRIDGE_SSH_HOST:-blain-ai}
+BRIDGE_LOCAL_ADDRESS=${SOPHOS_VPN_BRIDGE_LOCAL_ADDRESS:-127.0.0.1}
+BRIDGE_LOCAL_PORT=${SOPHOS_VPN_BRIDGE_LOCAL_PORT:-13389}
+BRIDGE_TARGET_HOST=${SOPHOS_VPN_BRIDGE_TARGET_HOST:-10.145.5.50}
+BRIDGE_TARGET_PORT=${SOPHOS_VPN_BRIDGE_TARGET_PORT:-3389}
+BRIDGE_CONTROL_SOCKET=${SOPHOS_VPN_BRIDGE_CONTROL_SOCKET:-${XDG_RUNTIME_DIR:-/tmp}/sophos-vpn/rdp-bridge.sock}
 
 usage() {
   cat <<'EOF'
@@ -17,6 +25,8 @@ Usage:
   sophos-vpn status
   sophos-vpn connect
   sophos-vpn disconnect
+  sophos-vpn bridge-connect
+  sophos-vpn bridge-disconnect
   sophos-vpn import <profile.ovpn> [--name <connection-name>] [--username <vpn-username>]
   sophos-vpn store-password
 
@@ -40,6 +50,21 @@ json_status() {
   local ip4=$5
   local message=$6
   local bar_text detail_text severity
+  local bridge_connected=false
+  local bridge_managed=false
+
+  if bridge_listener_active; then
+    bridge_connected=true
+  fi
+  if bridge_managed_active; then
+    bridge_managed=true
+  fi
+
+  if [[ $connected == true && $bridge_connected == true ]]; then
+    state=conflict
+  elif [[ $connected != true && $bridge_connected == true ]]; then
+    state=bridge-connected
+  fi
 
   case "$state" in
     connected)
@@ -47,6 +72,20 @@ json_status() {
       detail_text=${ip4:+$device $ip4}
       detail_text=${detail_text:-Connected}
       severity="ok"
+      ;;
+    bridge-connected)
+      bar_text="RDP ON"
+      if [[ $bridge_managed == true ]]; then
+        detail_text="SSH bridge via $BRIDGE_SSH_HOST"
+      else
+        detail_text="SSH bridge active externally"
+      fi
+      severity="ok"
+      ;;
+    conflict)
+      bar_text="VPN + RDP"
+      detail_text="Both paths are active"
+      severity="error"
       ;;
     connecting)
       bar_text="VPN ..."
@@ -80,12 +119,23 @@ json_status() {
     --arg bar_text "$bar_text" \
     --arg detail_text "$detail_text" \
     --arg severity "$severity" \
+    --arg bridge_host "$BRIDGE_SSH_HOST" \
+    --arg bridge_local "$BRIDGE_LOCAL_ADDRESS:$BRIDGE_LOCAL_PORT" \
+    --arg bridge_target "$BRIDGE_TARGET_HOST:$BRIDGE_TARGET_PORT" \
     --argjson connected "$connected" \
     --argjson has_secret "$has_secret" \
+    --argjson bridge_connected "$bridge_connected" \
+    --argjson bridge_managed "$bridge_managed" \
     '{
-      ok: ($state != "error"),
+      ok: ($state != "error" and $state != "conflict"),
       connection: $connection,
       connected: $connected,
+      vpn_connected: $connected,
+      bridge_connected: $bridge_connected,
+      bridge_managed: $bridge_managed,
+      bridge_host: $bridge_host,
+      bridge_local: $bridge_local,
+      bridge_target: $bridge_target,
       state: $state,
       device: $device,
       ip4: $ip4,
@@ -94,7 +144,11 @@ json_status() {
       detail_text: $detail_text,
       severity: $severity,
       message: $message,
-      available_actions: (if $connected then ["disconnect","status"] else ["connect","status"] end)
+      available_actions:
+        if $connected then ["disconnect","bridge-connect","status"]
+        elif $bridge_connected then ["bridge-disconnect","connect","status"]
+        else ["connect","bridge-connect","status"]
+        end
     }'
 }
 
@@ -120,6 +174,14 @@ require_bins() {
   }
   command_exists "$SECRET_TOOL_BIN" || {
     json_error "bootstrap" "secret-tool not found" >&2
+    exit 127
+  }
+  command_exists "$SSH_BIN" || {
+    json_error "bootstrap" "ssh not found" >&2
+    exit 127
+  }
+  command_exists "$SS_BIN" || {
+    json_error "bootstrap" "ss not found" >&2
     exit 127
   }
   command_exists jq || {
@@ -161,6 +223,51 @@ active_ip4() {
   local device=$1
   [[ -n $device ]] || return 0
   "$NMCLI_BIN" -g IP4.ADDRESS device show "$device" 2>/dev/null | paste -sd, - | sed 's#/.*##g'
+}
+
+bridge_managed_active() {
+  [[ -e $BRIDGE_CONTROL_SOCKET ]] || return 1
+  "$SSH_BIN" -S "$BRIDGE_CONTROL_SOCKET" -O check "$BRIDGE_SSH_HOST" >/dev/null 2>&1
+}
+
+bridge_listener_active() {
+  "$SS_BIN" -H -ltn "sport = :$BRIDGE_LOCAL_PORT" 2>/dev/null | grep -q .
+}
+
+start_managed_bridge() {
+  local socket_dir
+
+  if bridge_managed_active; then
+    return 0
+  fi
+  if bridge_listener_active; then
+    return 2
+  fi
+
+  socket_dir=$(dirname "$BRIDGE_CONTROL_SOCKET")
+  mkdir -p "$socket_dir"
+  chmod 0700 "$socket_dir"
+  rm -f "$BRIDGE_CONTROL_SOCKET"
+
+  "$SSH_BIN" \
+    -M \
+    -S "$BRIDGE_CONTROL_SOCKET" \
+    -fN \
+    -o BatchMode=yes \
+    -o ExitOnForwardFailure=yes \
+    -o ServerAliveInterval=30 \
+    -o ServerAliveCountMax=3 \
+    -L "$BRIDGE_LOCAL_ADDRESS:$BRIDGE_LOCAL_PORT:$BRIDGE_TARGET_HOST:$BRIDGE_TARGET_PORT" \
+    "$BRIDGE_SSH_HOST"
+}
+
+stop_managed_bridge() {
+  if ! bridge_managed_active; then
+    return 1
+  fi
+
+  "$SSH_BIN" -S "$BRIDGE_CONTROL_SOCKET" -O exit "$BRIDGE_SSH_HOST" >/dev/null 2>&1
+  rm -f "$BRIDGE_CONTROL_SOCKET"
 }
 
 print_status() {
@@ -206,6 +313,7 @@ store_password() {
 connect_vpn() {
   local base_password totp combined
   local tmpdir passwd_file stderr_file
+  local bridge_was_active=false
 
   if ! ensure_connection_exists; then
     json_error connect "connection not imported"
@@ -222,6 +330,18 @@ connect_vpn() {
   if [[ ! $totp =~ ^[0-9]{6}$ ]]; then
     json_error connect "TOTP must be exactly 6 digits"
     return 1
+  fi
+
+  if bridge_listener_active && ! bridge_managed_active; then
+    json_error connect "RDP bridge is active outside the plugin; stop its ssh command first"
+    return 1
+  fi
+  if bridge_managed_active; then
+    bridge_was_active=true
+    if ! stop_managed_bridge; then
+      json_error connect "failed to stop RDP bridge"
+      return 1
+    fi
   fi
 
   combined=${base_password}${totp}
@@ -241,6 +361,9 @@ connect_vpn() {
   local safe_error
   safe_error=$(tail -n 1 "$stderr_file" | tr -d '\r' | sed 's/[[:space:]]\+/ /g')
   safe_error=${safe_error:-connection failed}
+  if [[ $bridge_was_active == true ]]; then
+    start_managed_bridge >/dev/null 2>&1 || true
+  fi
   json_error connect "$safe_error"
   return 1
 }
@@ -265,6 +388,53 @@ disconnect_vpn() {
 
   json_error disconnect "disconnect failed"
   return 1
+}
+
+connect_bridge() {
+  local device
+  device=$(active_device)
+
+  if [[ -n $device ]]; then
+    if ! "$NMCLI_BIN" --wait 30 connection down id "$CONNECTION_NAME" >/dev/null 2>&1; then
+      json_error bridge-connect "failed to disconnect OpenVPN before starting RDP bridge"
+      return 1
+    fi
+  fi
+
+  if bridge_managed_active; then
+    print_status | jq '. + {action:"bridge-connect", message:"RDP bridge already connected"}'
+    return 0
+  fi
+  if bridge_listener_active; then
+    print_status | jq '. + {action:"bridge-connect", message:"RDP bridge is active outside the plugin"}'
+    return 0
+  fi
+
+  if start_managed_bridge; then
+    print_status | jq '. + {action:"bridge-connect", message:"RDP bridge connected"}'
+    return 0
+  fi
+
+  json_error bridge-connect "failed to start RDP bridge"
+  return 1
+}
+
+disconnect_bridge() {
+  if bridge_managed_active; then
+    if stop_managed_bridge; then
+      print_status | jq '. + {action:"bridge-disconnect", message:"RDP bridge disconnected"}'
+      return 0
+    fi
+    json_error bridge-disconnect "failed to stop RDP bridge"
+    return 1
+  fi
+
+  if bridge_listener_active; then
+    json_error bridge-disconnect "RDP bridge is active outside the plugin; stop its original ssh command"
+    return 1
+  fi
+
+  print_status | jq '. + {action:"bridge-disconnect", message:"RDP bridge already disconnected"}'
 }
 
 import_profile() {
@@ -373,6 +543,14 @@ main() {
     disconnect)
       shift
       disconnect_vpn "$@"
+      ;;
+    bridge-connect)
+      shift
+      connect_bridge "$@"
+      ;;
+    bridge-disconnect)
+      shift
+      disconnect_bridge "$@"
       ;;
     import)
       shift

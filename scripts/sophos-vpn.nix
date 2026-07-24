@@ -9,6 +9,8 @@ pkgs.writeShellApplication {
     pkgs.jq
     pkgs.libsecret
     pkgs.networkmanager
+    pkgs.openssh
+    pkgs.iproute2
   ];
   text = builtins.readFile ./sophos-vpn.sh;
 }
