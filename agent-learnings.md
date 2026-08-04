@@ -656,3 +656,9 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Added `@wheel` to trusted Nix users and disabled sudo password prompts for wheel users in the shared system profile.
 - Pitfall/Root cause: `nh os switch` and `nixos-rebuild-ng` can run different root commands during activation, so narrowly whitelisting individual sudoers command paths is brittle for `fr`, `fu`, and `ncg`.
 - Verification: `nix-instantiate --parse profiles/system/common.nix`, `nix fmt`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-desktop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.ew-cloud.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.michapc.config.system.build.toplevel.drvPath`, `nix eval --no-write-lock-file .#nixosConfigurations.michapc-debug.config.system.build.toplevel.drvPath`
+
+### 2026-08-04 (add ouch to devshell)
+- Date: 2026-08-04
+- Change: Added `ouch` to the shared development shell package list.
+- Pitfall/Root cause: Devshell tooling is sourced from the central `devPackages` list in `flake/modules/shared.nix`; the desktop host evaluation remains blocked by the pre-existing insecure `docker-28.5.2` package.
+- Verification: `nixfmt flake/modules/shared.nix`, `nix-instantiate --parse flake/modules/shared.nix`, `nix eval --no-write-lock-file .#devShells.x86_64-linux.default.drvPath`

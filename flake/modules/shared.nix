@@ -54,6 +54,7 @@ in
           nixd
           nodejs_22
           nushell
+          ouch
           pnpm
           pyright
           ripgrep
