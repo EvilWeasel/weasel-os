@@ -662,3 +662,10 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Added `ouch` to the shared development shell package list.
 - Pitfall/Root cause: Devshell tooling is sourced from the central `devPackages` list in `flake/modules/shared.nix`; the desktop host evaluation remains blocked by the pre-existing insecure `docker-28.5.2` package.
 - Verification: `nixfmt flake/modules/shared.nix`, `nix-instantiate --parse flake/modules/shared.nix`, `nix eval --no-write-lock-file .#devShells.x86_64-linux.default.drvPath`
+
+### 2026-08-04 (validate devshell rebuild host)
+
+- Date: 2026-08-04
+- Change: Made the devshell `fr` and `fu` functions validate `WEASEL_OS_HOST` against the flake host registry before invoking `nh`.
+- Pitfall/Root cause: On WSL, `$HOSTNAME` was `Blain37`, which is not a `nixosConfigurations` attribute, so `nh` attempted to build a nonexistent configuration.
+- Verification: `nix fmt`, `nix-instantiate --parse flake/modules/shared.nix`, `nix eval --no-write-lock-file .#devShells.x86_64-linux.default.drvPath`, `NIXPKGS_ALLOW_INSECURE=1 nix eval --impure --no-write-lock-file .#nixosConfigurations.<host>.config.system.build.toplevel.drvPath` for all hosts.
