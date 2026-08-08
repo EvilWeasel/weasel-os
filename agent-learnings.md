@@ -704,3 +704,9 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Removed `gamemoderun` from Factorio app `427520` Steam launch options in the local Steam user config, leaving `%command% > logfile.txt`.
 - Pitfall/Root cause: Factorio was not reaching its own log; Steam showed `gamemoderun` exiting 139, and coredumps pointed at Steam overlay/Millennium preload frames before the game started.
 - Verification: `factorio --version` via the Steam install path, `steam -applaunch 427520`, `pgrep -af 'Factorio|factorio|SteamLaunch AppId=427520'`, and fresh `gameprocess_log.txt` entries showing Factorio tracked without the immediate 139 exit.
+
+### 2026-08-08 (Blain remote access streaming readiness)
+- Date: 2026-08-08
+- Change: Renamed the Sophos VPN widget to Blain Remote Access and added separate direct Moonlight/Sunshine route and TCP-control readiness while preserving the RDP-only SSH bridge.
+- Pitfall/Root cause: OpenSSH local forwarding is TCP-only, while Moonlight requires latency-sensitive UDP; the streaming path therefore uses a narrowly scoped Tailscale subnet route to `10.145.5.50/32` and reports UDP as unverified until a real stream succeeds.
+- Verification: `bash tests/test-sophos-vpn-bridge.sh`, `bash tests/test-sophos-vpn-import.sh`, `shellcheck`, QML parsing with `qmlformat`, isolated `sophos-vpn.nix` build, `git diff --check`, and `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`.

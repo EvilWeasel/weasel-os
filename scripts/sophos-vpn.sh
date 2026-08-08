@@ -12,12 +12,18 @@ NMCLI_BIN=${NMCLI_BIN:-nmcli}
 SECRET_TOOL_BIN=${SECRET_TOOL_BIN:-secret-tool}
 SSH_BIN=${SSH_BIN:-ssh}
 SS_BIN=${SS_BIN:-ss}
+IP_BIN=${IP_BIN:-ip}
+TIMEOUT_BIN=${TIMEOUT_BIN:-timeout}
 BRIDGE_SSH_HOST=${SOPHOS_VPN_BRIDGE_SSH_HOST:-blain-ai}
 BRIDGE_LOCAL_ADDRESS=${SOPHOS_VPN_BRIDGE_LOCAL_ADDRESS:-127.0.0.1}
 BRIDGE_LOCAL_PORT=${SOPHOS_VPN_BRIDGE_LOCAL_PORT:-13389}
 BRIDGE_TARGET_HOST=${SOPHOS_VPN_BRIDGE_TARGET_HOST:-10.145.5.50}
 BRIDGE_TARGET_PORT=${SOPHOS_VPN_BRIDGE_TARGET_PORT:-3389}
 BRIDGE_CONTROL_SOCKET=${SOPHOS_VPN_BRIDGE_CONTROL_SOCKET:-${XDG_RUNTIME_DIR:-/tmp}/sophos-vpn/rdp-bridge.sock}
+STREAM_HOST=${SOPHOS_VPN_STREAM_HOST:-$BRIDGE_TARGET_HOST}
+STREAM_CONTROL_PORT=${SOPHOS_VPN_STREAM_CONTROL_PORT:-47984}
+STREAM_ROUTE_DEVICE=${SOPHOS_VPN_STREAM_ROUTE_DEVICE:-tailscale0}
+STREAM_PROBE_TIMEOUT=${SOPHOS_VPN_STREAM_PROBE_TIMEOUT:-2}
 
 usage() {
   cat <<'EOF'
@@ -52,12 +58,23 @@ json_status() {
   local bar_text detail_text severity
   local bridge_connected=false
   local bridge_managed=false
+  local stream_route_ready=false
+  local stream_tcp_reachable=false
+  local stream_status=route-missing
 
   if bridge_listener_active; then
     bridge_connected=true
   fi
   if bridge_managed_active; then
     bridge_managed=true
+  fi
+  if stream_route_ready; then
+    stream_route_ready=true
+    stream_status=control-unreachable
+    if stream_tcp_reachable; then
+      stream_tcp_reachable=true
+      stream_status=control-reachable
+    fi
   fi
 
   if [[ $connected == true && $bridge_connected == true ]]; then
@@ -122,10 +139,16 @@ json_status() {
     --arg bridge_host "$BRIDGE_SSH_HOST" \
     --arg bridge_local "$BRIDGE_LOCAL_ADDRESS:$BRIDGE_LOCAL_PORT" \
     --arg bridge_target "$BRIDGE_TARGET_HOST:$BRIDGE_TARGET_PORT" \
+    --arg stream_host "$STREAM_HOST" \
+    --arg stream_control "$STREAM_HOST:$STREAM_CONTROL_PORT" \
+    --arg stream_route_device "$STREAM_ROUTE_DEVICE" \
+    --arg stream_status "$stream_status" \
     --argjson connected "$connected" \
     --argjson has_secret "$has_secret" \
     --argjson bridge_connected "$bridge_connected" \
     --argjson bridge_managed "$bridge_managed" \
+    --argjson stream_route_ready "$stream_route_ready" \
+    --argjson stream_tcp_reachable "$stream_tcp_reachable" \
     '{
       ok: ($state != "error" and $state != "conflict"),
       connection: $connection,
@@ -136,6 +159,13 @@ json_status() {
       bridge_host: $bridge_host,
       bridge_local: $bridge_local,
       bridge_target: $bridge_target,
+      stream_host: $stream_host,
+      stream_control: $stream_control,
+      stream_route_device: $stream_route_device,
+      stream_route_ready: $stream_route_ready,
+      stream_tcp_reachable: $stream_tcp_reachable,
+      stream_udp_verified: false,
+      stream_status: $stream_status,
       state: $state,
       device: $device,
       ip4: $ip4,
@@ -182,6 +212,14 @@ require_bins() {
   }
   command_exists "$SS_BIN" || {
     json_error "bootstrap" "ss not found" >&2
+    exit 127
+  }
+  command_exists "$IP_BIN" || {
+    json_error "bootstrap" "ip not found" >&2
+    exit 127
+  }
+  command_exists "$TIMEOUT_BIN" || {
+    json_error "bootstrap" "timeout not found" >&2
     exit 127
   }
   command_exists jq || {
@@ -232,6 +270,19 @@ bridge_managed_active() {
 
 bridge_listener_active() {
   "$SS_BIN" -H -ltn "sport = :$BRIDGE_LOCAL_PORT" 2>/dev/null | grep -q .
+}
+
+stream_route_ready() {
+  local route
+  route=$("$IP_BIN" route get "$STREAM_HOST" 2>/dev/null | head -n 1) || return 1
+  [[ " $route " == *" dev $STREAM_ROUTE_DEVICE "* ]]
+}
+
+stream_tcp_reachable() {
+  stream_route_ready || return 1
+  # The inner shell expands its positional host and port arguments.
+  # shellcheck disable=SC2016
+  "$TIMEOUT_BIN" "$STREAM_PROBE_TIMEOUT" bash -c 'exec 3<>"/dev/tcp/$1/$2"' _ "$STREAM_HOST" "$STREAM_CONTROL_PORT" 2>/dev/null
 }
 
 start_managed_bridge() {

@@ -25,6 +25,12 @@ PluginComponent {
     property bool bridgeManaged: false
     property string bridgeLocal: "127.0.0.1:13389"
     property string bridgeTarget: "10.145.5.50:3389"
+    property string streamHost: "10.145.5.50"
+    property string streamControl: "10.145.5.50:47984"
+    property string streamRouteDevice: "tailscale0"
+    property bool streamRouteReady: false
+    property bool streamTcpReachable: false
+    property string streamStatus: "route-missing"
     property bool hasBasePassword: false
     property bool busy: false
     property string pendingAction: ""
@@ -80,6 +86,12 @@ PluginComponent {
         bridgeManaged = Boolean(data.bridge_managed)
         bridgeLocal = data.bridge_local || bridgeLocal
         bridgeTarget = data.bridge_target || bridgeTarget
+        streamHost = data.stream_host || streamHost
+        streamControl = data.stream_control || streamControl
+        streamRouteDevice = data.stream_route_device || streamRouteDevice
+        streamRouteReady = Boolean(data.stream_route_ready)
+        streamTcpReachable = Boolean(data.stream_tcp_reachable)
+        streamStatus = data.stream_status || "route-missing"
         hasBasePassword = Boolean(data.has_base_password)
         barText = data.bar_text || (connected ? "VPN ON" : "VPN OFF")
         detailText = data.detail_text || data.message || ""
@@ -377,7 +389,7 @@ PluginComponent {
 
     popoutContent: Component {
         PopoutComponent {
-            headerText: "Sophos VPN"
+            headerText: "Blain Remote Access"
             detailsText: root.connectionName + " • " + root.detailText
             showCloseButton: true
 
@@ -445,8 +457,16 @@ PluginComponent {
                             StyledText { text: root.deviceText || "-"; color: Theme.surfaceText; font.pixelSize: Theme.fontSizeSmall }
                             StyledText { text: "RDP endpoint"; color: Theme.surfaceVariantText; font.pixelSize: Theme.fontSizeSmall }
                             StyledText { text: root.bridgeLocal; color: Theme.surfaceText; font.pixelSize: Theme.fontSizeSmall }
-                            StyledText { text: "RDP target"; color: Theme.surfaceVariantText; font.pixelSize: Theme.fontSizeSmall }
+                            StyledText { text: "RDP SSH target"; color: Theme.surfaceVariantText; font.pixelSize: Theme.fontSizeSmall }
                             StyledText { text: root.bridgeTarget; color: Theme.surfaceText; font.pixelSize: Theme.fontSizeSmall }
+                            StyledText { text: "Moonlight host"; color: Theme.surfaceVariantText; font.pixelSize: Theme.fontSizeSmall }
+                            StyledText { text: root.streamHost + " (direct, not SSH)"; color: Theme.surfaceText; font.pixelSize: Theme.fontSizeSmall }
+                            StyledText { text: "Direct route"; color: Theme.surfaceVariantText; font.pixelSize: Theme.fontSizeSmall }
+                            StyledText { text: root.streamRouteReady ? "Ready via " + root.streamRouteDevice : "Missing via " + root.streamRouteDevice; color: root.streamRouteReady ? Theme.success : Theme.warning; font.pixelSize: Theme.fontSizeSmall }
+                            StyledText { text: "Sunshine control"; color: Theme.surfaceVariantText; font.pixelSize: Theme.fontSizeSmall }
+                            StyledText { text: root.streamTcpReachable ? root.streamControl + " reachable" : root.streamControl + " unreachable"; color: root.streamTcpReachable ? Theme.success : Theme.warning; font.pixelSize: Theme.fontSizeSmall }
+                            StyledText { text: "Streaming UDP"; color: Theme.surfaceVariantText; font.pixelSize: Theme.fontSizeSmall }
+                            StyledText { text: "Verify with a Moonlight stream"; color: Theme.surfaceVariantText; font.pixelSize: Theme.fontSizeSmall }
                         }
                     }
                 }
@@ -563,7 +583,7 @@ PluginComponent {
                         anchors.fill: parent
                         anchors.margins: Theme.spacingM
                         wrapMode: Text.Wrap
-                        text: root.messageText || "OpenVPN and the RDP SSH bridge are mutually exclusive. RDP connects through 127.0.0.1:13389."
+                        text: root.messageText || "The SSH bridge carries RDP only (127.0.0.1:13389). Moonlight/Sunshine connects directly to 10.145.5.50; this check does not verify streaming UDP."
                         color: root.state === "error" || root.state === "missing" || root.state === "conflict" ? Theme.error : Theme.surfaceVariantText
                         font.pixelSize: Theme.fontSizeSmall
                     }
