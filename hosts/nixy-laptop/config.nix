@@ -19,7 +19,9 @@
 
   services.netbird = {
     package = pkgs.callPackage ../../packages/netbird-bin.nix { };
-    ui.package = pkgs.callPackage ../../packages/netbird-ui-bin.nix { };
+    ui.package = pkgs.callPackage ../../packages/netbird-ui-bin.nix {
+      daemonSocket = "/var/run/netbird-personal/sock";
+    };
     useRoutingFeatures = "none";
     ui.enable = true;
     clients.personal = {

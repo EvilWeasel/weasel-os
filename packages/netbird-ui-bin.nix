@@ -12,6 +12,7 @@
   libsoup_3,
   webkitgtk_6_0,
   xorg,
+  daemonSocket ? "/var/run/netbird.sock",
 }:
 
 stdenv.mkDerivation (finalAttrs: {
@@ -53,6 +54,12 @@ stdenv.mkDerivation (finalAttrs: {
     substituteInPlace "$out/share/applications/netbird.desktop" \
       --replace-fail "/usr/bin/netbird-ui" "$out/bin/netbird-ui"
     runHook postInstall
+  '';
+
+  preFixup = ''
+    gappsWrapperArgs+=(
+      --set-default NB_DAEMON_ADDR ${lib.escapeShellArg daemonSocket}
+    )
   '';
 
   meta = {
