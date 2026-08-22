@@ -710,3 +710,9 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Renamed the Sophos VPN widget to Blain Remote Access and added separate direct Moonlight/Sunshine route and TCP-control readiness while preserving the RDP-only SSH bridge.
 - Pitfall/Root cause: OpenSSH local forwarding is TCP-only, while Moonlight requires latency-sensitive UDP; the streaming path therefore uses a narrowly scoped Tailscale subnet route to `10.145.5.50/32` and reports UDP as unverified until a real stream succeeds.
 - Verification: `bash tests/test-sophos-vpn-bridge.sh`, `bash tests/test-sophos-vpn-import.sh`, `shellcheck`, QML parsing with `qmlformat`, isolated `sophos-vpn.nix` build, `git diff --check`, and `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`.
+
+### 2026-08-22 (declarative personal NetBird client)
+- Date: 2026-08-22
+- Change: Added a hardened `services.netbird.clients.personal` instance on `nixy-laptop` using `pkgsUnstable.netbird`, the self-hosted management endpoint, and no routing features; performed one-time setup-key enrollment and removed the bootstrap secret afterward.
+- Pitfall/Root cause: The NixOS 25.11 login helper matches `Connected` inside `Disconnected` and can skip setup-key login; a temporary `lib.mkForce` login script was required only for enrollment. The unstable NetBird UI package also failed the stable module's desktop-entry wrapper, so the working stable UI package remains paired with the newer daemon.
+- Verification: `nix-instantiate --parse hosts/nixy-laptop/config.nix`, `nix fmt -- hosts/nixy-laptop/config.nix`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, full `nix build`, two successful `nixos-rebuild switch` activations, `netbird-personal status --check startup`, and API peer verification.
