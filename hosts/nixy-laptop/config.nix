@@ -1,7 +1,7 @@
 {
   config,
   lib,
-  pkgsUnstable,
+  pkgs,
   ...
 }:
 {
@@ -18,13 +18,16 @@
   hardware.nvidia.package = lib.mkForce config.boot.kernelPackages.nvidiaPackages.production;
 
   services.netbird = {
-    package = pkgsUnstable.netbird;
+    package = pkgs.callPackage ../../packages/netbird-bin.nix { };
+    ui.package = pkgs.callPackage ../../packages/netbird-ui-bin.nix { };
     useRoutingFeatures = "none";
+    ui.enable = true;
     clients.personal = {
       name = "personal";
       interface = "nb-personal";
       port = 51821;
       hardened = true;
+      autoStart = true;
       ui.enable = true;
       environment = {
         NB_MANAGEMENT_URL = "https://netbird.evilweasel.cloud";
