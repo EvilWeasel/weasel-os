@@ -258,6 +258,9 @@ in
 
   nixpkgs = {
     overlays = [
+      (final: prev: {
+        vesktop = final.callPackage ../../packages/vesktop-bin.nix { };
+      })
       inputs.millennium.overlays.default
     ];
     config = {
