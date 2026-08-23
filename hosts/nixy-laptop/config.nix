@@ -61,5 +61,44 @@
     };
   };
 
+  # Tailscale's ts-input anti-spoof chain treats NetBird's 100.96.0.0/16
+  # address space as part of its own CGNAT range and otherwise drops replies
+  # arriving on nb-personal. Reinstall this narrow exception after every
+  # tailscaled start; NetBird policy remains the authorization boundary.
+  systemd.services.netbird-tailscale-cgnat-compat = {
+    description = "Allow personal NetBird CGNAT before Tailscale anti-spoofing";
+    after = [
+      "network-online.target"
+      "netbird-personal.service"
+      "tailscaled.service"
+    ];
+    wants = [
+      "network-online.target"
+      "netbird-personal.service"
+    ];
+    wantedBy = [ "tailscaled.service" ];
+    serviceConfig = {
+      Type = "oneshot";
+      RemainAfterExit = true;
+    };
+    script = ''
+      set -euo pipefail
+      marker="weasel-netbird-cgnat-compat"
+      for attempt in $(seq 1 30); do
+        if ${pkgs.nftables}/bin/nft list chain ip filter ts-input >/dev/null 2>&1; then
+          if ${pkgs.nftables}/bin/nft list chain ip filter ts-input | ${pkgs.gnugrep}/bin/grep --fixed-strings --quiet "$marker"; then
+            exit 0
+          fi
+          ${pkgs.nftables}/bin/nft insert rule ip filter ts-input iifname "nb-personal" ip saddr 100.96.0.0/16 counter accept comment "$marker"
+          ${pkgs.nftables}/bin/nft list chain ip filter ts-input | ${pkgs.gnugrep}/bin/grep --fixed-strings --quiet "$marker"
+          exit 0
+        fi
+        sleep 1
+      done
+      echo "Tailscale ts-input chain did not appear within 30 seconds" >&2
+      exit 1
+    '';
+  };
+
   users.users.evilweasel.extraGroups = [ "netbird-personal" ];
 }
