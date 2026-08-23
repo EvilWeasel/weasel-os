@@ -25,11 +25,6 @@
 
   weasel.wispr-flow.enable = true;
 
-  # NetBird custom zones require a split-DNS-capable resolver.  openresolv
-  # cannot represent match domains and currently fails to install NetBird's
-  # DNS configuration, while systemd-resolved supports per-link routing.
-  services.resolved.enable = true;
-
   services.netbird = {
     package = pkgs.callPackage ../../packages/netbird-bin.nix { };
     ui.package = pkgs.callPackage ../../packages/netbird-ui-bin.nix {
@@ -40,10 +35,6 @@
     clients.personal = {
       name = "personal";
       interface = "nb-personal";
-      # The managed DNS zone uses this loopback listener. Declaring it makes
-      # the upstream NixOS module grant only CAP_NET_BIND_SERVICE in addition
-      # to the existing WireGuard capabilities.
-      dns-resolver.address = "127.0.0.153";
       port = 51821;
       dns-resolver = {
         address = "127.0.0.153";
