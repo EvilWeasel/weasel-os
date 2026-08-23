@@ -10,12 +10,15 @@
     ../../profiles/system/base.nix
     ../../profiles/system/client.nix
     ../../profiles/system/laptop.nix
+    ../../modules/wispr-flow.nix
     # ../../modules/networking/internal-dns.nix
     ./hardware.nix
     ./users.nix
   ];
 
   hardware.nvidia.package = lib.mkForce config.boot.kernelPackages.nvidiaPackages.production;
+
+  weasel.wispr-flow.enable = true;
 
   services.netbird = {
     package = pkgs.callPackage ../../packages/netbird-bin.nix { };
