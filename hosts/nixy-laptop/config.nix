@@ -67,7 +67,7 @@
       "network-online.target"
       "netbird-personal.service"
     ];
-    wantedBy = [ "tailscaled.service" ];
+    wantedBy = [ "multi-user.target" "tailscaled.service" ];
     serviceConfig = {
       Type = "oneshot";
       RemainAfterExit = true;
