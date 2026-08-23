@@ -36,6 +36,10 @@
       name = "personal";
       interface = "nb-personal";
       port = 51821;
+      dns-resolver = {
+        address = "127.0.0.153";
+        port = 53;
+      };
       hardened = true;
       autoStart = true;
       ui.enable = true;
@@ -49,10 +53,4 @@
   };
 
   users.users.evilweasel.extraGroups = [ "netbird-personal" ];
-
-  # The hardened client already carries the network capabilities it needs,
-  # but its unprivileged local DNS proxy must additionally bind port 53.
-  systemd.services.netbird-personal.serviceConfig.AmbientCapabilities = lib.mkAfter [
-    "CAP_NET_BIND_SERVICE"
-  ];
 }
