@@ -21,25 +21,21 @@ let
     inherit pname version src;
 
     postExtract = ''
-          # AppImages normally disable Chromium's sandbox because a SquashFS mount
-          # cannot retain a setuid helper. We run the extracted payload and use the
-          # audited NixOS wrapper at /run/wrappers/bin/__chromium-suid-sandbox.
-          substituteInPlace "$out/AppRun" \
-            --replace-fail "build_electron_args 'appimage'" "build_electron_args 'nix'"
+      # AppImages normally disable Chromium's sandbox because a SquashFS mount
+      # cannot retain a setuid helper. We run the extracted payload and use the
+      # audited NixOS wrapper at /run/wrappers/bin/__chromium-suid-sandbox.
+      substituteInPlace "$out/AppRun" \
+        --replace-fail "build_electron_args 'appimage'" "build_electron_args 'nix'"
 
-          substituteInPlace "$out/usr/lib/wispr-flow/doctor.sh" \
-            --replace-fail \
-              'local electron_path="''${1:-}"' \
-              'local electron_path="''${1:-}"
-      if [[ -n ''${CHROME_DEVEL_SANDBOX:-} && -x ''${CHROME_DEVEL_SANDBOX:-} && -u ''${CHROME_DEVEL_SANDBOX:-} ]]; then
-        _pass "chrome-sandbox: external setuid helper OK ($CHROME_DEVEL_SANDBOX)"
-        return
-      fi'
+      substituteInPlace "$out/usr/lib/wispr-flow/doctor.sh" \
+        --replace-fail \
+          $'_doctor_check_sandbox() {\n\tlocal electron_path="''${1:-}"' \
+          $'_doctor_check_sandbox() {\n\tlocal electron_path="''${1:-}"\n\tif [[ -n ''${CHROME_DEVEL_SANDBOX:-} && -x ''${CHROME_DEVEL_SANDBOX:-} && -u ''${CHROME_DEVEL_SANDBOX:-} ]]; then\n\t\t_pass "chrome-sandbox: external setuid helper OK ($CHROME_DEVEL_SANDBOX)"\n\t\treturn\n\tfi'
 
-          substituteInPlace "$out/usr/lib/wispr-flow/doctor.sh" \
-            --replace-fail \
-              "local desktop_file='/usr/share/applications/wispr-flow.desktop'" \
-              'local desktop_file="''${WISPR_DESKTOP_FILE:-/usr/share/applications/wispr-flow.desktop}"'
+      substituteInPlace "$out/usr/lib/wispr-flow/doctor.sh" \
+        --replace-fail \
+          "local desktop_file='/usr/share/applications/wispr-flow.desktop'" \
+          'local desktop_file="''${WISPR_DESKTOP_FILE:-/usr/share/applications/wispr-flow.desktop}"'
     '';
   };
 in
