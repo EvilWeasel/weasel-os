@@ -4,7 +4,7 @@
   lib,
 }:
 
-appimageTools.wrapType2 rec {
+let
   pname = "vesktop";
   version = "1.6.7";
 
@@ -12,6 +12,23 @@ appimageTools.wrapType2 rec {
     url = "https://github.com/Vencord/Vesktop/releases/download/v${version}/Vesktop-${version}.AppImage";
     hash = "sha256-hVYytou6pyTXbp89neqwQQER9dlbedo88CTOtU9ObYE=";
   };
+
+  appimageContents = appimageTools.extractType2 {
+    inherit pname version src;
+  };
+in
+appimageTools.wrapType2 {
+  inherit pname version src;
+
+  extraInstallCommands = ''
+    install -Dm444 \
+      ${appimageContents}/vesktop.desktop \
+      "$out/share/applications/vesktop.desktop"
+    substituteInPlace "$out/share/applications/vesktop.desktop" \
+      --replace-fail 'Exec=AppRun --no-sandbox %U' 'Exec=vesktop %U'
+
+    cp -r ${appimageContents}/usr/share/icons "$out/share/"
+  '';
 
   meta = {
     description = "Vesktop Discord client with current Wayland screenshare fixes";
