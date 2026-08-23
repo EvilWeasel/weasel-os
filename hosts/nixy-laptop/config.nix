@@ -20,6 +20,11 @@
 
   weasel.wispr-flow.enable = true;
 
+  # NetBird custom zones require a split-DNS-capable resolver.  openresolv
+  # cannot represent match domains and currently fails to install NetBird's
+  # DNS configuration, while systemd-resolved supports per-link routing.
+  services.resolved.enable = true;
+
   services.netbird = {
     package = pkgs.callPackage ../../packages/netbird-bin.nix { };
     ui.package = pkgs.callPackage ../../packages/netbird-ui-bin.nix {
@@ -44,4 +49,10 @@
   };
 
   users.users.evilweasel.extraGroups = [ "netbird-personal" ];
+
+  # The hardened client already carries the network capabilities it needs,
+  # but its unprivileged local DNS proxy must additionally bind port 53.
+  systemd.services.netbird-personal.serviceConfig.AmbientCapabilities = lib.mkAfter [
+    "CAP_NET_BIND_SERVICE"
+  ];
 }
