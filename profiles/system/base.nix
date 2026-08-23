@@ -346,7 +346,10 @@ in
     wants = [ "systemd-udev-settle.service" ];
   };
   systemd.services.flatpak-repo = {
-    path = [ pkgs.flatpak ];
+    path = [
+      pkgs.flatpak
+      pkgs.gnugrep
+    ];
     wantedBy = [ "multi-user.target" ];
     after = [ "network-online.target" ];
     wants = [ "network-online.target" ];
@@ -355,7 +358,16 @@ in
       flatpak remote-add --if-not-exists GeForceNOW https://international.download.nvidia.com/GFNLinux/flatpak/geforcenow.flatpakrepo
 
       if flatpak info --system com.nvidia.geforcenow >/dev/null 2>&1; then
-        flatpak update --system -y --noninteractive com.nvidia.geforcenow
+        if update_output=$(flatpak update --system -y --noninteractive com.nvidia.geforcenow 2>&1); then
+          printf '%s\n' "$update_output"
+        elif [[ $(printf '%s\n' "$update_output" | grep -c '^Error:') -eq 1 ]] \
+          && printf '%s\n' "$update_output" \
+            | grep -q '^Error: Failed to update com\.nvidia\.geforcenow: .*Update is older than current version$'; then
+          printf 'GeForce NOW remote is older than the installed version; keeping the installed version.\n'
+        else
+          printf '%s\n' "$update_output" >&2
+          exit 1
+        fi
       else
         flatpak install --system -y --noninteractive GeForceNOW com.nvidia.geforcenow
       fi

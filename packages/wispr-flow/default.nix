@@ -69,6 +69,13 @@ appimageTools.wrapAppImage {
 
     cp -r ${appimageContents}/usr/share/icons "$out/share/"
     cp -r ${appimageContents}/usr/share/metainfo "$out/share/"
+
+    install -Dm444 /dev/stdin \
+      "$out/lib/udev/rules.d/70-wispr-flow-uinput.rules" <<'UDEV'
+    # Wispr Flow: active-session access for text injection and push-to-talk.
+    KERNEL=="uinput", SUBSYSTEM=="misc", OPTIONS+="static_node=uinput", TAG+="uaccess", GROUP="input", MODE="0660"
+    SUBSYSTEM=="input", KERNEL=="event*", TAG+="uaccess", GROUP="input", MODE="0660"
+    UDEV
   '';
 
   meta = {

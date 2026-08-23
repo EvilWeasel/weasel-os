@@ -720,5 +720,11 @@ Append-only log of implementation lessons for future agents working in this repo
 ### 2026-08-23 (Wispr Flow on NixOS)
 - Date: 2026-08-23
 - Change: Added a checksum-pinned Wispr Flow AppImage package and a laptop-only NixOS module with active-session udev grants, `uinput`, desktop integration, and Chromium sandboxing.
-- Pitfall/Root cause: Upstream's Nix derivation is knowingly incomplete (`lib.fakeHash`, impure installer input, unreplaced Windows native DB modules). Wrapping the release AppImage is reliable, but its `--no-sandbox` mode must be patched out and `CHROME_DEVEL_SANDBOX` must point to NixOS 25.11's actual `/run/wrappers/bin/__chromium-suid-sandbox` name.
+- Pitfall/Root cause: Upstream's Nix derivation is knowingly incomplete (`lib.fakeHash`, impure installer input, unreplaced Windows native DB modules). Wrapping the release AppImage is reliable, but its `--no-sandbox` mode must be patched out and `CHROME_DEVEL_SANDBOX` must point to NixOS 25.11's actual `/run/wrappers/bin/__chromium-suid-sandbox` name. `uaccess` rules added through `services.udev.extraRules` land in `99-local.rules`, after systemd's seat-late ACL processing; device rules that need active-session ACLs must instead ship as an earlier `70-*` rule through `services.udev.packages`.
 - Verification: `nix fmt`; `nix flake check --no-write-lock-file`; package and full `nixy-laptop` builds; generated-wrapper, desktop-file, Electron/helper, Wayland/clipboard Doctor checks; static security scan; and independent fail-closed review.
+
+### 2026-08-23 (GeForce NOW Flatpak idempotence)
+- Date: 2026-08-23
+- Change: Made the declarative GeForce NOW Flatpak bootstrap tolerate the known benign case where the configured remote offers an older commit than the currently installed version while preserving fail-closed handling for other update errors.
+- Pitfall/Root cause: `flatpak update` exits non-zero for an older remote commit, which caused otherwise successful `nixos-rebuild switch` activations to report failure.
+- Verification: Full `nixy-laptop` build and `nix flake check --no-write-lock-file`; the generated activation script handled the older remote commit and exited `0`.
