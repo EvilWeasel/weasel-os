@@ -728,3 +728,9 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Made the declarative GeForce NOW Flatpak bootstrap tolerate the known benign case where the configured remote offers an older commit than the currently installed version while preserving fail-closed handling for other update errors.
 - Pitfall/Root cause: `flatpak update` exits non-zero for an older remote commit, which caused otherwise successful `nixos-rebuild switch` activations to report failure.
 - Verification: Full `nixy-laptop` build and `nix flake check --no-write-lock-file`; the generated activation script handled the older remote commit and exited `0`.
+
+### 2026-08-23 (NetBird split DNS with Tailscale coexistence)
+- Date: 2026-08-23
+- Change: Enabled `systemd-resolved` and pinned the personal NetBird client's typed `dns-resolver` option to `127.0.0.153:53`, providing private custom-zone resolution without public A/AAAA records.
+- Pitfall/Root cause: Tailscale's `ts-input` chain drops `100.64.0.0/10` traffic on non-Tailscale interfaces; because NetBird uses `100.96.0.0/16`, its default resolver appeared bound on the peer IP but local DNS packets were dropped on loopback. The NixOS NetBird module's typed resolver option declaratively manages `CustomDNSAddress`, the wrapper environment, and `CAP_NET_BIND_SERVICE`, avoiding firewall exceptions and imperative state.
+- Verification: full `nixy-laptop` build and switch; Wispr store closure remained identical; direct and system resolver queries returned the private records; normal HTTPS, dashboard authentication, Tailscale MagicDNS, and public DNS passed; Cloudflare API and an authoritative resolver confirmed the public fallback record was absent while NetBird DNS remained healthy.
