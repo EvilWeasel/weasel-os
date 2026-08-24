@@ -19,7 +19,15 @@
     extraPortals = with pkgs; [
       xdg-desktop-portal-gnome
       xdg-desktop-portal-gtk
+      xdg-desktop-portal-wlr
     ];
+    wlr = {
+      enable = true;
+      settings.screencast = {
+        max_fps = 60;
+        force_mod_linear = true;
+      };
+    };
     config.niri = {
       default = [
         "gnome"
@@ -27,8 +35,8 @@
       ];
       "org.freedesktop.impl.portal.Access" = [ "gtk" ];
       "org.freedesktop.impl.portal.Notification" = [ "gtk" ];
-      "org.freedesktop.impl.portal.ScreenCast" = [ "gnome" ];
-      "org.freedesktop.impl.portal.Screenshot" = [ "gnome" ];
+      "org.freedesktop.impl.portal.ScreenCast" = [ "wlr" ];
+      "org.freedesktop.impl.portal.Screenshot" = [ "wlr" ];
       "org.freedesktop.impl.portal.Secret" = [ "gnome-keyring" ];
     };
   };
