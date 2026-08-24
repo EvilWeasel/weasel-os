@@ -20,14 +20,15 @@ assert_contains "$package_file" '"$out/share/applications/vesktop.desktop"'
 assert_contains "$package_file" "--replace-fail 'Exec=AppRun --no-sandbox %U' 'Exec=vesktop %U'"
 assert_contains "$package_file" 'cp -r ${appimageContents}/usr/share/icons "$out/share/"'
 
-# On this hybrid Intel/NVIDIA laptop, the GNOME screencast path negotiates an
-# NVIDIA-only DMA-BUF modifier while Electron consumes on Intel. Route only
-# ScreenCast/Screenshot through wlr and require its linear-buffer fallback.
-assert_contains "$portal_file" 'xdg-desktop-portal-wlr'
-assert_contains "$portal_file" 'wlr = {'
-assert_contains "$portal_file" 'force_mod_linear = true;'
-assert_contains "$portal_file" '"org.freedesktop.impl.portal.ScreenCast" = [ "wlr" ];'
-assert_contains "$portal_file" '"org.freedesktop.impl.portal.Screenshot" = [ "wlr" ];'
+# Niri's supported screencast backend is xdg-desktop-portal-gnome. Do not
+# route ScreenCast through xdp-wlr: on this Niri session its slurp chooser
+# exits without a valid output and xdp-wlr reports `no output found`.
+assert_contains "$portal_file" '"org.freedesktop.impl.portal.ScreenCast" = [ "gnome" ];'
+assert_contains "$portal_file" '"org.freedesktop.impl.portal.Screenshot" = [ "gnome" ];'
+if grep -F -- 'xdg-desktop-portal-wlr' "$portal_file" >/dev/null; then
+  printf 'FAIL: %s must not enable the unsupported Niri wlr portal path\n' "$portal_file" >&2
+  exit 1
+fi
 
 # Optional built-artifact checks. These make the same test useful against the
 # evaluated Vesktop package before activation.
@@ -38,4 +39,4 @@ if [[ -n ${VESKTOP_PACKAGE:-} ]]; then
   [[ -d $VESKTOP_PACKAGE/share/icons ]]
 fi
 
-printf 'PASS: Vesktop launcher and linear Wayland capture path are declarative\n'
+printf 'PASS: Vesktop launcher and supported Niri GNOME portal path are declarative\n'
