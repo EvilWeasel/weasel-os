@@ -4,6 +4,17 @@
   pkgs,
   ...
 }:
+let
+  netbirdTailscaleCgnatCompat = pkgs.writeShellApplication {
+    name = "netbird-tailscale-cgnat-compat";
+    runtimeInputs = with pkgs; [
+      coreutils
+      gnugrep
+      nftables
+    ];
+    text = builtins.readFile ../../scripts/netbird-tailscale-cgnat-compat.sh;
+  };
+in
 {
   imports = [
     ../../profiles/system/common.nix
@@ -67,28 +78,22 @@
       "network-online.target"
       "netbird-personal.service"
     ];
-    wantedBy = [ "multi-user.target" "tailscaled.service" ];
+    partOf = [ "tailscaled.service" ];
+    wantedBy = [
+      "multi-user.target"
+      "tailscaled.service"
+    ];
+    unitConfig = {
+      StartLimitIntervalSec = "10min";
+      StartLimitBurst = 12;
+    };
     serviceConfig = {
       Type = "oneshot";
       RemainAfterExit = true;
+      Restart = "on-failure";
+      RestartSec = "5s";
+      ExecStart = lib.getExe netbirdTailscaleCgnatCompat;
     };
-    script = ''
-      set -euo pipefail
-      marker="weasel-netbird-cgnat-compat"
-      for attempt in $(seq 1 30); do
-        if ${pkgs.nftables}/bin/nft list chain ip filter ts-input >/dev/null 2>&1; then
-          if ${pkgs.nftables}/bin/nft list chain ip filter ts-input | ${pkgs.gnugrep}/bin/grep --fixed-strings --quiet "$marker"; then
-            exit 0
-          fi
-          ${pkgs.nftables}/bin/nft insert rule ip filter ts-input iifname "nb-personal" ip saddr 100.96.0.0/16 counter accept comment "$marker"
-          ${pkgs.nftables}/bin/nft list chain ip filter ts-input | ${pkgs.gnugrep}/bin/grep --fixed-strings --quiet "$marker"
-          exit 0
-        fi
-        sleep 1
-      done
-      echo "Tailscale ts-input chain did not appear within 30 seconds" >&2
-      exit 1
-    '';
   };
 
   users.users.evilweasel.extraGroups = [ "netbird-personal" ];
