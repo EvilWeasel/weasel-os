@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# Offline checker for Markdown links within the sanitized recovery bundle.
+set -euo pipefail
+
+root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
+cd "$root"
+
+failures=0
+while IFS=: read -r document line link; do
+  case "$link" in
+    ''|\#*|http://*|https://*|mailto:*) continue ;;
+  esac
+  target=${link%%\#*}
+  case "$target" in
+    /*) candidate="$root$target" ;;
+    *) candidate="$(dirname -- "$document")/$target" ;;
+  esac
+  if ! test -e "$candidate"; then
+    printf 'document link check: FAIL: %s:%s -> %s\n' "$document" "$line" "$link" >&2
+    failures=1
+  fi
+done < <(
+  grep -RInE --include='*.md' --exclude-dir=.git \
+    '\]\(([^)#]+)(#[^)]*)?\)' . |
+    while IFS= read -r match; do
+      document=${match%%:*}
+      rest=${match#*:}
+      line=${rest%%:*}
+      text=${rest#*:}
+      while IFS= read -r match_link; do
+        link=${match_link#']('}
+        link=${link%')'}
+        printf '%s:%s:%s\n' "$document" "$line" "$link"
+      done < <(printf '%s\n' "$text" | grep -oE '\]\(([^)#]+)(#[^)]*)?\)')
+    done
+)
+
+test "$failures" = 0 || exit 1
+printf 'document link check: PASS (offline; relative Markdown targets resolve)\n'

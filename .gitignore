@@ -1,6 +1,8 @@
 certs
 result
 **/.env*
+**/__pycache__/
+*.py[cod]
 
 # Local WLAN debugging artifacts
 /wifi-ap-*-diagnostics-*.log
