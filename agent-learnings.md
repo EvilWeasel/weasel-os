@@ -668,4 +668,11 @@ Append-only log of implementation lessons for future agents working in this repo
 - Date: 2026-08-04
 - Change: Made the devshell `fr` and `fu` functions validate `WEASEL_OS_HOST` against the flake host registry before invoking `nh`.
 - Pitfall/Root cause: On WSL, `$HOSTNAME` was `Blain37`, which is not a `nixosConfigurations` attribute, so `nh` attempted to build a nonexistent configuration.
-- Verification: `nix fmt`, `nix-instantiate --parse flake/modules/shared.nix`, `nix eval --no-write-lock-file .#devShells.x86_64-linux.default.drvPath`, `NIXPKGS_ALLOW_INSECURE=1 nix eval --impure --no-write-lock-file .#nixosConfigurations.<host>.config.system.build.toplevel.drvPath` for all hosts.
+- Verification: `nix fmt`, `nix-instantiate --parse flake/modules/shared.nix`, `nix eval --impure --no-write-lock-file .#devShells.x86_64-linux.default.drvPath`, `NIXPKGS_ALLOW_INSECURE=1 nix eval --impure --no-write-lock-file .#nixosConfigurations.<host>.config.system.build.toplevel.drvPath` for all hosts.
+
+### 2026-08-25 (activate the nixy-laptop Codex recovery console)
+
+- Date: 2026-08-25
+- Change: Added a declarative, human-invoked Codex recovery console to nixy-laptop: the locked Nix package, sanitized bundle, explicit operating-contract launcher, and an idempotent mode-0600 dedicated Iris recovery key. No Codex auth/config content, token, SSH policy, mesh policy, or cloud state is managed by this module.
+- Pitfall/Root cause: The recovery key must be generated at Home Manager activation rather than from a Nix expression, or private-key material would enter the Nix store. Existing keys are only mode-corrected; symlinks and non-regular paths fail closed.
+- Verification: offline sanitizer/link/launcher/fake-broker tests, target laptop evaluation and build, activation with NixOS generation rollback, and post-activation local-only console smoke test.

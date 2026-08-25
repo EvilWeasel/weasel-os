@@ -1,0 +1,43 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+fail() {
+  printf 'recovery-console smoke test: FAIL: %s\n' "$*" >&2
+  exit 1
+}
+
+root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
+cd "$root"
+
+git rev-parse --is-inside-work-tree >/dev/null 2>&1 || fail "bundle is not inside a Git worktree"
+test -s CODEX-OPERATING-CONTRACT.md || fail "operating contract missing or empty"
+test -x bin/codex-recovery || fail "human recovery launcher missing or not executable"
+test -s skills/hermes-recovery-operations.md || fail "Hermes recovery skill missing or empty"
+test -s skills/cx43-rescale-safety.md || fail "CX43 recovery skill missing or empty"
+
+# This exercises the exact contract and selected skills that --start supplies
+# to Codex, without starting Codex or contacting a provider.
+effective_context=$(bin/codex-recovery --dry-run) \
+  || fail "launcher could not render effective recovery context"
+printf '%s\n' "$effective_context" | grep -Fqx '=== CODEX RECOVERY OPERATING CONTRACT ===' \
+  || fail "launcher did not present the operating contract"
+printf '%s\n' "$effective_context" | grep -Fqx '=== SELECTED SANITIZED RECOVERY SKILLS ===' \
+  || fail "launcher did not present the selected recovery skills"
+printf '%s\n' "$effective_context" | grep -Fqx '=== END EFFECTIVE CODEX CONTEXT ===' \
+  || fail "launcher did not delimit the effective Codex context"
+
+command -v codex >/dev/null 2>&1 || fail "Codex CLI is not installed"
+codex --version >/dev/null
+
+# Check only file metadata. This script intentionally never reads auth/config.
+for path in "$HOME/.codex/auth.json" "$HOME/.codex/config.toml"; do
+  if test -e "$path"; then
+    mode=$(stat -c '%a' -- "$path")
+    test "$mode" = 600 || fail "$path must be mode 0600, found $mode"
+  fi
+done
+
+ssh -G hephaestus-netbird 2>/dev/null | grep -qx 'stricthostkeychecking yes' \
+  || fail "hephaestus-netbird must retain StrictHostKeyChecking=yes"
+
+printf 'recovery-console smoke test: PASS (local, no host/provider contact)\n'
