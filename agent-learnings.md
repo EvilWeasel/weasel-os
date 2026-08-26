@@ -760,3 +760,9 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Packaged the immutable official OpenAI x86_64 RPM payload for nixy-laptop without executing its repository/updater scriptlets, and installed the resulting unfree derivation through the host configuration.
 - Pitfall/Root cause: Locked `pkgs.chatgpt` is Darwin-only. The Linux RPM bundles both Qt 5/6 shims and glibc/musl native prebuilds; use the Qt `out` outputs together and ignore only the unused musl loader during auto-patching, otherwise the Qt setup hook or autoPatchelf fails.
 - Verification: `nix fmt -- hosts/nixy-laptop/config.nix packages/chatgpt/default.nix`, `nix-instantiate --parse` for both changed Nix files, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, focused `pkgs.callPackage ./packages/chatgpt/default.nix { }` build, `nix flake check --no-write-lock-file`, and `nix build --no-link --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel`.
+
+### 2026-08-26 (silent NetBird tray autostart)
+- Date: 2026-08-26
+- Change: Linked the existing pinned NetBird UI desktop entry into the Home Manager XDG autostart directory for `nixy-laptop`, configured with the existing `netbird-personal` daemon socket.
+- Pitfall/Root cause: NetBird UI 0.77.1 ignores the NixOS module's daemon-address argument, so autostart must reuse the package wrapper that supplies `NB_DAEMON_ADDR`; starting a separate UI package would otherwise target the default socket or duplicate launcher ownership.
+- Verification: `nixfmt`, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, `nix build --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel`, and guarded `nixos-rebuild switch --flake .#nixy-laptop` with post-activation graphical-session, NetBird/Tailscale, DNS, dashboard, and failed-unit checks.

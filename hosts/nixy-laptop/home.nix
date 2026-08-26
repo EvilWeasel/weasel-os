@@ -1,6 +1,9 @@
 { inputs, pkgs, ... }:
 let
   hermesDesktop = inputs.hermes-agent.packages.${pkgs.stdenv.hostPlatform.system}.desktop;
+  netbirdUi = pkgs.callPackage ../../packages/netbird-ui-bin.nix {
+    daemonSocket = "/var/run/netbird-personal/sock";
+  };
 in
 {
   imports = [
@@ -15,6 +18,12 @@ in
     hermesDesktop
     pkgs.caddy
   ];
+
+  # The NetBird UI creates its main window hidden unless explicitly asked to
+  # open a view. Reuse the pinned launcher and per-client daemon socket so a
+  # graphical session gets a tray icon without starting another daemon.
+  xdg.configFile."autostart/netbird.desktop".source =
+    "${netbirdUi}/share/applications/netbird.desktop";
 
   xdg.configFile."caddy/hermes-remote.Caddyfile".text = ''
     {
