@@ -1,6 +1,7 @@
 {
   config,
   lib,
+  pkgs,
   ...
 }:
 {
@@ -15,4 +16,10 @@
   ];
 
   hardware.nvidia.package = lib.mkForce config.boot.kernelPackages.nvidiaPackages.production;
+
+  # Only the RPM payload is installed. Its scriptlets would otherwise add an
+  # imperative OpenAI DNF repository and updater outside the flake.
+  environment.systemPackages = [
+    (pkgs.callPackage ../../packages/chatgpt/default.nix { })
+  ];
 }
