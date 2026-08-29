@@ -4,17 +4,6 @@
   pkgs,
   ...
 }:
-let
-  netbirdTailscaleCgnatCompat = pkgs.writeShellApplication {
-    name = "netbird-tailscale-cgnat-compat";
-    runtimeInputs = with pkgs; [
-      coreutils
-      gnugrep
-      nftables
-    ];
-    text = builtins.readFile ../../scripts/netbird-tailscale-cgnat-compat.sh;
-  };
-in
 {
   imports = [
     ../../profiles/system/common.nix
@@ -34,12 +23,16 @@ in
   # module's scoped polkit rule authorize only NetBird's resolved operations.
   services.resolved.enable = true;
 
+  # NetBird is the laptop's sole overlay. Other hosts may still enable the
+  # shared profile's Tailscale service independently.
+  services.tailscale.enable = lib.mkForce false;
+
   weasel.wispr-flow.enable = true;
 
   services.netbird = {
     package = pkgs.callPackage ../../packages/netbird-bin.nix { };
     ui.package = pkgs.callPackage ../../packages/netbird-ui-bin.nix {
-      daemonSocket = "/var/run/netbird-personal/sock";
+      daemonSocket = "unix:///var/run/netbird-personal/sock";
     };
     useRoutingFeatures = "none";
     ui.enable = true;
@@ -60,39 +53,6 @@ in
       };
       openFirewall = true;
       openInternalFirewall = true;
-    };
-  };
-
-  # Tailscale's ts-input anti-spoof chain treats NetBird's 100.96.0.0/16
-  # address space as part of its own CGNAT range and otherwise drops replies
-  # arriving on nb-personal. Reinstall this narrow exception after every
-  # tailscaled start; NetBird policy remains the authorization boundary.
-  systemd.services.netbird-tailscale-cgnat-compat = {
-    description = "Allow personal NetBird CGNAT before Tailscale anti-spoofing";
-    after = [
-      "network-online.target"
-      "netbird-personal.service"
-      "tailscaled.service"
-    ];
-    wants = [
-      "network-online.target"
-      "netbird-personal.service"
-    ];
-    partOf = [ "tailscaled.service" ];
-    wantedBy = [
-      "multi-user.target"
-      "tailscaled.service"
-    ];
-    unitConfig = {
-      StartLimitIntervalSec = "10min";
-      StartLimitBurst = 12;
-    };
-    serviceConfig = {
-      Type = "oneshot";
-      RemainAfterExit = true;
-      Restart = "on-failure";
-      RestartSec = "5s";
-      ExecStart = lib.getExe netbirdTailscaleCgnatCompat;
     };
   };
 

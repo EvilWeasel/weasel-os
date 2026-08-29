@@ -12,7 +12,7 @@
   libsoup_3,
   webkitgtk_6_0,
   xorg,
-  daemonSocket ? "/var/run/netbird.sock",
+  daemonSocket ? "unix:///var/run/netbird.sock",
 }:
 
 stdenv.mkDerivation (finalAttrs: {

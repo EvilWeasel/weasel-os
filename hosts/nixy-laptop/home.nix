@@ -1,9 +1,29 @@
-{ inputs, pkgs, ... }:
+{
+  inputs,
+  lib,
+  pkgs,
+  ...
+}:
 let
   hermesDesktop = inputs.hermes-agent.packages.${pkgs.stdenv.hostPlatform.system}.desktop;
   netbirdUi = pkgs.callPackage ../../packages/netbird-ui-bin.nix {
-    daemonSocket = "/var/run/netbird-personal/sock";
+    daemonSocket = "unix:///var/run/netbird-personal/sock";
   };
+  netbirdUiLauncher = pkgs.writeShellScript "netbird-ui-launcher" ''
+    set -eu
+
+    for _ in {1..120}; do
+      if [[ -S /var/run/netbird-personal/sock ]]; then
+        # 0.77.x can fall back to the default socket despite NB_DAEMON_ADDR.
+        exec ${lib.getExe netbirdUi} \
+          --daemon-addr=unix:///var/run/netbird-personal/sock
+      fi
+      ${pkgs.coreutils}/bin/sleep 1
+    done
+
+    echo "NetBird daemon socket did not appear within 120 seconds" >&2
+    exit 1
+  '';
 in
 {
   imports = [
@@ -16,57 +36,47 @@ in
 
   home.packages = [
     hermesDesktop
-    pkgs.caddy
   ];
 
-  # The NetBird UI creates its main window hidden unless explicitly asked to
-  # open a view. Reuse the pinned launcher and per-client daemon socket so a
-  # graphical session gets a tray icon without starting another daemon.
-  xdg.configFile."autostart/netbird.desktop".source =
-    "${netbirdUi}/share/applications/netbird.desktop";
-
-  xdg.configFile."caddy/hermes-remote.Caddyfile".text = ''
-    {
-      admin off
-      auto_https off
-    }
-
-    http://127.0.0.1:9119 {
-      bind 127.0.0.1
-
-      reverse_proxy http://127.0.0.1:9120 {
-        header_up Host 10.145.80.4:9119
-      }
-    }
-  '';
-
-  systemd.user.services.hermes-blain-tunnel = {
-    Unit = {
-      Description = "SSH tunnel to Hermes on blain-ai";
-      Wants = [ "network-online.target" ];
-      After = [ "network-online.target" ];
-    };
-    Service = {
-      ExecStart = "${pkgs.openssh}/bin/ssh -N -T -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=30 -o ServerAliveCountMax=3 -o StrictHostKeyChecking=yes -L 127.0.0.1:9120:10.145.80.4:9119 blain-ai";
-      Restart = "always";
-      RestartSec = "5s";
-    };
-    Install.WantedBy = [ "default.target" ];
+  # Disable the package's unordered XDG autostart. It can race the hardened
+  # daemon and then remain disconnected until manually restarted.
+  xdg.configFile."autostart/netbird.desktop" = {
+    force = true;
+    text = ''
+      [Desktop Entry]
+      Type=Application
+      Name=NetBird (managed by systemd)
+      Hidden=true
+      NoDisplay=true
+    '';
   };
 
-  systemd.user.services.hermes-remote-bridge = {
+  # Preserve Home Manager's stale backup outside the autostart directory so
+  # systemd-xdg-autostart-generator cannot launch a second, obsolete UI.
+  home.activation.archiveLegacyNetbirdAutostart = lib.hm.dag.entryAfter [ "writeBoundary" ] ''
+    legacy="$HOME/.config/autostart/netbird.desktop.hm-backup"
+    archive="$HOME/.local/state/weasel-os/netbird.desktop.hm-backup"
+    if [[ -e "$legacy" ]]; then
+      $DRY_RUN_CMD ${pkgs.coreutils}/bin/mkdir -p "$HOME/.local/state/weasel-os"
+      $DRY_RUN_CMD ${pkgs.coreutils}/bin/mv --backup=numbered -T "$legacy" "$archive"
+    fi
+  '';
+
+  # The UI is a tray process and must start only after the custom daemon socket
+  # exists. A clean user-initiated quit remains respected (Restart=on-failure).
+  systemd.user.services.netbird-ui = {
     Unit = {
-      Description = "Local bridge for Hermes Desktop remote gateway";
-      Wants = [ "hermes-blain-tunnel.service" ];
-      After = [ "hermes-blain-tunnel.service" ];
+      Description = "NetBird tray for the personal client";
+      After = [ "graphical-session.target" ];
+      PartOf = [ "graphical-session.target" ];
     };
     Service = {
-      ExecStart = "${pkgs.caddy}/bin/caddy run --config %h/.config/caddy/hermes-remote.Caddyfile --adapter caddyfile";
-      ExecReload = "${pkgs.caddy}/bin/caddy reload --config %h/.config/caddy/hermes-remote.Caddyfile --adapter caddyfile --force";
-      Restart = "always";
+      Environment = [ "WEBKIT_DISABLE_DMABUF_RENDERER=1" ];
+      ExecStart = netbirdUiLauncher;
+      Restart = "on-failure";
       RestartSec = "5s";
     };
-    Install.WantedBy = [ "default.target" ];
+    Install.WantedBy = [ "graphical-session.target" ];
   };
 
   xdg.desktopEntries.hermes-desktop = {
