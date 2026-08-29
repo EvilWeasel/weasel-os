@@ -92,4 +92,10 @@
   };
 
   users.users.evilweasel.extraGroups = [ "netbird-personal" ];
+
+  # Only the RPM payload is installed. Its scriptlets would otherwise add an
+  # imperative OpenAI DNF repository and updater outside the flake.
+  environment.systemPackages = [
+    (pkgs.callPackage ../../packages/chatgpt/default.nix { })
+  ];
 }

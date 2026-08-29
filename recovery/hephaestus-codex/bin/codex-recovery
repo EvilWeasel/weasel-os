@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+# Human-invoked launcher for the sanitized hephaestus recovery context.
+set -euo pipefail
+
+fail() {
+  printf 'codex-recovery: %s\n' "$*" >&2
+  exit 2
+}
+
+root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
+contract="$root/CODEX-OPERATING-CONTRACT.md"
+skill_dir="$root/skills"
+
+emit_context() {
+  test -s "$contract" || fail "operating contract missing or empty"
+  printf '%s\n' '=== CODEX RECOVERY OPERATING CONTRACT ==='
+  cat -- "$contract"
+  printf '%s\n' '=== SELECTED SANITIZED RECOVERY SKILLS ==='
+
+  local skill
+  local seen=0
+  for skill in "$skill_dir"/*.md; do
+    test -e "$skill" || continue
+    test -s "$skill" || fail "skill missing or empty: $skill"
+    seen=1
+    printf '\n=== %s ===\n' "$(basename -- "$skill")"
+    cat -- "$skill"
+  done
+  test "$seen" = 1 || fail "no sanitized recovery skills found"
+}
+
+case "${1:-}" in
+  --print-context)
+    test "$#" = 1 || fail "--print-context takes no other arguments"
+    emit_context
+    ;;
+  --dry-run)
+    test "$#" = 1 || fail "--dry-run takes no other arguments"
+    emit_context
+    printf '%s\n' '=== END EFFECTIVE CODEX CONTEXT ==='
+    printf '%s\n' 'Dry run only: Codex was not started and no provider was contacted.'
+    ;;
+  --start)
+    test "$#" = 1 || fail "--start takes no other arguments"
+    command -v codex >/dev/null 2>&1 || fail "Codex CLI is not installed"
+    printf '%s\n' 'Presenting the exact context supplied to Codex:' >&2
+    emit_context >&2
+    printf '%s\n' '=== END EFFECTIVE CODEX CONTEXT ===' >&2
+    printf '%s\n' 'Starting interactive Codex in the recovery bundle; it receives this context as its initial prompt.' >&2
+    context=$(emit_context)
+    exec codex --cd "$root" "$context"
+    ;;
+  *)
+    cat >&2 <<'USAGE'
+Usage: codex-recovery --dry-run | --print-context | --start
+
+--dry-run prints the effective Codex context without starting Codex.
+--start prints the same context, then opens an interactive Codex session with it
+as the initial prompt. It never supplies credentials or broad cloud authority.
+USAGE
+    exit 64
+    ;;
+esac

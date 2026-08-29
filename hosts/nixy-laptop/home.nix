@@ -8,6 +8,7 @@ in
     ../../profiles/home/base.nix
     ../../profiles/home/client.nix
     ../../profiles/home/laptop.nix
+    ../../programs/hephaestus-recovery-console.nix
   ];
 
   home.packages = [
@@ -71,4 +72,6 @@ in
     ];
     startupNotify = true;
   };
+
+  weasel.hephaestusRecoveryConsole.enable = true;
 }

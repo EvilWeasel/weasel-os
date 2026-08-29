@@ -1,5 +1,9 @@
 { inputs, ... }:
 let
+  hostRegistry = import ../../lib/hosts.nix { inherit inputs; };
+  devHostNames = builtins.attrNames hostRegistry;
+  devHostPattern = builtins.concatStringsSep "|" devHostNames;
+  devHostOptions = builtins.concatStringsSep ", " devHostNames;
   mkPkgs =
     nixpkgsInput: system:
     import nixpkgsInput {
@@ -10,7 +14,7 @@ in
 {
   _module.args = {
     inherit mkPkgs;
-    hostRegistry = import ../../lib/hosts.nix { inherit inputs; };
+    inherit hostRegistry;
     mkHost = import ../../lib/mk-host.nix { inherit inputs; };
     mkDevEnvironment =
       system:
@@ -54,6 +58,7 @@ in
           nixd
           nodejs_22
           nushell
+          ouch
           pnpm
           pyright
           ripgrep
@@ -160,6 +165,30 @@ in
           export ZDOTDIR=${devZshDotDir}
           export TERMINFO_DIRS=${devTerminfoDirs}:''${TERMINFO_DIRS:-}
 
+          weasel_os_host() {
+            local candidate="''${WEASEL_OS_HOST:-''${HOSTNAME:-}}"
+
+            case "$candidate" in
+              ${devHostPattern}) printf '%s\\n' "$candidate" ;;
+              *)
+                printf 'No valid NixOS flake host is selected (got: %s). Set WEASEL_OS_HOST to one of: ${devHostOptions}\\n' "''${candidate:-unset}" >&2
+                return 1
+                ;;
+            esac
+          }
+
+          fr() {
+            local host
+            host="$(weasel_os_host)" || return
+            nh os switch --hostname "$host" "$WEASEL_OS_ROOT"
+          }
+
+          fu() {
+            local host
+            host="$(weasel_os_host)" || return
+            nh os switch --hostname "$host" --update "$WEASEL_OS_ROOT"
+          }
+
           if [[ -t 1 ]]; then
             fastfetch || true
           fi
@@ -174,8 +203,6 @@ in
           eval "$(zoxide init bash)"
 
           alias sv='sudo nvim'
-          alias fr='nh os switch --hostname "$WEASEL_OS_HOST" "$WEASEL_OS_ROOT"'
-          alias fu='nh os switch --hostname "$WEASEL_OS_HOST" --update "$WEASEL_OS_ROOT"'
           alias ncg='nix-collect-garbage --delete-old && sudo nix-collect-garbage -d && sudo /run/current-system/bin/switch-to-configuration boot'
           alias v='nvim'
           alias cat='bat'

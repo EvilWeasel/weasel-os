@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Offline integration fixture: a synthetic caller and fake broker responses only.
+set -euo pipefail
+
+root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
+validator="$root/iris-broker/validate-request.py"
+tmpdir=$(mktemp -d)
+trap 'rm -rf -- "$tmpdir"' EXIT
+
+now=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+expires=$(date -u -d '+5 minutes' +%Y-%m-%dT%H:%M:%SZ)
+
+printf '{"version":1,"request_id":"synthetic-request-0001","approval_id":"synthetic-approval-0001","operation":"change_type","server_id":162472190,"server_type":"cx43","upgrade_disk":false,"not_before":"%s","expires_at":"%s"}\n' "$now" "$expires" >"$tmpdir/accepted-request.json"
+accepted=$(python3 -B "$validator" <"$tmpdir/accepted-request.json")
+case "$accepted" in
+  'ACCEPT request_sha256='[0-9a-f][0-9a-f]*) ;;
+  *) printf 'review smoke test: FAIL: unexpected fake-broker acceptance response\n' >&2; exit 1 ;;
+esac
+
+printf '{"version":1,"request_id":"synthetic-request-0002","approval_id":"synthetic-approval-0002","operation":"change_type","server_id":1,"server_type":"cx43","upgrade_disk":false,"not_before":"%s","expires_at":"%s"}\n' "$now" "$expires" >"$tmpdir/rejected-request.json"
+if python3 -B "$validator" <"$tmpdir/rejected-request.json" >"$tmpdir/rejected.stdout" 2>"$tmpdir/rejected.stderr"; then
+  printf 'review smoke test: FAIL: wrong-server request was accepted\n' >&2
+  exit 1
+fi
+grep -Fqx 'REJECT wrong server_id' "$tmpdir/rejected.stderr" || {
+  printf 'review smoke test: FAIL: unexpected fake-broker rejection\n' >&2
+  exit 1
+}
+
+printf 'review smoke test: PASS (synthetic requests and fake broker responses; no network)\n'

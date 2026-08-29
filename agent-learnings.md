@@ -734,3 +734,29 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Enabled `systemd-resolved` and pinned the personal NetBird client's typed `dns-resolver` option to `127.0.0.153:53`, providing private custom-zone resolution without public A/AAAA records.
 - Pitfall/Root cause: Tailscale's `ts-input` chain drops `100.64.0.0/10` traffic on non-Tailscale interfaces; because NetBird uses `100.96.0.0/16`, its default resolver appeared bound on the peer IP but local DNS packets were dropped on loopback. The NixOS NetBird module's typed resolver option declaratively manages `CustomDNSAddress`, the wrapper environment, and `CAP_NET_BIND_SERVICE`, avoiding firewall exceptions and imperative state.
 - Verification: full `nixy-laptop` build and switch; Wispr store closure remained identical; direct and system resolver queries returned the private records; normal HTTPS, dashboard authentication, Tailscale MagicDNS, and public DNS passed; Cloudflare API and an authoritative resolver confirmed the public fallback record was absent while NetBird DNS remained healthy.
+### 2026-08-04 (add ouch to devshell)
+- Date: 2026-08-04
+- Change: Added `ouch` to the shared development shell package list.
+- Pitfall/Root cause: Devshell tooling is sourced from the central `devPackages` list in `flake/modules/shared.nix`; the desktop host evaluation remains blocked by the pre-existing insecure `docker-28.5.2` package.
+- Verification: `nixfmt flake/modules/shared.nix`, `nix-instantiate --parse flake/modules/shared.nix`, `nix eval --no-write-lock-file .#devShells.x86_64-linux.default.drvPath`
+
+### 2026-08-04 (validate devshell rebuild host)
+
+- Date: 2026-08-04
+- Change: Made the devshell `fr` and `fu` functions validate `WEASEL_OS_HOST` against the flake host registry before invoking `nh`.
+- Pitfall/Root cause: On WSL, `$HOSTNAME` was `Blain37`, which is not a `nixosConfigurations` attribute, so `nh` attempted to build a nonexistent configuration.
+- Verification: `nix fmt`, `nix-instantiate --parse flake/modules/shared.nix`, `nix eval --impure --no-write-lock-file .#devShells.x86_64-linux.default.drvPath`, `NIXPKGS_ALLOW_INSECURE=1 nix eval --impure --no-write-lock-file .#nixosConfigurations.<host>.config.system.build.toplevel.drvPath` for all hosts.
+
+### 2026-08-25 (activate the nixy-laptop Codex recovery console)
+
+- Date: 2026-08-25
+- Change: Added a declarative, human-invoked Codex recovery console to nixy-laptop: the locked Nix package, sanitized bundle, explicit operating-contract launcher, and an idempotent mode-0600 dedicated Iris recovery key. No Codex auth/config content, token, SSH policy, mesh policy, or cloud state is managed by this module.
+- Pitfall/Root cause: The recovery key must be generated at Home Manager activation rather than from a Nix expression, or private-key material would enter the Nix store. Existing keys are only mode-corrected; symlinks and non-regular paths fail closed.
+- Verification: offline sanitizer/link/launcher/fake-broker tests, target laptop evaluation and build, activation with NixOS generation rollback, and post-activation local-only console smoke test.
+
+### 2026-08-29 (official ChatGPT/Codex Linux preview)
+
+- Date: 2026-08-29
+- Change: Packaged the immutable official OpenAI x86_64 RPM payload for nixy-laptop without executing its repository/updater scriptlets, and installed the resulting unfree derivation through the host configuration.
+- Pitfall/Root cause: Locked `pkgs.chatgpt` is Darwin-only. The Linux RPM bundles both Qt 5/6 shims and glibc/musl native prebuilds; use the Qt `out` outputs together and ignore only the unused musl loader during auto-patching, otherwise the Qt setup hook or autoPatchelf fails.
+- Verification: `nix fmt -- hosts/nixy-laptop/config.nix packages/chatgpt/default.nix`, `nix-instantiate --parse` for both changed Nix files, `nix eval --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath`, focused `pkgs.callPackage ./packages/chatgpt/default.nix { }` build, `nix flake check --no-write-lock-file`, and `nix build --no-link --no-write-lock-file .#nixosConfigurations.nixy-laptop.config.system.build.toplevel`.

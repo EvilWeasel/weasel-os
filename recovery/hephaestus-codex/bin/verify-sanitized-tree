@@ -1,0 +1,46 @@
+#!/usr/bin/env bash
+# Offline guard for the recovery bundle. It reads only repository files.
+set -euo pipefail
+
+failures=0
+root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd -P)
+cd "$root"
+
+fail() {
+  printf 'sanitization check: FAIL: %s\n' "$*" >&2
+  failures=1
+}
+
+while IFS= read -r -d '' path; do
+  case "$path" in
+    */.env|*/.env.*|*/__pycache__/*|*.pyc|*.pyo|*.pyd|*.pem|*.p12|*.pfx|*.key|*id_rsa*|*id_ed25519*|*known_hosts*|*authorized_keys*|*auth.json|*credentials*|*secret*)
+      fail "denylisted path: $path"
+      ;;
+  esac
+done < <(find . -type d -name __pycache__ -prune -o -type f -print0 -not -path './.git/*')
+
+private_prefix='-----BEGIN '
+private_suffix='PRIVATE KEY-----'
+private_pattern="${private_prefix}(RSA |EC |OPENSSH )?${private_suffix}"
+if grep -rIq --exclude='verify-sanitized-tree' --exclude='*.pyc' --exclude-dir=__pycache__ -e "$private_pattern" .; then
+  fail 'private-key material detected'
+fi
+if grep -rIq --exclude='verify-sanitized-tree' --exclude='*.pyc' --exclude-dir=__pycache__ -E 'bearer[[:space:]]+[A-Za-z0-9._~-]{12,}|(api|access|secret)[_-]?(key|token)[[:space:]]*[:=][[:space:]]*[^[:space:]<][^[:space:]]{11,}' .; then
+  fail 'token-like material detected'
+fi
+if grep -rIq --exclude='verify-sanitized-tree' --exclude='*.pyc' --exclude-dir=__pycache__ -E '[A-Za-z0-9_-]{64,}' .; then
+  fail 'long opaque value detected'
+fi
+
+# The canonical policy must be explicit, but no operational workplace endpoint
+# or alias may enter the console bundle.
+if grep -rIq --exclude='verify-sanitized-tree' --exclude='*.pyc' --exclude-dir=__pycache__ -E 'blain-ai' .; then
+  fail 'prohibited workplace operational reference detected'
+fi
+
+for document in README.md SANITIZATION.md CONTRIBUTING.md CODEX-OPERATING-CONTRACT.md RECOVERY-SOURCE-MANIFEST.md PACKAGE-REVIEW.md; do
+  test -s "$document" || fail "required document missing or empty: $document"
+done
+
+test "$failures" = 0 || exit 1
+printf 'sanitization check: PASS (offline; no credentials or network access)\n'
