@@ -48,11 +48,10 @@
       inputs.nixpkgs.follows = "nixpkgs-unstable";
     };
     hermes-agent.url = "github:NousResearch/hermes-agent/v2026.7.20";
-    handy-nixpkgs.url = "github:NixOS/nixpkgs/d6c71932130818840fc8fe9509cf50be8c64634f";
+    handy-nixpkgs.url = "github:NixOS/nixpkgs/46db2e09e1d3f113a13c0d7b81e2f221c63b8ce9";
     handy = {
-      # Pin to a known-good revision because latest upstream currently breaks Nix builds
-      # (`tauri-runtime-2.9.1` hash/dependency mismatch during evaluation/build).
-      url = "github:cjpais/Handy/f705a4948d01a29a815e284c44dae5fec890639c";
+      # Pin to the immutable upstream v0.9.6 release with its matching nixpkgs snapshot
+      url = "github:cjpais/Handy/af48dd68a64d58aad128fdbb920492a03da53c79";
       inputs.nixpkgs.follows = "handy-nixpkgs";
     };
     sops-nix = {
