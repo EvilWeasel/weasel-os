@@ -18,6 +18,10 @@
 
   hardware.nvidia.package = lib.mkForce config.boot.kernelPackages.nvidiaPackages.production;
 
+  # The AX211 can enumerate on PCI without iwlwifi being auto-loaded on some boots.
+  # Request the in-kernel driver explicitly before NetworkManager starts.
+  boot.kernelModules = [ "iwlwifi" ];
+
   # NetBird's hardened per-client daemon integrates DNS through systemd-resolved.
   # This avoids an unprivileged daemon mutating openresolv state and lets the
   # module's scoped polkit rule authorize only NetBird's resolved operations.
