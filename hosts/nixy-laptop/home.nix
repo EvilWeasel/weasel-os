@@ -6,6 +6,11 @@
 }:
 let
   hermesDesktop = inputs.hermes-agent.packages.${pkgs.stdenv.hostPlatform.system}.desktop;
+  codexLatest = pkgs.callPackage ../../packages/codex-bin.nix { };
+  cuaDriver = pkgs.callPackage ../../packages/cua-driver-bin.nix { };
+  laptopExecutor = pkgs.callPackage ../../scripts/weasel-laptop-executor.nix {
+    codexPackage = codexLatest;
+  };
   netbirdUi = pkgs.callPackage ../../packages/netbird-ui-bin.nix {
     daemonSocket = "unix:///var/run/netbird-personal/sock";
   };
@@ -36,6 +41,8 @@ in
 
   home.packages = [
     hermesDesktop
+    cuaDriver
+    laptopExecutor
   ];
 
   # Disable the package's unordered XDG autostart. It can race the hardened
@@ -79,6 +86,28 @@ in
     Install.WantedBy = [ "graphical-session.target" ];
   };
 
+  systemd.user.services.cua-driver = {
+    Unit = {
+      Description = "Cua background computer-use driver";
+      After = [ "graphical-session.target" ];
+      PartOf = [ "graphical-session.target" ];
+    };
+    Service = {
+      Type = "simple";
+      Environment = [
+        "CUA_DRIVER_RS_ENABLE_WAYLAND=1"
+        "XDG_SESSION_TYPE=wayland"
+        "WAYLAND_DISPLAY=wayland-1"
+        "DISPLAY=:0"
+      ];
+      ExecStartPre = "${cuaDriver}/bin/cua-driver telemetry disable";
+      ExecStart = "${cuaDriver}/bin/cua-driver serve --permission-mode standard";
+      Restart = "on-failure";
+      RestartSec = "3s";
+    };
+    Install.WantedBy = [ "graphical-session.target" ];
+  };
+
   xdg.desktopEntries.hermes-desktop = {
     name = "Hermes";
     comment = "Hermes Agent desktop application";
@@ -92,5 +121,8 @@ in
     startupNotify = true;
   };
 
-  weasel.hephaestusRecoveryConsole.enable = true;
+  weasel.hephaestusRecoveryConsole = {
+    enable = true;
+    package = codexLatest;
+  };
 }

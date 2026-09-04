@@ -33,6 +33,8 @@
     };
   };
 
+  services.gnome.at-spi2-core.enable = true;
+
   local.hardware-clock.enable = true;
 
   networking = {

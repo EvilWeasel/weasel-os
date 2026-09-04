@@ -790,3 +790,9 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Added fixed-output Vencord runtime assets and a settings-preserving pre-launch bootstrap to the existing patched Vesktop 1.6.7 package while retaining the Niri Wayland screenshare correction.
 - Pitfall/Root cause: Vesktop stores Vencord under `sessionData/vencordFiles`, not `vencordDist`, and considers the payload valid only when `package.json` plus all four runtime assets exist. A bootstrap targeting the wrong directory leaves a plain Discord UI even though plugin settings exist.
 - Verification: source and built-artifact regressions, complete laptop build, narrow closure diff, switch-only activation, runtime `Vencord`/`VencordNative` globals, Vencord/Vesktop settings entries, registered and enabled `VoiceMessages` with `channel-attach` hook, one-second unsent Opus microphone capture, normal restart with debug port closed, and post-switch DNS/NetBird checks.
+
+### 2026-09-04 (local CUA and task-bound Codex executor)
+- Date: 2026-09-04
+- Change: Added pinned Cua Driver 0.23.2 with a graphical-session user service, enabled AT-SPI, pinned Codex CLI 0.153.3, and added a private task-bound executor that persists through SSH loss with local result spooling.
+- Pitfall/Root cause: Nixpkgs Codex 0.92/0.133 could not decode the current model catalog or use `gpt-5.6-sol`; global Codex MCPs also added startup failures and latency. The executor explicitly clears `mcp_servers`, restricts writable workdirs, accepts only private prompt files, and keeps `workspace-write` sandboxing. CUA needs both Wayland opt-in and the session AT-SPI bus.
+- Verification: fixed-output hashes, package/full-host builds, narrow closure diff, switch-only activation, CUA daemon/doctor/AT-SPI/app/window/screen checks, telemetry disabled, Codex 0.153.3, and a detached systemd executor smoke returning `LOCAL_EXECUTOR_OK` with exit 0 and no MCP startup.
