@@ -1,10 +1,14 @@
 {
   appimageTools,
   asar,
+  coreutils,
   fetchurl,
+  gnugrep,
   lib,
+  makeWrapper,
   nodejs,
   runCommand,
+  writeShellApplication,
 }:
 
 let
@@ -18,6 +22,53 @@ let
 
   appimageContents = appimageTools.extractType2 {
     inherit pname version src;
+  };
+
+  # Vesktop downloads Vencord's runtime beside user settings. If that first-run
+  # fetch is absent or partial, Vesktop silently degrades to plain Discord.
+  # Fixed-output fallbacks keep Vencord available without changing user state.
+  vencordDesktopMain = fetchurl {
+    url = "https://github.com/Vendicated/Vencord/releases/download/devbuild/vencordDesktopMain.js";
+    hash = "sha256-sqfEGaNOoV5nZH1ihI5EtD3qXNQ6OitseFpnSkdXzAs=";
+  };
+  vencordDesktopPreload = fetchurl {
+    url = "https://github.com/Vendicated/Vencord/releases/download/devbuild/vencordDesktopPreload.js";
+    hash = "sha256-nf9Wauh8inZFmChoZc3P1wjLVUoCRBbFs7fKQq2Qlmc=";
+  };
+  vencordDesktopRenderer = fetchurl {
+    url = "https://github.com/Vendicated/Vencord/releases/download/devbuild/vencordDesktopRenderer.js";
+    hash = "sha256-zLYWu9z8qYS1aaAntfuKK5YF63a9mV3ZDXilZdpjrW4=";
+  };
+  vencordDesktopRendererCss = fetchurl {
+    url = "https://github.com/Vendicated/Vencord/releases/download/devbuild/vencordDesktopRenderer.css";
+    hash = "sha256-h6qYaWjAiv0h6ps21OIE7gfiYItQoTcdSiD8j6wemU8=";
+  };
+
+  vencordBootstrap = writeShellApplication {
+    name = "vesktop-vencord-bootstrap";
+    runtimeInputs = [
+      coreutils
+      gnugrep
+    ];
+    text = ''
+      user_data_dir="''${VENCORD_USER_DATA_DIR:-''${XDG_CONFIG_HOME:-$HOME/.config}/vesktop}"
+      vencord_dir="$user_data_dir/sessionData/vencordFiles"
+
+      if [ ! -s "$vencord_dir/package.json" ] \
+        || [ ! -s "$vencord_dir/vencordDesktopMain.js" ] \
+        || [ ! -s "$vencord_dir/vencordDesktopPreload.js" ] \
+        || [ ! -s "$vencord_dir/vencordDesktopRenderer.js" ] \
+        || [ ! -s "$vencord_dir/vencordDesktopRenderer.css" ] \
+        || ! grep -Fq 'VoiceMessages' "$vencord_dir/vencordDesktopMain.js"; then
+        mkdir -p "$vencord_dir"
+        install -Dm600 ${vencordDesktopMain} "$vencord_dir/vencordDesktopMain.js"
+        install -Dm600 ${vencordDesktopPreload} "$vencord_dir/vencordDesktopPreload.js"
+        install -Dm600 ${vencordDesktopRenderer} "$vencord_dir/vencordDesktopRenderer.js"
+        install -Dm600 ${vencordDesktopRendererCss} "$vencord_dir/vencordDesktopRenderer.css"
+        printf '{}\n' > "$vencord_dir/package.json"
+        chmod 0600 "$vencord_dir/package.json"
+      fi
+    '';
   };
 
   # Vesktop 1.6.7 asks its renderer to open a second, custom picker after
@@ -52,6 +103,8 @@ appimageTools.wrapAppImage {
   inherit pname version;
   src = patchedAppimageContents;
 
+  nativeBuildInputs = [ makeWrapper ];
+
   extraInstallCommands = ''
     install -Dm444 \
       ${patchedAppimageContents}/vesktop.desktop \
@@ -60,6 +113,18 @@ appimageTools.wrapAppImage {
       --replace-fail 'Exec=AppRun --no-sandbox %U' 'Exec=vesktop %U'
 
     cp -r ${patchedAppimageContents}/usr/share/icons "$out/share/"
+
+    install -Dm444 ${vencordDesktopMain} \
+      "$out/share/vesktop/vencord/vencordDesktopMain.js"
+    install -Dm444 ${vencordDesktopPreload} \
+      "$out/share/vesktop/vencord/vencordDesktopPreload.js"
+    install -Dm444 ${vencordDesktopRenderer} \
+      "$out/share/vesktop/vencord/vencordDesktopRenderer.js"
+    install -Dm444 ${vencordDesktopRendererCss} \
+      "$out/share/vesktop/vencord/vencordDesktopRenderer.css"
+
+    wrapProgram "$out/bin/vesktop" \
+      --run ${lib.escapeShellArg "${vencordBootstrap}/bin/vesktop-vencord-bootstrap"}
   '';
 
   meta = {

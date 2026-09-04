@@ -784,3 +784,9 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Added explicit early `iwlwifi` loading to the current `nixy-laptop` lineage while preserving NetBird as the sole overlay and excluding the diagnostic boot service from the release candidate.
 - Pitfall/Root cause: A prior candidate was built from stale commit `c13c40e` instead of active laptop lineage `b43e535`; its broad closure reintroduced Tailscale and removed/reverted unrelated laptop packages. NetBird and Tailscale then both mutated `systemd-resolved`, while NetBird's global DNS route temporarily targeted an unavailable encrypted peer and returned SERVFAIL. Never activate a host candidate before comparing its complete closure with the running LKG.
 - Verification: Nix parse/eval, effective `services.tailscale.enable=false`, NetBird autostart true, full target build, closure diff against LKG, switch-only activation, public/private DNS, IPv4/IPv6, NetBird SSH and failed-unit checks.
+
+### 2026-09-04 (Vesktop Vencord runtime fallback)
+- Date: 2026-09-04
+- Change: Added fixed-output Vencord runtime assets and a settings-preserving pre-launch bootstrap to the existing patched Vesktop 1.6.7 package while retaining the Niri Wayland screenshare correction.
+- Pitfall/Root cause: Vesktop stores Vencord under `sessionData/vencordFiles`, not `vencordDist`, and considers the payload valid only when `package.json` plus all four runtime assets exist. A bootstrap targeting the wrong directory leaves a plain Discord UI even though plugin settings exist.
+- Verification: source and built-artifact regressions, complete laptop build, narrow closure diff, switch-only activation, runtime `Vencord`/`VencordNative` globals, Vencord/Vesktop settings entries, registered and enabled `VoiceMessages` with `channel-attach` hook, one-second unsent Opus microphone capture, normal restart with debug port closed, and post-switch DNS/NetBird checks.
