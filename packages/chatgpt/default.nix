@@ -1,5 +1,6 @@
 {
   alsa-lib,
+  asar,
   at-spi2-atk,
   at-spi2-core,
   autoPatchelfHook,
@@ -10,10 +11,12 @@
   fetchurl,
   gdk-pixbuf,
   glib,
+  glibc,
   gtk3,
   lib,
   libdrm,
   libgbm,
+  libglvnd,
   libnotify,
   libpulseaudio,
   libsecret,
@@ -50,6 +53,7 @@ stdenv.mkDerivation (finalAttrs: {
   dontBuild = true;
 
   nativeBuildInputs = [
+    asar
     rpmextract
     autoPatchelfHook
     makeWrapper
@@ -100,6 +104,17 @@ stdenv.mkDerivation (finalAttrs: {
     mkdir -p "$out/lib"
     cp -a usr/lib/chatgpt "$out/lib/"
 
+    # autoPatchelf can move PT_INTERP beyond detect-libc's 2048-byte ELF
+    # probe. Its next probe assumes /usr/bin/ldd, absent on NixOS; falling
+    # through to process.report.getReport() crashes Electron's Git worker.
+    # Point that filesystem probe at the glibc used by this package.
+    asar extract "$out/lib/chatgpt/resources/app.asar" app
+    substituteInPlace app/node_modules/@parcel/watcher/node_modules/detect-libc/lib/filesystem.js \
+      --replace-fail "const LDD_PATH = '/usr/bin/ldd';" \
+      "const LDD_PATH = '${lib.getBin glibc}/bin/ldd';"
+    # Keep native modules and their supporting files available to dlopen.
+    asar pack app "$out/lib/chatgpt/resources/app.asar" --unpack-dir node_modules
+
     install -Dm644 usr/share/applications/chatgpt.desktop \
       "$out/share/applications/chatgpt.desktop"
     install -Dm644 usr/share/pixmaps/chatgpt.png \
@@ -114,6 +129,7 @@ stdenv.mkDerivation (finalAttrs: {
     # write a GPG key below /etc, and enable imperative package-manager updates.
     makeWrapper "$out/lib/chatgpt/ChatGPT" "$out/bin/chatgpt" \
       --prefix PATH : ${lib.makeBinPath [ xdg-utils ]} \
+      --prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath [ libglvnd ]} \
       --prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath [ libpulseaudio ]}
   '';
 
