@@ -316,6 +316,8 @@ in
     };
     libinput.enable = true;
     gvfs.enable = true;
+    # Thunar needs the D-Bus thumbnailer for thumbnails and its image preview pane.
+    tumbler.enable = true;
     openssh.enable = true;
     flatpak.enable = true;
     printing.enable = true;
