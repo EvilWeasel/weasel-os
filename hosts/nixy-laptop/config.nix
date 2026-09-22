@@ -54,6 +54,9 @@
       environment = {
         NB_MANAGEMENT_URL = "https://netbird.evilweasel.cloud";
         NB_ADMIN_URL = "https://netbird.evilweasel.cloud";
+        # Avoid the generic-XDP page_pool split-lock crash on this kernel.
+        # Keep kernel WireGuard and use NetBird's UDP relay proxy instead.
+        NB_DISABLE_EBPF_WG_PROXY = "true";
       };
       openFirewall = true;
       openInternalFirewall = true;
