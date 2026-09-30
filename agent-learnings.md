@@ -825,3 +825,9 @@ Append-only log of implementation lessons for future agents working in this repo
 - Root cause: Thunar was enabled without its D-Bus thumbnailer. The preview options were already correct, but requests to `org.freedesktop.thumbnails.Thumbnailer1` failed with `ServiceUnknown`; even the standalone pane depends on an XX_LARGE thumbnail.
 - Verification: `nixfmt --check profiles/system/base.nix`, `nix-instantiate --parse profiles/system/base.nix`, `git diff --check`, and `nix eval --no-write-lock-file .#nixosConfigurations.<host>.config.system.build.toplevel.drvPath` for nixy-laptop, nixy-desktop, michapc and michapc-debug; full laptop builds and `nix flake check --no-write-lock-file` passed. Before activation, `nix store diff-closures` confirmed only Tumbler, ffmpegthumbnailer and libgepub were added. Preserve the active, uncommitted OpenRazer configuration when building the live system; do not activate a clean checkout that removes it.
 - Live result: Activated on nixy-laptop without reboot; verified packaged D-Bus activation after stopping the temporary probe, active OpenRazer, no failed system/user units, JPEG/PNG thumbnail caches, and the original screenshot's selected JPEG displayed in the right preview pane. User confirmed the preview works. Existing OpenRazer/MIME files and flake.lock remain unchanged.
+
+### 2026-09-30 (ChatGPT Linux desktop app update)
+
+- Change: Updated the nixy-laptop's declaratively packaged official ChatGPT RPM from 26.901.31953 to 26.928.21956, retaining the NixOS-specific ASAR and runtime-library fixes.
+- Pitfall/Root cause: OpenAI's official x64 RPM `latest` link is mutable; resolve it once, read the RPM metadata for its concrete version, and pin the immutable versioned URL plus its Nix SRI SHA-256 before rebuilding.
+- Verification: Nix parse, laptop toplevel evaluation, focused ChatGPT package build and startup/audio regression tests, then a live laptop `nixos-rebuild switch` with process and unit checks.
