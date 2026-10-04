@@ -69,5 +69,6 @@
   # imperative OpenAI DNF repository and updater outside the flake.
   environment.systemPackages = [
     (pkgs.callPackage ../../packages/chatgpt/default.nix { })
+    (pkgs.callPackage ../../packages/tuios-bin.nix { })
   ];
 }
