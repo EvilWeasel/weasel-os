@@ -40,7 +40,7 @@ codex_path = home / ".codex/config.toml"
 codex = tomlkit.parse(codex_path.read_text()) if codex_path.exists() else tomlkit.document()
 entry = codex.setdefault("mcp_servers", {}).setdefault("serena", {})
 entry["command"] = executable
-entry["args"] = ["start-mcp-server", "--context", "codex", "--project-from-cwd"]
+entry["args"] = ["start-mcp-server", "--context", "codex"]
 entry["startup_timeout_sec"] = 60
 entry["tool_timeout_sec"] = 120
 replace_if_changed(codex_path, tomlkit.dumps(codex))

@@ -840,3 +840,5 @@ Append-only log of implementation lessons for future agents working in this repo
 - Keep laptop Zed settings separate from the shared settings because the desktop does not import the added packages. Avoid adding unstable nixfmt alongside the existing formatter: Home Manager reports a binary collision.
 - Verified laptop eval/build and activation, ACP initialize/session creation, ten LSP initialize handshakes, and Python Serena symbol lookup/references/rename/body replacement followed by execution. Symbol replacement requires correct indentation; an MCP success alone does not prove valid code.
 - Full `nix flake check --no-build --no-write-lock-file` remains blocked by the unrelated ew-cloud/openclaw Fontconfig invalid store source. Preserve the user's unrelated local changes when applying this change.
+
+- Desktop MCP startup may use HOME as cwd (which is itself a Git repository here); avoid `--project-from-cwd` in the shared entry. Use Serena activate_project for the current repository to prevent whole-home indexing.
