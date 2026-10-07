@@ -1,0 +1,4 @@
+interface:
+  display_name: "Proton Pass CLI"
+  short_description: "API-Zugangsdaten sicher aus Proton Pass verwenden"
+  default_prompt: "Nutze $proton-pass-cli, um den benötigten API-Schlüssel sicher für den autorisierten Aufruf bereitzustellen."

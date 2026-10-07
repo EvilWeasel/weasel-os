@@ -2,6 +2,7 @@
   inputs,
   lib,
   pkgs,
+  pkgsUnstable,
   ...
 }:
 let
@@ -44,7 +45,12 @@ in
     hermesDesktop
     cuaDriver
     laptopExecutor
+    (import ../../packages/proton-pass-cli.nix { inherit pkgs pkgsUnstable; })
   ];
+
+  home.sessionVariables.PROTON_PASS_LINUX_KEYRING = "dbus";
+  home.file.".codex/skills/cartesia-audio".source = ../../skills/cartesia-audio;
+  home.file.".codex/skills/proton-pass-cli".source = ../../skills/proton-pass-cli;
 
   # Disable the package's unordered XDG autostart. It can race the hardened
   # daemon and then remain disconnected until manually restarted.

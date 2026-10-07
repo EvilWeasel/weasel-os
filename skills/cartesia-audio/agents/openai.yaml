@@ -1,0 +1,4 @@
+interface:
+  display_name: "Cartesia Audio"
+  short_description: "Antworten auf Abruf als natürliches deutsches Audio"
+  default_prompt: "Nutze $cartesia-audio, um deine letzte Antwort hörfreundlich als Audio mit passenden Emotionen wiederzugeben."
