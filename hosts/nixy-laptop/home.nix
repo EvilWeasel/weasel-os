@@ -37,6 +37,7 @@ in
     ../../profiles/home/client.nix
     ../../profiles/home/laptop.nix
     ../../programs/hephaestus-recovery-console.nix
+    ../../programs/coding-tools.nix
   ];
 
   home.packages = [
