@@ -10,6 +10,7 @@
     ../../profiles/system/base.nix
     ../../profiles/system/client.nix
     ../../profiles/system/laptop.nix
+    ../../modules/home-snapshots.nix
     ../../modules/wispr-flow.nix
     # ../../modules/networking/internal-dns.nix
     ./hardware.nix
