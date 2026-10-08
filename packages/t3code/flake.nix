@@ -17,10 +17,10 @@
       let
         pkgs = import nixpkgs { inherit system; };
 
-        version = "0.0.45";
+        source = builtins.fromJSON (builtins.readFile ./source.json);
+        version = source.version;
         src = pkgs.fetchurl {
-          url = "https://github.com/pingdotgg/t3code/releases/download/v${version}/T3-Code-${version}-x86_64.AppImage";
-          hash = "sha256-q3sKhtHqZXzMFitgt3LGH3C8fIueJZtGk51Tuzj6oCo=";
+          inherit (source) url hash;
         };
 
         desktopFile = pkgs.writeText "t3code.desktop" ''
@@ -39,7 +39,11 @@
         packages.default = pkgs.appimageTools.wrapType2 {
           pname = "t3code";
           inherit version src;
+          nativeBuildInputs = [ pkgs.makeWrapper ];
           extraInstallCommands = ''
+            wrapProgram $out/bin/t3code \
+              --set T3CODE_DISABLE_AUTO_UPDATE true \
+              --set WEASEL_T3_CLIENT 1
             install -Dm444 ${desktopFile} $out/share/applications/t3code.desktop
           '';
 

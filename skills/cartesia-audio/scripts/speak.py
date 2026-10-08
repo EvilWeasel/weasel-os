@@ -194,6 +194,19 @@ def split_text(text, limit=3500):
     return chunks
 
 
+def prepare_t3_audio_root(root):
+    # Keep project-local speech and transcripts private and out of Git. The
+    # ignore file ignores itself too; never replace a user's existing rules.
+    root.parent.mkdir(exist_ok=True, mode=0o700)
+    root.mkdir(exist_ok=True, mode=0o700)
+    try:
+        descriptor = os.open(root / ".gitignore", os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        return
+    with os.fdopen(descriptor, "w") as handle:
+        handle.write("*\n")
+
+
 def render(args, config, key):
     text = args.input.read_text().strip()
     if not text or len(text) > 20000:
@@ -208,17 +221,20 @@ def render(args, config, key):
         raise AudioError("Speed must be between 0.6 and 1.5.")
     if not shutil.which("ffprobe") or not shutil.which("ffmpeg"):
         raise AudioError("ffmpeg and ffprobe are required for validation and joining speech segments.")
-    voice = choose_voice(config, key)
     stamp = dt.datetime.now().astimezone().strftime("%Y-%m-%d/%H%M%S-%f")
-    root = Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local/share"))) / "cartesia-audio/outputs"
-    output = args.output.expanduser().absolute() if args.output else root / (stamp + "-antwort.mp3")
+    t3_client = os.environ.get("WEASEL_T3_CLIENT") == "1"
+    root = Path.cwd() / ".t3-artifacts/audio" if t3_client else Path(os.environ.get("XDG_DATA_HOME", str(Path.home() / ".local/share"))) / "cartesia-audio/outputs"
+    output = args.output.expanduser().absolute() if args.output else (root / (stamp + "-antwort.mp3")).absolute()
     if output.suffix.lower() != ".mp3":
         raise AudioError("The output path must end in .mp3.")
     sidecars = [output.with_suffix(".txt"), output.with_suffix(".json")]
     if any(path.exists() for path in [output, *sidecars]):
         raise AudioError("An output or sidecar already exists; refusing to overwrite it.")
+    if t3_client and not args.output:
+        prepare_t3_audio_root(root)
     output.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     chunks = split_text(text)
+    voice = choose_voice(config, key)
     with tempfile.TemporaryDirectory(prefix="cartesia-audio-", dir=output.parent) as temporary:
         folder = Path(temporary)
         parts = []
@@ -260,7 +276,15 @@ def render(args, config, key):
         "voice_id": voice["id"], "voice_name": voice.get("name"),
         "model_id": config["model_id"], "language": config["language"],
         "emotion": emotion, "emotion_support": "documented" if config["language"] == "en" else "experimental-outside-English",
+        "client": "t3code" if t3_client else "codex",
     }
+    if t3_client:
+        try:
+            metadata["preview_path"] = output.relative_to(Path.cwd()).as_posix()
+        except ValueError:
+            # An explicit output can be outside the workspace. Preserve that
+            # request without pretending it has a project-relative preview.
+            metadata["preview_path"] = None
     output.with_suffix(".json").write_text(json.dumps(metadata, ensure_ascii=False, indent=2) + "\n")
     print(json.dumps(metadata, ensure_ascii=False))
 

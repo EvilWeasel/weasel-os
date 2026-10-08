@@ -39,13 +39,35 @@ python3 /home/evilweasel/.codex/skills/cartesia-audio/scripts/speak.py voices
 python3 /home/evilweasel/.codex/skills/cartesia-audio/scripts/speak.py configure --voice VOICE_UUID
 ```
 
-Save outputs under the helper's durable local data directory by default. On successful rendering, use its absolute `audio_path` in the final answer:
+The helper keeps the configured voice (currently the user's selected Rena),
+including across clients. Do not reset the voice during client setup.
+
+In the Codex app, save outputs under the helper's durable local data directory
+by default. On successful rendering, use its absolute `audio_path` in the final
+answer:
 
 ```markdown
 ![Audioantwort](/absolute/path/antwort.mp3)
 
 [MP3 herunterladen](/absolute/path/antwort.mp3)
 ```
+
+In T3 Code, the launcher supplies `WEASEL_T3_CLIENT=1`. With that marker, the
+default output is `.t3-artifacts/audio/YYYY-MM-DD/` under the current project
+directory, allowing T3's workspace file preview to access the audio. The helper
+creates private directories and a self-ignoring `.gitignore` without replacing
+existing ignore rules. An explicit `--output` always takes precedence. Use the
+reported `preview_path` for a normal Markdown file link that opens the native
+preview; do not assume Codex's image-style MP3 embed works in T3:
+
+```markdown
+[Audio anhören](.t3-artifacts/audio/YYYY-MM-DD/antwort.mp3)
+```
+
+If an explicit output is outside the workspace, `preview_path` is null: link the
+absolute `audio_path` and describe it as a local file, without claiming a native
+workspace preview. Confirm preview behavior separately before claiming that
+the UI played or displayed the audio.
 
 Keep the written reply short: the player, duration, and any essential copyable commands or links. Link the saved transcript when useful. Do not repeat the entire long answer beside its audio unless requested. Never claim playback was heard or app rendering verified merely from ffprobe validation. Do not autoplay through desktop speakers.
 

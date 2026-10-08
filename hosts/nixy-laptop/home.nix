@@ -39,6 +39,7 @@ in
     ../../profiles/home/laptop.nix
     ../../programs/hephaestus-recovery-console.nix
     ../../programs/coding-tools.nix
+    ../../programs/t3code-client.nix
   ];
 
   home.packages = [
