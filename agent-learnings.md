@@ -894,3 +894,10 @@ Append-only log of implementation lessons for future agents working in this repo
 - Root cause: This T3 harness restricts networking despite the existing working Parallel OAuth configuration. Bundled LibreOffice lacks lcms2 and a CURL_OPENSSL_4-compatible library on the default loader path. Remote main also lacks existing local Handy/Wispr changes; build the complete current local source and preserve those patches.
 - Verification: official AppImage digest matched Nix prefetch; exact packaged nightly launch and authenticated UI; isolated V1-to-V2 DB migration (quick_check ok, 8 projects, 7 threads, 309 messages, no model runs); Codex/Claude provider discovery; Search/Extract receipts; execpolicy positive and billing-negative checks; packaged DOCX-to-PDF-to-PNG render; Nix parse, affected-host drvPath evals and complete local laptop build; closure diff limited to T3 and the two helpers. Whole-flake check remains blocked by the known unrelated ew-cloud Fontconfig source.
 - Activation: built candidate only; this harness prevents sudo via NoNewPrivs, including escalated commands. Do not report switch or production DB migration until confirmed from the normal host terminal.
+
+
+### 2026-10-08 (daily update candidate 20261008T201955Z-eaff4a88)
+
+- Change: Prepare codex 0.160.0 -> 0.162.0 with exact official source metadata.
+- Verification: Candidate package and laptop builds plus required isolated functional gates passed; preserve their receipts.
+- Activation: Pending independent submit verification; authoritative result is in /var/lib/weasel-updates/runs/20261008T201955Z-eaff4a88/journal.json.

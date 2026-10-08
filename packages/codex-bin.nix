@@ -6,11 +6,11 @@
 
 stdenvNoCC.mkDerivation (finalAttrs: {
   pname = "codex";
-  version = "0.160.0";
+  version = "0.162.0";
 
   src = fetchurl {
     url = "https://registry.npmjs.org/@openai/codex/-/codex-${finalAttrs.version}-linux-x64.tgz";
-    hash = "sha256-N6QdYcM5kYK4xye3cJDMehVmvYSdDwkHCgu8b+xMWNw=";
+    hash = "sha256-29NC562JbVPbtQXpJvG4IxS3mp0z4gmwt2Fs7WsGyYM=";
   };
 
   installPhase = ''
