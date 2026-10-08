@@ -1,8 +1,10 @@
 {
   appimageTools,
+  fetchFromGitHub,
   fetchurl,
   lib,
   makeWrapper,
+  rustPlatform,
   wl-clipboard,
   xclip,
   xsel,
@@ -15,6 +17,24 @@ let
   src = fetchurl {
     url = "https://github.com/wispr-flow-linux/wispr-flow-linux/releases/download/v1.0.3%2Bwispr1.6.7/wispr-flow-1.6.7-1.0.3-x86_64.AppImage";
     hash = "sha256-T9/evAykYnc20TVc7sX3Bwf8aTkTkxEtDr8FNavIMfA=";
+  };
+
+  # Keep the proprietary AppImage pinned, but replace its helper with a small,
+  # reviewed source patch. The helper release is independently content-addressed.
+  helperSrc = fetchFromGitHub {
+    owner = "wispr-flow-linux";
+    repo = "helper";
+    rev = "v0.1.2";
+    hash = "sha256-VH5rJ2wZd482TcDZKAQZHqeqLk443wkEIStxIjouVlU=";
+  };
+
+  linuxHelper = rustPlatform.buildRustPackage {
+    pname = "wispr-flow-linux-helper";
+    version = "0.1.2-release-all-keys";
+    src = helperSrc;
+    cargoLock.lockFile = "${helperSrc}/Cargo.lock";
+    patches = [ ./release-all-uinput-keys.patch ];
+    doCheck = true;
   };
 
   appimageContents = appimageTools.extractType2 {
@@ -36,6 +56,10 @@ let
         --replace-fail \
           "local desktop_file='/usr/share/applications/wispr-flow.desktop'" \
           'local desktop_file="''${WISPR_DESKTOP_FILE:-/usr/share/applications/wispr-flow.desktop}"'
+
+      install -Dm755 \
+        ${linuxHelper}/bin/wispr-flow-linux-helper \
+        "$out/usr/lib/wispr-flow/resources/Release/wispr-flow-linux-helper"
     '';
   };
 in

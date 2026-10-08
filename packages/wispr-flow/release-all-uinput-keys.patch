@@ -1,0 +1,166 @@
+diff --git a/src/backend/uinput.rs b/src/backend/uinput.rs
+index 6890857..bc49c3e 100644
+--- a/src/backend/uinput.rs
++++ b/src/backend/uinput.rs
+@@ -14,6 +14,7 @@
+ //! Codes written here are Linux evdev `KEY_*` codes (see `keymap::vk_to_evdev`),
+ //! NOT X11 keysyms.
+
++use std::collections::BTreeSet;
+ use std::fs::{File, OpenOptions};
+ use std::io::Write;
+ use std::os::unix::fs::OpenOptionsExt;
+@@ -43,6 +44,7 @@ const KEY_MAX: u16 = 0x2ff;
+
+ pub struct UInput {
+     file: File,
++    pressed_keys: BTreeSet<u16>,
+ }
+
+ impl UInput {
+@@ -107,7 +109,10 @@ impl UInput {
+         // will route events from it; injecting too early drops the first keys.
+         std::thread::sleep(std::time::Duration::from_millis(200));
+
+-        Ok(UInput { file })
++        Ok(UInput {
++            file,
++            pressed_keys: BTreeSet::new(),
++        })
+     }
+
+     fn emit(&mut self, type_: u16, code: u16, value: i32) -> Result<()> {
+@@ -137,8 +142,25 @@ impl UInput {
+
+     /// Press (value=1) or release (value=0) a single evdev key, with a SYN.
+     pub fn key(&mut self, code: u16, press: bool) -> Result<()> {
++        if press {
++            // A partial write can still reach the kernel, so teardown must err
++            // toward an extra key-up rather than a potentially stuck modifier.
++            self.pressed_keys.insert(code);
++        }
+         self.emit(EV_KEY, code, if press { 1 } else { 0 })?;
+-        self.syn()
++        self.syn()?;
++        if !press {
++            self.pressed_keys.remove(&code);
++        }
++        Ok(())
++    }
++
++    /// Best-effort release of every key this virtual device may have pressed.
++    /// An extra key-up is harmless; a stuck Ctrl or Meta poisons seat state.
++    pub fn release_all(&mut self) {
++        for code in release_order(&self.pressed_keys) {
++            let _ = self.key(code, false);
++        }
+     }
+
+     /// Press a chord: hold `mods` (in order), tap `key`, release everything in
+@@ -164,22 +186,28 @@ impl UInput {
+         for &m in &held {
+             let _ = self.key(m, false);
+         }
+-        for &m in mods {
+-            self.key(m, true)?;
+-        }
+-        self.key(key, true)?;
+-        self.key(key, false)?;
+-        for &m in mods.iter().rev() {
+-            self.key(m, false)?;
+-        }
+-        // Restore physically-held modifiers (reverse order). Best-effort.
+-        for &m in held.iter().rev() {
+-            let _ = self.key(m, true);
+-        }
+-        Ok(())
++        let result = (|| {
++            for &m in mods {
++                self.key(m, true)?;
++            }
++            self.key(key, true)?;
++            self.key(key, false)?;
++            for &m in mods.iter().rev() {
++                self.key(m, false)?;
++            }
++            Ok(())
++        })();
++        // Physical keys remain held independently. Re-pressing them through the
++        // virtual device creates a second synthetic down with no matching up.
++        self.release_all();
++        result
+     }
+ }
+
++fn release_order(pressed: &BTreeSet<u16>) -> Vec<u16> {
++    pressed.iter().rev().copied().collect()
++}
++
+ /// Snapshot the modifier keys the user is *physically* holding right now, by
+ /// querying every readable `/dev/input/event*` device with `EVIOCGKEY` (a
+ /// bitmap of currently-pressed keycodes) and intersecting with the modifier set.
+@@ -235,10 +263,25 @@ pub fn held_modifiers() -> Vec<u16> {
+
+ impl Drop for UInput {
+     fn drop(&mut self) {
++        self.release_all();
+         unsafe { libc::ioctl(self.file.as_raw_fd(), UI_DEV_DESTROY) };
+     }
+ }
+
++#[cfg(test)]
++mod tests {
++    use std::collections::BTreeSet;
++
++    use super::release_order;
++
++    #[test]
++    fn teardown_releases_every_synthetic_key_in_reverse_press_order() {
++        let pressed = BTreeSet::from([29, 42, 56, 125]);
++
++        assert_eq!(release_order(&pressed), vec![125, 56, 42, 29]);
++    }
++}
++
+ fn ioctl_set(fd: libc::c_int, req: libc::c_ulong, arg: libc::c_int) -> Result<()> {
+     if unsafe { libc::ioctl(fd, req, arg) } < 0 {
+         return Err(format!(
+diff --git a/src/main.rs b/src/main.rs
+index ba9993a..1d4bbbf 100644
+--- a/src/main.rs
++++ b/src/main.rs
+@@ -123,7 +123,9 @@ fn main() {
+                         log::debug!("<- response {} uuid={}", msg.command, msg.uuid);
+                         continue;
+                     }
+-                    handle_request(&mut *be, held_keys.as_ref(), &ipc, &msg, started);
++                    if !handle_request(&mut *be, held_keys.as_ref(), &ipc, &msg, started) {
++                        return;
++                    }
+                 }
+                 Err(e) => log::error!("failed to parse message: {e}; body={body:?}"),
+             }
+@@ -137,7 +139,7 @@ fn handle_request(
+     ipc: &IpcWriter,
+     msg: &Incoming,
+     started: Instant,
+-) {
++) -> bool {
+     let uuid = msg.uuid.as_str();
+     // payload-bearing commands wrap their data under `.payload`
+     let payload = msg.payload.get("payload").cloned().unwrap_or(Value::Null);
+@@ -279,7 +281,7 @@ fn handle_request(
+         "HelperAppShutdown" => {
+             log::info!("HelperAppShutdown received — exiting");
+             ipc.send(&proto::ack(uuid));
+-            std::process::exit(0);
++            return false;
+         }
+
+         // ---- everything else: safe no-op ACK ----
+@@ -291,4 +293,5 @@ fn handle_request(
+             ipc.send(&proto::ack(uuid));
+         }
+     }
++    true
+ }

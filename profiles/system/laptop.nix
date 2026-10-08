@@ -100,7 +100,11 @@
       inputs.helium.packages.${pkgs.stdenv.hostPlatform.system}.default
       inputs.zen-browser.packages.${pkgs.stdenv.hostPlatform.system}.default
       inputs.self.packages.${pkgs.stdenv.hostPlatform.system}.t3code
-      inputs.handy.packages.${pkgs.stdenv.hostPlatform.system}.handy
+      (import ../../packages/handy {
+        handy = inputs.handy;
+        handyNixpkgs = inputs.handy-nixpkgs;
+        system = pkgs.stdenv.hostPlatform.system;
+      })
     ];
 
   services = {
@@ -127,6 +131,14 @@
   };
 
   hardware = {
+    # RazerGenie is installed for all client machines.  Its backend was only
+    # enabled on the desktop, leaving the laptop GUI unable to talk to the
+    # Naga V2 HyperSpeed receiver.
+    openrazer = {
+      enable = true;
+      users = [ username ];
+    };
+
     sane = {
       enable = true;
       extraBackends = [ pkgs.sane-airscan ];

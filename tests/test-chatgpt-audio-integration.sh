@@ -12,11 +12,21 @@ assert_contains() {
   }
 }
 
+assert_matches() {
+  local pattern=$1
+  rg --pcre2 --quiet -- "$pattern" "$package_file" || {
+    printf 'FAIL: %s does not match %s\n' "$package_file" "$pattern" >&2
+    exit 1
+  }
+}
+
 # Chromium loads libpulse.so dynamically. Without it, the official Electron
 # payload silently falls back to ALSA and getUserMedia fails against PipeWire
 # with NotReadableError: Could not start audio source.
-assert_contains 'version = "26.901.31953";'
-assert_contains 'hash = "sha256-6TyfiefNvKjAfCk7TYO6+d7tCrCP6+s4w80TrR3Aidc=";'
+# The exact version and hash intentionally change on every upstream update.
+# Assert that both pins exist and retain Nix's expected SRI SHA-256 shape.
+assert_matches '^  version = "[0-9]+\.[0-9]+\.[0-9]+";$'
+assert_matches '^    hash = "sha256-[A-Za-z0-9+/]{43}=";$'
 assert_contains 'libpulseaudio,'
 assert_contains 'libpulseaudio'
 assert_contains '--prefix LD_LIBRARY_PATH : ${lib.makeLibraryPath [ libpulseaudio ]}'

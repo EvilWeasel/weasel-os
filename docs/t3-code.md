@@ -28,6 +28,20 @@ Pins prüft und überholte Ausnahmen beseitigt. Der LLM trifft die begründete
 Updateentscheidung; überprüfbare Build-, Snapshot- und Aktivierungsschritte
 sollen die Ausführung absichern.
 
+## Parallel arbeiten
+
+Für neue parallele Threads in diesem T3-Projekt beim Start `Worktree` auswählen. Der
+Hauptcheckout `/home/evilweasel/weasel-os` bleibt auf `main` und dient als
+gemeinsame Integrationsbasis. Jeder schreibende Task arbeitet auf seiner
+eigenen Branch; mehrere Threads im selben lokalen Checkout würden weiterhin
+dieselben Dateien und denselben Git-Index verändern. T3s Projektoption für die
+Standardumgebung neuer Threads kann diese Auswahl voreinstellen.
+
+T3 stellt dafür native Worktree-Starts und einen Worktree-Handoff für bestehende
+Threads bereit. Vor einem Handoff zuerst die aktuelle Bindung prüfen.
+Unabhängige Reviews dürfen dieselbe Quelle lesen. Systemaktivierungen bleiben
+koordiniert und dürfen sich auch bei getrennten Worktrees nicht überlappen.
+
 Dieser Migrationsauftrag installiert und aktiviert keinen Update-Timer und
 ändert weder NixOS-Version noch Flake-Inputs. Ein bisheriger deterministischer
 Updaterentwurf ist als unveröffentlichtes Referenzmaterial unter

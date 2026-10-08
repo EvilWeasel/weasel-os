@@ -26,6 +26,13 @@ Preferred day-to-day rebuild commands are defined in `hosts/nixy-laptop/home.nix
 - `ncg`: run system/user garbage collection, then switch boot configuration.
 Use these aliases when available; use the full `nixos-rebuild`/`nh` commands in non-interactive or fresh environments.
 
+## Parallel Agent Work
+- Keep the main checkout on `main` as the integration baseline. For concurrent code changes, use a separate branch and worktree per task; in T3 use its native worktree handoff or launch a thread with a worktree workspace.
+- Check the thread's current worktree binding before creating another. Read-only reviews may share a checkout; agents must not edit, stage or commit in another task's worktree.
+- Before integrating, fetch and compare current `origin/main`, preserve other worktrees, resolve conflicts in the task branch, and validate the resulting host configuration. Push without force and return the main checkout to a clean, synchronized state.
+- Coordinate system activation separately from source changes. Builds may run in parallel; only one update or system activation transaction may be in progress. An active or unresolved update blocks another activation.
+- Never reset, stash or delete another task's work to make integration succeed. The daily updater must use an isolated candidate and stop if its baseline changes.
+
 ## Coding Style & Naming Conventions
 - Nix code is formatted with `nixfmt`; do not hand-format around it.
 - Use the standard RFC-style layout that `nixfmt` produces.
