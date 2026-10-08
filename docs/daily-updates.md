@@ -206,10 +206,13 @@ Ein Stromausfall während Cleanup hinterlässt ebenfalls einen Recoveryfall.
 
 Die erste Installation des festen Root-Dienstes braucht normale Hostrechte.
 Zunächst blockierte das aus dem alten Harness gestartete T3 mit `NoNewPrivs`
-auch normal freigegebenes sudo. Nach dem eigenständigen Neustart der nativen
-T3-App hat der normale genehmigte Hostprozess tatsächlich `NoNewPrivs: 0` und
-`sudo -n id -u` liefert 0. Damit kann der autorisierte Bootstrap regulär laufen,
-sobald alle konkreten Quellen, Tests und Builds fertig sind. Kein User-Executor,
+auch normal freigegebenes sudo. Nach einem eigenständigen Neustart der nativen
+T3-App wurde zwischenzeitlich `NoNewPrivs: 0` mit erfolgreichem sudo beobachtet.
+Die abschließende Prüfung am 2026-10-09 erbt jedoch wieder `NoNewPrivs: 1`;
+sudo verweigert diesen Prozess. Solange das der tatsächliche Harness-Zustand
+ist, braucht der vollständig gebaute und quellgeprüfte Bootstrap einen einzigen
+Aufruf im normalen Terminal. Eine frühere erfolgreiche Probe belegt keine
+aktuell verfügbaren Rechte. Kein User-Executor,
 kein alternativer Dispatch und keine verweigerte T3-Capability werden umgangen.
 
 Der konkrete Bootstrap-Befehl nennt einen unveränderlichen Store-Wrapper und
