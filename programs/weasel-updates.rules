@@ -1,0 +1,7 @@
+# The installed helper validates every action and isolates its candidates.
+# It can submit only object IDs to the fixed, independently checked inbox.
+prefix_rule(
+    pattern = ["/run/current-system/sw/bin/weasel-update", ["--review-start", "--record-review", "--discover", "--prepare", "--submit", "--status"]],
+    decision = "allow",
+    justification = "Authorized daily candidate discovery, build, review and signed update submission through the fixed Weasel helper.",
+)

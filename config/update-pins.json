@@ -1,0 +1,1347 @@
+{
+  "schema_version": 1,
+  "last_review": "2026-10-08",
+  "review_every_days": 1,
+  "automatic_lanes": [
+    "t3",
+    "codex",
+    "chatgpt"
+  ],
+  "activation_policy": "only-built-and-gated-candidates-after-home-snapshot",
+  "source_scope": {
+    "t3": [
+      "packages/t3code/source.json"
+    ],
+    "codex": [
+      "packages/codex-bin.nix:version",
+      "packages/codex-bin.nix:src.hash"
+    ],
+    "chatgpt": [
+      "packages/chatgpt/default.nix:version",
+      "packages/chatgpt/default.nix:src.hash"
+    ]
+  },
+  "support": {
+    "current_declared_base": "25.11",
+    "eol": "2026-06-30",
+    "supported_target": "26.05",
+    "supported_until": "2026-12-31",
+    "official_source": "https://nixos.org/blog/announcements/2026/nixos-2605/"
+  },
+  "migration_status": "required-separate-25.11-to-supported-stable-migration",
+  "entries": [
+    {
+      "id": "disko",
+      "kind": "flake-input",
+      "source": "flake.nix + flake.lock",
+      "original": {
+        "owner": "nix-community",
+        "repo": "disko",
+        "type": "github"
+      },
+      "locked_rev": "63b4e7e6cf75307c1d26ac3762b886b5b0247267",
+      "locked_commit_date": "2026-05-02",
+      "lane": "lock-adapter-review",
+      "reason": "No special hold reason found; exact lock provides reproducibility, not permanent version freeze.",
+      "required_gate": "Official upstream change review; dependency graph/affected hosts and relevant build.",
+      "next_review": "2026-10-09",
+      "last_review": "2026-10-08",
+      "affected_hosts": [
+        "nixy-laptop"
+      ],
+      "gate_adapter": null,
+      "gate_status": "needs-verified-adapter",
+      "review_status": "daily-pin-reason-and-candidate-review",
+      "candidate_policy": "upstream-reviewed",
+      "discovery_endpoints": [
+        "https://api.github.com/repos/nix-community/disko/releases?per_page=20",
+        "https://api.github.com/repos/nix-community/disko/commits?per_page=10"
+      ],
+      "reason_evidence": [
+        "https://github.com/nix-community/disko",
+        "repo:flake.nix + flake.lock"
+      ],
+      "affected_versions": [
+        "63b4e7e6cf75307c1d26ac3762b886b5b0247267"
+      ]
+    },
+    {
+      "id": "dms",
+      "kind": "flake-input",
+      "source": "flake.nix + flake.lock",
+      "original": {
+        "owner": "AvengeMedia",
+        "ref": "stable",
+        "repo": "DankMaterialShell",
+        "type": "github"
+      },
+      "locked_rev": "eb5afcdc40ea5446c27e18552ff4a19f9daf9484",
+      "locked_commit_date": "2026-04-29",
+      "lane": "channel-adapter",
+      "reason": "Stable branch; shared greeter/Home module and mutable theme integrations.",
+      "required_gate": "Qt/quickshell compatibility, compositor and greeter candidates; no surprise session restarts.",
+      "next_review": "2026-10-09",
+      "last_review": "2026-10-08",
+      "affected_hosts": [
+        "nixy-laptop",
+        "nixy-desktop",
+        "michapc",
+        "michapc-debug"
+      ],
+      "gate_adapter": null,
+      "gate_status": "needs-verified-adapter",
+      "review_status": "daily-pin-reason-and-candidate-review",
+      "candidate_policy": "upstream-reviewed",
+      "discovery_endpoints": [
+        "https://api.github.com/repos/AvengeMedia/DankMaterialShell/releases?per_page=20",
+        "https://api.github.com/repos/AvengeMedia/DankMaterialShell/commits?per_page=10"
+      ],
+      "reason_evidence": [
+        "https://github.com/AvengeMedia/DankMaterialShell",
+        "repo:flake.nix + flake.lock"
+      ],
+      "affected_versions": [
+        "eb5afcdc40ea5446c27e18552ff4a19f9daf9484"
+      ]
+    },
+    {
+      "id": "fine-cmdline",
+      "kind": "flake-input",
+      "source": "flake.nix + flake.lock",
+      "original": {
+        "owner": "VonHeikemen",
+        "repo": "fine-cmdline.nvim",
+        "type": "github"
+      },
+      "locked_rev": "6e646f4da6afe856e36f3d952489b723d1475638",
+      "locked_commit_date": "2026-03-19",
+      "lane": "source-adapter",
+      "reason": "Neovim plugin Git source used directly; no special hold reason found.",
+      "required_gate": "Neovim startup/plugin command and shared host evaluation.",
+      "next_review": "2026-10-09",
+      "last_review": "2026-10-08",
+      "affected_hosts": [
+        "nixy-laptop",
+        "nixy-desktop",
+        "michapc",
+        "michapc-debug"
+      ],
+      "gate_adapter": null,
+      "gate_status": "needs-verified-adapter",
+      "review_status": "daily-pin-reason-and-candidate-review",
+      "candidate_policy": "upstream-reviewed",
+      "discovery_endpoints": [
+        "https://api.github.com/repos/VonHeikemen/fine-cmdline.nvim/releases?per_page=20",
+        "https://api.github.com/repos/VonHeikemen/fine-cmdline.nvim/commits?per_page=10"
+      ],
+      "reason_evidence": [
+        "https://github.com/VonHeikemen/fine-cmdline.nvim",
+        "repo:flake.nix + flake.lock"
+      ],
+      "affected_versions": [
+        "6e646f4da6afe856e36f3d952489b723d1475638"
+      ]
+    },
+    {
+      "id": "flake-parts",
+      "kind": "flake-input",
+      "source": "flake.nix + flake.lock",
+      "original": {
+        "owner": "hercules-ci",
+        "repo": "flake-parts",
+        "type": "github"
+      },
+      "locked_rev": "5250617bffd85403b14dbf43c3870e7f255d2c16",
+      "locked_commit_date": "2026-05-01",
+      "lane": "lock-adapter-review",
+      "reason": "No special hold reason found; exact lock provides reproducibility, not permanent version freeze.",
+      "required_gate": "Official upstream change review; dependency graph/affected hosts and relevant build.",
+      "next_review": "2026-10-09",
+      "last_review": "2026-10-08",
+      "affected_hosts": [
+        "nixy-laptop",
+        "nixy-desktop",
+        "michapc",
+        "michapc-debug",
+        "ew-cloud"
+      ],
+      "gate_adapter": null,
+      "gate_status": "needs-verified-adapter",
+      "review_status": "daily-pin-reason-and-candidate-review",
+      "candidate_policy": "upstream-reviewed",
+      "discovery_endpoints": [
+        "https://api.github.com/repos/hercules-ci/flake-parts/releases?per_page=20",
+        "https://api.github.com/repos/hercules-ci/flake-parts/commits?per_page=10"
+      ],
+      "reason_evidence": [
+        "https://github.com/hercules-ci/flake-parts",
+        "repo:flake.nix + flake.lock"
+      ],
+      "affected_versions": [
+        "5250617bffd85403b14dbf43c3870e7f255d2c16"
+      ]
+    },
+    {
+      "id": "handy",
+      "kind": "flake-input",
+      "source": "flake.nix + flake.lock",
+      "original": {
+        "owner": "cjpais",
+        "repo": "Handy",
+        "rev": "af48dd68a64d58aad128fdbb920492a03da53c79",
+        "type": "github"
+      },
+      "locked_rev": "af48dd68a64d58aad128fdbb920492a03da53c79",
+      "locked_commit_date": "2026-08-24",
+      "lane": "paired-pin-review",
+      "reason": "Original March pin avoided Rust/Tauri hash break; September 4 update fixed to v0.9.6 with own nixpkgs; crates.io download route override persists.",
+      "required_gate": "Build paired handy+handy-nixpkgs candidate and existing-model synthetic offline transcription; preserve checksums.",
+      "next_review": "2026-10-09",
+      "last_review": "2026-10-08",
+      "affected_hosts": [
+        "nixy-laptop",
+        "michapc",
+        "michapc-debug"
+      ],
+      "gate_adapter": null,
+      "gate_status": "needs-verified-adapter",
+      "review_status": "daily-pin-reason-and-candidate-review",
+      "candidate_policy": "upstream-reviewed",
+      "discovery_endpoints": [
+        "https://api.github.com/repos/cjpais/Handy/releases?per_page=20",
+        "https://api.github.com/repos/cjpais/Handy/commits?per_page=10"
+      ],
+      "reason_evidence": [
+        "https://github.com/cjpais/Handy",
+        "repo:flake.nix + flake.lock"
+      ],
+      "affected_versions": [
+        "af48dd68a64d58aad128fdbb920492a03da53c79"
+      ]
+    },
+    {
+      "id": "handy-nixpkgs",
+      "kind": "flake-input",
+      "source": "flake.nix + flake.lock",
+      "original": {
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "46db2e09e1d3f113a13c0d7b81e2f221c63b8ce9",
+        "type": "github"
+      },
+      "locked_rev": "46db2e09e1d3f113a13c0d7b81e2f221c63b8ce9",
+      "locked_commit_date": "2026-03-24",
+      "lane": "paired-pin-review",
+      "reason": "Separate immutable nixpkgs prevents every global update from rebasing/rebuilding Handy.",
+      "required_gate": "Update with Handy only, compare lock graph and build/transcription.",
+      "next_review": "2026-10-09",
+      "last_review": "2026-10-08",
+      "affected_hosts": [
+        "nixy-laptop",
+        "michapc",
+        "michapc-debug"
+      ],
+      "gate_adapter": null,
+      "gate_status": "needs-verified-adapter",
+      "review_status": "daily-pin-reason-and-candidate-review",
+      "candidate_policy": "upstream-reviewed",
+      "discovery_endpoints": [
+        "https://api.github.com/repos/NixOS/nixpkgs/releases?per_page=20",
+        "https://api.github.com/repos/NixOS/nixpkgs/commits?per_page=10"
+      ],
+      "reason_evidence": [
+        "https://github.com/NixOS/nixpkgs",
+        "repo:flake.nix + flake.lock"
+      ],
+      "affected_versions": [
+        "46db2e09e1d3f113a13c0d7b81e2f221c63b8ce9"
+      ]
+    },
+    {
+      "id": "helium",
+      "kind": "flake-input",
+      "source": "flake.nix + flake.lock",
+      "original": {
+        "owner": "schembriaiden",
+        "repo": "helium-browser-nix-flake",
+        "type": "github"
+      },
+      "locked_rev": "98e2d707c457106f0821166ad29e053f6ed0f872",
+      "locked_commit_date": "2026-05-02",
+      "lane": "channel-adapter",
+      "reason": "External maintained flake replaced local AppImage package May 3.",
+      "required_gate": "Current upstream stable packaging, browser renderer with isolated profile, profile migration.",
+      "next_review": "2026-10-09",
+      "last_review": "2026-10-08",
+      "affected_hosts": [
+        "nixy-laptop",
+        "michapc",
+        "michapc-debug"
+      ],
+      "gate_adapter": null,
+      "gate_status": "needs-verified-adapter",
+      "review_status": "daily-pin-reason-and-candidate-review",
+      "candidate_policy": "upstream-reviewed",
+      "discovery_endpoints": [
+        "https://api.github.com/repos/schembriaiden/helium-browser-nix-flake/releases?per_page=20",
+        "https://api.github.com/repos/schembriaiden/helium-browser-nix-flake/commits?per_page=10"
+      ],
+      "reason_evidence": [
+        "https://github.com/schembriaiden/helium-browser-nix-flake",
+        "repo:flake.nix + flake.lock"
+      ],
+      "affected_versions": [
+        "98e2d707c457106f0821166ad29e053f6ed0f872"
+      ]
+    },
+    {
+      "id": "hermes-agent",
+      "kind": "flake-input",
+      "source": "flake.nix + flake.lock",
+      "original": {
+        "owner": "NousResearch",
+        "ref": "v2026.7.20",
+        "repo": "hermes-agent",
+        "type": "github"
+      },
+      "locked_rev": "3ef6bbd201263d354fd83ec55b3c306ded2eb72a",
+      "locked_commit_date": "2026-07-20",
+      "lane": "tag-adapter-review",
+      "reason": "Pinned v2026.7.20 release; reason for holding this release is not established by focused code/history.",
+      "required_gate": "Review actual client usage, upstream release and harness compatibility; isolated desktop/state migration probes.",
+      "next_review": "2026-10-09",
+      "last_review": "2026-10-08",
+      "affected_hosts": [
+        "nixy-laptop"
+      ],
+      "gate_adapter": null,
+      "gate_status": "needs-verified-adapter",
+      "review_status": "unknown-hold-reason-investigate",
+      "candidate_policy": "upstream-reviewed",
+      "discovery_endpoints": [
+        "https://api.github.com/repos/NousResearch/hermes-agent/releases?per_page=20",
+        "https://api.github.com/repos/NousResearch/hermes-agent/commits?per_page=10"
+      ],
+      "reason_evidence": [
+        "https://github.com/NousResearch/hermes-agent",
+        "repo:flake.nix + flake.lock"
+      ],
+      "investigation_due": "2026-10-09",
+      "affected_versions": [
+        "3ef6bbd201263d354fd83ec55b3c306ded2eb72a"
+      ]
+    },
+    {
+      "id": "home-manager",
+      "kind": "flake-input",
+      "source": "flake.nix + flake.lock",
+      "original": {
+        "owner": "nix-community",
+        "ref": "release-25.11",
+        "repo": "home-manager",
+        "type": "github"
+      },
+      "locked_rev": "0585fbf645640973e3398863bbaf3bd1ddce4a51",
+      "locked_commit_date": "2026-05-03",
+      "lane": "paired-release-migration",
+      "reason": "release-25.11 follows stable nixpkgs; migrate the matching release with stable base.",
+      "required_gate": "Paired release compatibility and Home Manager activation with preserved mutable settings.",
+      "next_review": "2026-10-09",
+      "last_review": "2026-10-08",
+      "affected_hosts": [
+        "nixy-laptop",
+        "nixy-desktop",
+        "michapc",
+        "michapc-debug",
+        "ew-cloud"
+      ],
+      "gate_adapter": null,
+      "gate_status": "separate-migration-needed",
+      "review_status": "daily-migration-review",
+      "candidate_policy": "upstream-reviewed",
+      "discovery_endpoints": [
+        "https://api.github.com/repos/nix-community/home-manager/releases?per_page=20",
+        "https://api.github.com/repos/nix-community/home-manager/commits?per_page=10"
+      ],
+      "reason_evidence": [
+        "https://github.com/nix-community/home-manager",
+        "repo:flake.nix + flake.lock"
+      ],
+      "affected_versions": [
+        "0585fbf645640973e3398863bbaf3bd1ddce4a51"
+      ]
+    },
+    {
+      "id": "millennium",
+      "kind": "flake-input",
+      "source": "flake.nix + flake.lock",
+      "original": {
+        "dir": "packages/nix",
+        "owner": "SteamClientHomebrew",
+        "repo": "Millennium",
+        "type": "github"
+      },
+      "locked_rev": "8f6a93c62a8d2ed246fb61b0b354dccb2d2b396c",
+      "locked_commit_date": "2026-05-04",
+      "lane": "channel-adapter",
+      "reason": "Shared Steam overlay added May 5; includes 32-bit dependencies.",
+      "required_gate": "Overlay evaluation/all consumers, build and Steam compatibility without disturbing live games.",
+      "next_review": "2026-10-09",
+      "last_review": "2026-10-08",
+      "affected_hosts": [
+        "nixy-laptop",
+        "nixy-desktop",
+        "michapc",
+        "michapc-debug"
+      ],
+      "gate_adapter": null,
+      "gate_status": "needs-verified-adapter",
+      "review_status": "daily-pin-reason-and-candidate-review",
+      "candidate_policy": "upstream-reviewed",
+      "discovery_endpoints": [
+        "https://api.github.com/repos/SteamClientHomebrew/Millennium/releases?per_page=20",
+        "https://api.github.com/repos/SteamClientHomebrew/Millennium/commits?per_page=10"
+      ],
+      "reason_evidence": [
+        "https://github.com/SteamClientHomebrew/Millennium",
+        "repo:flake.nix + flake.lock"
+      ],
+      "affected_versions": [
+        "8f6a93c62a8d2ed246fb61b0b354dccb2d2b396c"
+      ]
+    },
+    {
+      "id": "nix-openclaw",
+      "kind": "flake-input",
+      "source": "flake.nix + flake.lock",
+      "original": {
+        "owner": "openclaw",
+        "repo": "nix-openclaw",
+        "type": "github"
+      },
+      "locked_rev": "53aac0dce0810c40c75793fdad3d41b0f7e7baaf",
+      "locked_commit_date": "2026-04-14",
+      "lane": "server-review",
+      "reason": "Only ew-cloud consumes OpenClaw. The historical Fontconfig evaluation failure did not recur in the current full flake check; a new candidate still needs server-specific service checks.",
+      "required_gate": "Separate server scope and state backup; no autonomous laptop update may silently deploy server.",
+      "next_review": "2026-10-09",
+      "last_review": "2026-10-08",
+      "affected_hosts": [
+        "ew-cloud"
+      ],
+      "gate_adapter": null,
+      "gate_status": "needs-verified-adapter",
+      "review_status": "daily-pin-reason-and-candidate-review",
+      "candidate_policy": "upstream-reviewed",
+      "discovery_endpoints": [
+        "https://api.github.com/repos/openclaw/nix-openclaw/releases?per_page=20",
+        "https://api.github.com/repos/openclaw/nix-openclaw/commits?per_page=10"
+      ],
+      "reason_evidence": [
+        "https://github.com/openclaw/nix-openclaw",
+        "repo:flake.nix + flake.lock"
+      ],
+      "affected_versions": [
+        "53aac0dce0810c40c75793fdad3d41b0f7e7baaf"
+      ]
+    },
+    {
+      "id": "nixos-anywhere",
+      "kind": "flake-input",
+      "source": "flake.nix + flake.lock",
+      "original": {
+        "owner": "nix-community",
+        "repo": "nixos-anywhere",
+        "type": "github"
+      },
+      "locked_rev": "92f82c5196a5f8588be4967e535c4cfd35e85902",
+      "locked_commit_date": "2026-02-01",
+      "lane": "lock-adapter-review",
+      "reason": "No special hold reason found; exact lock provides reproducibility, not permanent version freeze.",
+      "required_gate": "Official upstream change review; dependency graph/affected hosts and relevant build.",
+      "next_review": "2026-10-09",
+      "last_review": "2026-10-08",
+      "affected_hosts": [
+        "nixy-laptop"
+      ],
+      "gate_adapter": null,
+      "gate_status": "needs-verified-adapter",
+      "review_status": "daily-pin-reason-and-candidate-review",
+      "candidate_policy": "upstream-reviewed",
+      "discovery_endpoints": [
+        "https://api.github.com/repos/nix-community/nixos-anywhere/releases?per_page=20",
+        "https://api.github.com/repos/nix-community/nixos-anywhere/commits?per_page=10"
+      ],
+      "reason_evidence": [
+        "https://github.com/nix-community/nixos-anywhere",
+        "repo:flake.nix + flake.lock"
+      ],
+      "affected_versions": [
+        "92f82c5196a5f8588be4967e535c4cfd35e85902"
+      ]
+    },
+    {
+      "id": "nixos-hardware",
+      "kind": "flake-input",
+      "source": "flake.nix + flake.lock",
+      "original": {
+        "owner": "NixOS",
+        "ref": "master",
+        "repo": "nixos-hardware",
+        "type": "github"
+      },
+      "locked_rev": "eeb02f6e29fc8139c0b15af5ff0fdfdc6d0d3d90",
+      "locked_commit_date": "2026-05-03",
+      "lane": "lock-adapter-review",
+      "reason": "No special hold reason found; exact lock provides reproducibility, not permanent version freeze.",
+      "required_gate": "Official upstream change review; dependency graph/affected hosts and relevant build.",
+      "next_review": "2026-10-09",
+      "last_review": "2026-10-08",
+      "affected_hosts": [
+        "nixy-laptop"
+      ],
+      "gate_adapter": null,
+      "gate_status": "needs-verified-adapter",
+      "review_status": "daily-pin-reason-and-candidate-review",
+      "candidate_policy": "upstream-reviewed",
+      "discovery_endpoints": [
+        "https://api.github.com/repos/NixOS/nixos-hardware/releases?per_page=20",
+        "https://api.github.com/repos/NixOS/nixos-hardware/commits?per_page=10"
+      ],
+      "reason_evidence": [
+        "https://github.com/NixOS/nixos-hardware",
+        "repo:flake.nix + flake.lock"
+      ],
+      "affected_versions": [
+        "eeb02f6e29fc8139c0b15af5ff0fdfdc6d0d3d90"
+      ]
+    },
+    {
+      "id": "nixpkgs",
+      "kind": "flake-input",
+      "source": "flake.nix + flake.lock",
+      "original": {
+        "owner": "nixos",
+        "ref": "nixos-25.11",
+        "repo": "nixpkgs",
+        "type": "github"
+      },
+      "locked_rev": "26ef669cffa904b6f6832ab57b77892a37c1a671",
+      "locked_commit_date": "2026-05-01",
+      "lane": "supported-release-migration",
+      "reason": "Current nixos-25.11 base is EOL since 2026-06-30; separate migration to supported 26.05 before broad OS lane.",
+      "required_gate": "NixOS support, release notes, all affected host eval/build, initrd/kernel/NVIDIA/EVDI/network probes.",
+      "next_review": "2026-10-09",
+      "last_review": "2026-10-08",
+      "affected_hosts": [
+        "nixy-laptop",
+        "nixy-desktop",
+        "michapc",
+        "michapc-debug",
+        "ew-cloud"
+      ],
+      "gate_adapter": null,
+      "gate_status": "separate-migration-needed",
+      "review_status": "daily-migration-review",
+      "candidate_policy": "upstream-reviewed",
+      "discovery_endpoints": [
+        "https://api.github.com/repos/nixos/nixpkgs/releases?per_page=20",
+        "https://api.github.com/repos/nixos/nixpkgs/commits?per_page=10"
+      ],
+      "reason_evidence": [
+        "https://github.com/nixos/nixpkgs",
+        "repo:flake.nix + flake.lock"
+      ],
+      "affected_versions": [
+        "26ef669cffa904b6f6832ab57b77892a37c1a671"
+      ]
+    },
+    {
+      "id": "nixpkgs-unstable",
+      "kind": "flake-input",
+      "source": "flake.nix + flake.lock",
+      "original": {
+        "owner": "nixos",
+        "ref": "nixos-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      },
+      "locked_rev": "64c08a7ca051951c8eae34e3e3cb1e202fe36786",
+      "locked_commit_date": "2026-05-23",
+      "lane": "channel-adapter",
+      "reason": "Moving channel locked 2026-05-23; advance only in isolated candidate because it supplies developer tools/apps.",
+      "required_gate": "Diff transitive closure, affected hosts, package probes, no kernel or system release surprises.",
+      "next_review": "2026-10-09",
+      "last_review": "2026-10-08",
+      "affected_hosts": [
+        "nixy-laptop",
+        "nixy-desktop",
+        "michapc",
+        "michapc-debug",
+        "ew-cloud"
+      ],
+      "gate_adapter": null,
+      "gate_status": "needs-verified-adapter",
+      "review_status": "daily-pin-reason-and-candidate-review",
+      "candidate_policy": "upstream-reviewed",
+      "discovery_endpoints": [
+        "https://api.github.com/repos/nixos/nixpkgs/releases?per_page=20",
+        "https://api.github.com/repos/nixos/nixpkgs/commits?per_page=10"
+      ],
+      "reason_evidence": [
+        "https://github.com/nixos/nixpkgs",
+        "repo:flake.nix + flake.lock"
+      ],
+      "affected_versions": [
+        "64c08a7ca051951c8eae34e3e3cb1e202fe36786"
+      ]
+    },
+    {
+      "id": "quickshell",
+      "kind": "flake-input",
+      "source": "flake.nix + flake.lock",
+      "original": {
+        "type": "git",
+        "url": "https://git.outfoxxed.me/outfoxxed/quickshell"
+      },
+      "locked_rev": "8db8ca1fecfcce8def1f9265fa1742baa0e0c271",
+      "locked_commit_date": "2026-05-02",
+      "lane": "usage-review",
+      "reason": "Input exists; direct consumer absent in focused source scan, DMS may supply its own dependency.",
+      "required_gate": "Resolve input graph and actual derivation use before deciding update/removal.",
+      "next_review": "2026-10-09",
+      "last_review": "2026-10-08",
+      "affected_hosts": [],
+      "gate_adapter": null,
+      "gate_status": "needs-usage-review",
+      "review_status": "daily-usage-and-replacement-review",
+      "candidate_policy": "upstream-reviewed",
+      "discovery_endpoints": [
+        "https://git.outfoxxed.me/outfoxxed/quickshell"
+      ],
+      "reason_evidence": [
+        "https://git.outfoxxed.me/outfoxxed/quickshell",
+        "repo:flake.nix + flake.lock"
+      ],
+      "affected_versions": [
+        "8db8ca1fecfcce8def1f9265fa1742baa0e0c271"
+      ]
+    },
+    {
+      "id": "serena",
+      "kind": "flake-input",
+      "source": "flake.nix + flake.lock",
+      "original": {
+        "owner": "oraios",
+        "repo": "serena",
+        "rev": "949a27ef1e5fda1a6e7b561e777bcece345c6ffd",
+        "type": "github"
+      },
+      "locked_rev": "949a27ef1e5fda1a6e7b561e777bcece345c6ffd",
+      "locked_commit_date": "2026-08-09",
+      "lane": "exact-revision-adapter",
+      "reason": "Pinned v1.7.0 commit when added October 7; preserve LSP/MCP integration.",
+      "required_gate": "Official release source hash; ten LSP handshakes and isolated symbol lookup/references/rename/body replacement with execution.",
+      "next_review": "2026-10-09",
+      "last_review": "2026-10-08",
+      "affected_hosts": [
+        "nixy-laptop"
+      ],
+      "gate_adapter": null,
+      "gate_status": "needs-verified-adapter",
+      "review_status": "daily-pin-reason-and-candidate-review",
+      "candidate_policy": "upstream-reviewed",
+      "discovery_endpoints": [
+        "https://api.github.com/repos/oraios/serena/releases?per_page=20",
+        "https://api.github.com/repos/oraios/serena/commits?per_page=10"
+      ],
+      "reason_evidence": [
+        "https://github.com/oraios/serena",
+        "repo:flake.nix + flake.lock"
+      ],
+      "affected_versions": [
+        "949a27ef1e5fda1a6e7b561e777bcece345c6ffd"
+      ]
+    },
+    {
+      "id": "sops-nix",
+      "kind": "flake-input",
+      "source": "flake.nix + flake.lock",
+      "original": {
+        "owner": "Mic92",
+        "repo": "sops-nix",
+        "type": "github"
+      },
+      "locked_rev": "8eaee5c45428b28b8c47a83e4c09dccec5f279b5",
+      "locked_commit_date": "2026-04-28",
+      "lane": "lock-adapter-review",
+      "reason": "No special hold reason found; exact lock provides reproducibility, not permanent version freeze.",
+      "required_gate": "Official upstream change review; dependency graph/affected hosts and relevant build.",
+      "next_review": "2026-10-09",
+      "last_review": "2026-10-08",
+      "affected_hosts": [
+        "nixy-laptop",
+        "nixy-desktop",
+        "michapc",
+        "michapc-debug"
+      ],
+      "gate_adapter": null,
+      "gate_status": "needs-verified-adapter",
+      "review_status": "daily-pin-reason-and-candidate-review",
+      "candidate_policy": "upstream-reviewed",
+      "discovery_endpoints": [
+        "https://api.github.com/repos/Mic92/sops-nix/releases?per_page=20",
+        "https://api.github.com/repos/Mic92/sops-nix/commits?per_page=10"
+      ],
+      "reason_evidence": [
+        "https://github.com/Mic92/sops-nix",
+        "repo:flake.nix + flake.lock"
+      ],
+      "affected_versions": [
+        "8eaee5c45428b28b8c47a83e4c09dccec5f279b5"
+      ]
+    },
+    {
+      "id": "t3code",
+      "kind": "flake-input",
+      "source": "flake.nix + flake.lock",
+      "original": {
+        "path": "./packages/t3code",
+        "type": "path"
+      },
+      "locked_rev": null,
+      "locked_commit_date": null,
+      "lane": "lock-adapter-review",
+      "reason": "No special hold reason found; exact lock provides reproducibility, not permanent version freeze.",
+      "required_gate": "Official upstream change review; dependency graph/affected hosts and relevant build.",
+      "next_review": "2026-10-09",
+      "last_review": "2026-10-08",
+      "affected_hosts": [
+        "nixy-laptop"
+      ],
+      "gate_adapter": null,
+      "gate_status": "needs-verified-adapter",
+      "review_status": "daily-pin-reason-and-candidate-review",
+      "candidate_policy": "upstream-reviewed",
+      "discovery_endpoints": [],
+      "reason_evidence": [
+        "repo:flake.nix + flake.lock"
+      ],
+      "affected_versions": [
+        "./packages/t3code"
+      ]
+    },
+    {
+      "id": "zen-browser",
+      "kind": "flake-input",
+      "source": "flake.nix + flake.lock",
+      "original": {
+        "owner": "youwen5",
+        "repo": "zen-browser-flake",
+        "type": "github"
+      },
+      "locked_rev": "239dc504b56eabcfc1dce945e7e22ca99694be89",
+      "locked_commit_date": "2026-07-18",
+      "lane": "channel-adapter",
+      "reason": "Moving browser flake; locked July 18.",
+      "required_gate": "Browser isolated profile renderer and migration gates.",
+      "next_review": "2026-10-09",
+      "last_review": "2026-10-08",
+      "affected_hosts": [
+        "nixy-laptop",
+        "michapc",
+        "michapc-debug"
+      ],
+      "gate_adapter": null,
+      "gate_status": "needs-verified-adapter",
+      "review_status": "daily-pin-reason-and-candidate-review",
+      "candidate_policy": "upstream-reviewed",
+      "discovery_endpoints": [
+        "https://api.github.com/repos/youwen5/zen-browser-flake/releases?per_page=20",
+        "https://api.github.com/repos/youwen5/zen-browser-flake/commits?per_page=10"
+      ],
+      "reason_evidence": [
+        "https://github.com/youwen5/zen-browser-flake",
+        "repo:flake.nix + flake.lock"
+      ],
+      "affected_versions": [
+        "239dc504b56eabcfc1dce945e7e22ca99694be89"
+      ]
+    },
+    {
+      "id": "t3",
+      "kind": "custom-package",
+      "source": "packages/t3code/source.json",
+      "versions": [
+        "0.0.46-nightly.20261008.2833"
+      ],
+      "revisions": [],
+      "lane": "release-assets",
+      "reason": "Regular Nightly explicitly chosen October 8; imperative desktop updater disabled. The current deterministic discovery handles the exact nightly syntax and excludes maintainer previews/downgrades.",
+      "required_gate": "Exact official AppImage SHA256 digest and full bytes; SHA256SUMS if desktop listed, otherwise validate CLI manifest plus official Electron desktop SHA512/size; isolated T3 DB migration and GUI with Clerk requirement addressed; no downgrade.",
+      "next_review": "2026-10-09",
+      "last_review": "2026-10-08",
+      "affected_hosts": [
+        "nixy-laptop",
+        "michapc",
+        "michapc-debug"
+      ],
+      "gate_adapter": "t3",
+      "gate_status": "baseline-startup-and-distinct-migration-tested",
+      "review_status": "daily-candidate-discovery",
+      "automatic_scope": "exact-source-metadata-only",
+      "candidate_policy": "regular-nightly",
+      "discovery_endpoints": [
+        "https://api.github.com/repos/pingdotgg/t3code/releases?per_page=50"
+      ],
+      "reason_evidence": [
+        "repo:packages/t3code/source.json",
+        "https://github.com/pingdotgg/t3code/releases/tag/v0.0.46-nightly.20261008.2833"
+      ],
+      "affected_versions": [
+        "0.0.46-nightly.20261008.2833"
+      ],
+      "verification": {
+        "date": "2026-10-08",
+        "candidate": "none-newer-at-discovery",
+        "migration": "official stable 0.0.45 to installed nightly, 54 to 60 migrations; synthetic data preserved",
+        "activation": "no new T3 activation performed"
+      }
+    },
+    {
+      "id": "codex",
+      "kind": "custom-package",
+      "source": "packages/codex-bin.nix",
+      "versions": [
+        "0.162.0"
+      ],
+      "revisions": [],
+      "lane": "npm-versioned-asset",
+      "reason": "Custom package required when old nixpkgs CLI could not decode model catalog; multiple installed owners historically exist.",
+      "required_gate": "Official npm tarball integrity, --version, codex app-server/ACP handshake; inspect executable ownership without paid model run.",
+      "next_review": "2026-10-09",
+      "last_review": "2026-10-08",
+      "affected_hosts": [
+        "nixy-laptop"
+      ],
+      "gate_adapter": "codex",
+      "gate_status": "candidate-tested-activation-pending",
+      "review_status": "daily-candidate-discovery",
+      "automatic_scope": "exact-source-metadata-only",
+      "candidate_policy": "stable-release",
+      "discovery_endpoints": [
+        "https://registry.npmjs.org/@openai%2Fcodex/latest"
+      ],
+      "reason_evidence": [
+        "repo:packages/codex-bin.nix",
+        "https://github.com/openai/codex"
+      ],
+      "affected_versions": [
+        "0.160.0",
+        "0.162.0"
+      ],
+      "verification": {
+        "date": "2026-10-08",
+        "candidate": "0.162.0",
+        "checks": [
+          "package and full laptop build",
+          "app-server initialize",
+          "bound ACP initialize",
+          "strict closure",
+          "signed package commit"
+        ],
+        "activation": "pending exact bootstrap",
+        "source_commit": "4f8e152",
+        "installed_at_seed": "0.160.0"
+      }
+    },
+    {
+      "id": "chatgpt",
+      "kind": "custom-package",
+      "source": "packages/chatgpt/default.nix",
+      "versions": [
+        "26.1002.52244"
+      ],
+      "revisions": [],
+      "lane": "official-rpm",
+      "reason": "Immutable RPM pin preserves native-watcher detect-libc/glibc, libGL/PulseAudio packaging; upstream latest link mutable.",
+      "required_gate": "Resolve official latest RPM metadata once; pin versioned RPM/hash; startup native watcher + audio integration + isolated renderer; no live app closure.",
+      "next_review": "2026-10-09",
+      "last_review": "2026-10-08",
+      "affected_hosts": [
+        "nixy-laptop"
+      ],
+      "gate_adapter": "chatgpt",
+      "gate_status": "candidate-tested-activation-pending",
+      "review_status": "daily-candidate-discovery",
+      "automatic_scope": "exact-source-metadata-only",
+      "candidate_policy": "stable-release",
+      "discovery_endpoints": [
+        "https://persistent.oaistatic.com/codex-app-prod/linux/rpm/latest/chatgpt.x86_64.rpm"
+      ],
+      "reason_evidence": [
+        "repo:packages/chatgpt/default.nix",
+        "https://developers.openai.com/codex/app/"
+      ],
+      "affected_versions": [
+        "26.930.31730",
+        "26.1002.52244"
+      ],
+      "verification": {
+        "date": "2026-10-08",
+        "candidate": "26.1002.52244",
+        "checks": [
+          "package and full laptop build",
+          "owned renderer",
+          "native watcher event",
+          "audio packaging",
+          "strict structural closure",
+          "signed package commit"
+        ],
+        "activation": "pending exact bootstrap",
+        "source_commit": "b57dd3b",
+        "installed_at_seed": "26.930.31730"
+      }
+    },
+    {
+      "id": "codex-acp",
+      "kind": "custom-package",
+      "source": "packages/codex-acp.nix",
+      "versions": [
+        "2.1.1"
+      ],
+      "revisions": [],
+      "lane": "npm-versioned-asset",
+      "reason": "2.1.1 adapter binds CODEX_PATH to declarative CLI.",
+      "required_gate": "ACP initialize/session handshake against actual CLI; preserve CODEX_PATH wrapper.",
+      "next_review": "2026-10-09",
+      "last_review": "2026-10-08",
+      "affected_hosts": [
+        "nixy-laptop"
+      ],
+      "gate_adapter": null,
+      "gate_status": "needs-verified-adapter",
+      "review_status": "daily-pin-reason-and-candidate-review",
+      "candidate_policy": "stable-release",
+      "discovery_endpoints": [
+        "https://api.github.com/repos/agentclientprotocol/codex-acp/releases?per_page=20"
+      ],
+      "reason_evidence": [
+        "repo:packages/codex-acp.nix",
+        "https://github.com/agentclientprotocol/codex-acp"
+      ],
+      "affected_versions": [
+        "2.1.1"
+      ]
+    },
+    {
+      "id": "tuios",
+      "kind": "custom-package",
+      "source": "packages/tuios-bin.nix",
+      "versions": [
+        "0.8.5"
+      ],
+      "revisions": [],
+      "lane": "release-assets",
+      "reason": "Official Linux binary pin, added/updated October 4.",
+      "required_gate": "Release integrity, --version and PTY renderer/new-pane command smoke.",
+      "next_review": "2026-10-09",
+      "last_review": "2026-10-08",
+      "affected_hosts": [
+        "nixy-laptop"
+      ],
+      "gate_adapter": null,
+      "gate_status": "needs-verified-adapter",
+      "review_status": "daily-pin-reason-and-candidate-review",
+      "candidate_policy": "stable-release",
+      "discovery_endpoints": [
+        "https://api.github.com/repos/Gaurav-Gosain/tuios/releases?per_page=20"
+      ],
+      "reason_evidence": [
+        "repo:packages/tuios-bin.nix",
+        "https://github.com/Gaurav-Gosain/tuios"
+      ],
+      "affected_versions": [
+        "0.8.5"
+      ]
+    },
+    {
+      "id": "proton-pass-cli",
+      "kind": "custom-package",
+      "source": "packages/proton-pass-cli.nix",
+      "versions": [
+        "2.4.2"
+      ],
+      "revisions": [],
+      "lane": "official-versioned-binary",
+      "reason": "Overrides old unstable 2.0.2 with 2.4.2; extra D-Bus runtime input.",
+      "required_gate": "Official version/hash, version/help and Secret Service compatibility without printing credentials.",
+      "next_review": "2026-10-09",
+      "last_review": "2026-10-08",
+      "affected_hosts": [
+        "nixy-laptop"
+      ],
+      "gate_adapter": null,
+      "gate_status": "needs-verified-adapter",
+      "review_status": "daily-pin-reason-and-candidate-review",
+      "candidate_policy": "stable-release",
+      "discovery_endpoints": [
+        "https://proton.me/pass/download"
+      ],
+      "reason_evidence": [
+        "repo:packages/proton-pass-cli.nix",
+        "https://proton.me/pass/download"
+      ],
+      "affected_versions": [
+        "2.4.2"
+      ]
+    },
+    {
+      "id": "netbird-daemon",
+      "kind": "custom-package",
+      "source": "packages/netbird-bin.nix",
+      "versions": [
+        "0.77.1"
+      ],
+      "revisions": [],
+      "lane": "paired-release-assets",
+      "reason": "0.77.1 superseded vulnerable older nixpkgs; retain eBPF proxy-disable workaround until exact kernel fix gate.",
+      "required_gate": "Pair daemon/UI versions; preserve socket env, resolver, routing policy and peers; network/DNS/relay regression probes.",
+      "next_review": "2026-10-09",
+      "last_review": "2026-10-08",
+      "affected_hosts": [
+        "nixy-laptop"
+      ],
+      "gate_adapter": null,
+      "gate_status": "needs-verified-adapter",
+      "review_status": "daily-pin-reason-and-candidate-review",
+      "candidate_policy": "stable-release",
+      "discovery_endpoints": [
+        "https://api.github.com/repos/netbirdio/netbird/releases?per_page=20"
+      ],
+      "reason_evidence": [
+        "repo:packages/netbird-bin.nix",
+        "https://github.com/netbirdio/netbird"
+      ],
+      "affected_versions": [
+        "0.77.1"
+      ]
+    },
+    {
+      "id": "netbird-ui",
+      "kind": "custom-package",
+      "source": "packages/netbird-ui-bin.nix",
+      "versions": [
+        "0.77.1"
+      ],
+      "revisions": [],
+      "lane": "paired-release-assets",
+      "reason": "UI 0.77.1 ignores --daemon-addr but honors NB_DAEMON_ADDR; RPM needs GSettings/desktop integration.",
+      "required_gate": "Daemon paired candidate; existing test-netbird-ui-integration.sh plus isolated GUI.",
+      "next_review": "2026-10-09",
+      "last_review": "2026-10-08",
+      "affected_hosts": [
+        "nixy-laptop"
+      ],
+      "gate_adapter": null,
+      "gate_status": "needs-verified-adapter",
+      "review_status": "daily-pin-reason-and-candidate-review",
+      "candidate_policy": "stable-release",
+      "discovery_endpoints": [
+        "https://api.github.com/repos/netbirdio/netbird/releases?per_page=20"
+      ],
+      "reason_evidence": [
+        "repo:packages/netbird-ui-bin.nix",
+        "https://github.com/netbirdio/netbird"
+      ],
+      "affected_versions": [
+        "0.77.1"
+      ]
+    },
+    {
+      "id": "vesktop",
+      "kind": "custom-package",
+      "source": "packages/vesktop-bin.nix",
+      "versions": [
+        "1.6.7"
+      ],
+      "revisions": [],
+      "lane": "release-assets-with-patches",
+      "reason": "1.6.7 portal picker patch plus pinned four-file Vencord fallback restore VoiceMessages.",
+      "required_gate": "Existing Wayland/Vencord integration checks, renderer and unsent microphone capture; verify upstream patch removal criteria.",
+      "next_review": "2026-10-09",
+      "last_review": "2026-10-08",
+      "affected_hosts": [
+        "nixy-laptop",
+        "nixy-desktop",
+        "michapc",
+        "michapc-debug"
+      ],
+      "gate_adapter": null,
+      "gate_status": "needs-verified-adapter",
+      "review_status": "daily-pin-reason-and-candidate-review",
+      "candidate_policy": "stable-release",
+      "discovery_endpoints": [
+        "https://api.github.com/repos/Vencord/Vesktop/releases?per_page=20"
+      ],
+      "reason_evidence": [
+        "repo:packages/vesktop-bin.nix",
+        "https://github.com/Vencord/Vesktop"
+      ],
+      "affected_versions": [
+        "1.6.7"
+      ]
+    },
+    {
+      "id": "wispr-flow",
+      "kind": "custom-package",
+      "source": "packages/wispr-flow/default.nix",
+      "versions": [
+        "1.6.7-1.0.3",
+        "0.1.2-release-all-keys"
+      ],
+      "revisions": [
+        "v0.1.2"
+      ],
+      "lane": "paired-appimage-helper",
+      "reason": "1.6.7-1.0.3 AppImage, helper v0.1.2 plus release-all-uinput-keys patch; upstream Nix packaging was incomplete.",
+      "required_gate": "Chromium sandbox, udev/uinput ACL, held Ctrl/Meta differential event sink and paste-cycle regression; no live microphone required.",
+      "next_review": "2026-10-09",
+      "last_review": "2026-10-08",
+      "affected_hosts": [
+        "nixy-laptop"
+      ],
+      "gate_adapter": null,
+      "gate_status": "needs-verified-adapter",
+      "review_status": "daily-pin-reason-and-candidate-review",
+      "candidate_policy": "stable-release",
+      "discovery_endpoints": [
+        "https://api.github.com/repos/wispr-flow-linux/wispr-flow-linux/releases?per_page=20"
+      ],
+      "reason_evidence": [
+        "repo:packages/wispr-flow/default.nix",
+        "https://github.com/wispr-flow-linux/wispr-flow-linux"
+      ],
+      "affected_versions": [
+        "1.6.7-1.0.3",
+        "0.1.2-release-all-keys"
+      ]
+    },
+    {
+      "id": "cua-driver",
+      "kind": "custom-package",
+      "source": "packages/cua-driver-bin.nix",
+      "versions": [
+        "0.23.2"
+      ],
+      "revisions": [],
+      "lane": "release-assets",
+      "reason": "0.23.2 pinned graphical service/AT-SPI integration.",
+      "required_gate": "doctor, API/window/screen/AT-SPI smoke preserving Wayland opt-in and telemetry settings.",
+      "next_review": "2026-10-09",
+      "last_review": "2026-10-08",
+      "affected_hosts": [
+        "nixy-laptop"
+      ],
+      "gate_adapter": null,
+      "gate_status": "needs-verified-adapter",
+      "review_status": "daily-pin-reason-and-candidate-review",
+      "candidate_policy": "stable-release",
+      "discovery_endpoints": [
+        "https://api.github.com/repos/trycua/cua/releases?per_page=20"
+      ],
+      "reason_evidence": [
+        "repo:packages/cua-driver-bin.nix",
+        "https://github.com/trycua/cua"
+      ],
+      "affected_versions": [
+        "0.23.2"
+      ]
+    },
+    {
+      "id": "screenpipe",
+      "kind": "custom-package",
+      "source": "packages/screenpipe/default.nix",
+      "versions": [
+        "2.2.293",
+        "2.10.0"
+      ],
+      "revisions": [
+        "0d3d1f30a78b"
+      ],
+      "lane": "dormant-source-build",
+      "reason": "2.2.293 custom source output remains available; removed from laptop installed package list May 3. cargo-tauri 2.10.0/numerous Nix adaptations are nested pins.",
+      "required_gate": "Inventory output, source and vendor hashes; test only if requested/actual consumers, no recording service start.",
+      "next_review": "2026-10-09",
+      "last_review": "2026-10-08",
+      "affected_hosts": [],
+      "gate_adapter": null,
+      "gate_status": "needs-usage-review",
+      "review_status": "daily-usage-and-replacement-review",
+      "candidate_policy": "stable-release",
+      "discovery_endpoints": [
+        "https://api.github.com/repos/screenpipe/screenpipe/releases?per_page=20"
+      ],
+      "reason_evidence": [
+        "repo:packages/screenpipe/default.nix",
+        "https://github.com/screenpipe/screenpipe"
+      ],
+      "affected_versions": [
+        "2.2.293",
+        "2.10.0"
+      ]
+    },
+    {
+      "id": "local-helium",
+      "kind": "custom-package",
+      "source": "packages/helium/flake.nix",
+      "versions": [
+        "0.10.6.1"
+      ],
+      "revisions": [],
+      "lane": "dormant-review",
+      "reason": "0.10.6.1 local AppImage is bypassed by external Helium flake since May 3.",
+      "required_gate": "Usage audit before archival/removal; do not confuse with active external input.",
+      "next_review": "2026-10-09",
+      "last_review": "2026-10-08",
+      "affected_hosts": [],
+      "gate_adapter": null,
+      "gate_status": "needs-usage-review",
+      "review_status": "daily-usage-and-replacement-review",
+      "candidate_policy": "stable-release",
+      "discovery_endpoints": [
+        "https://api.github.com/repos/imputnet/helium-linux/releases?per_page=20"
+      ],
+      "reason_evidence": [
+        "repo:packages/helium/flake.nix",
+        "https://github.com/imputnet/helium-linux"
+      ],
+      "affected_versions": [
+        "0.10.6.1"
+      ]
+    },
+    {
+      "id": "frostycli",
+      "kind": "custom-package",
+      "source": "packages/frostycli/default.nix",
+      "versions": [
+        "c32856d45d7438379f295ffba46b2bd3c39abc5d"
+      ],
+      "revisions": [
+        "c32856d45d7438379f295ffba46b2bd3c39abc5d"
+      ],
+      "lane": "dormant-review",
+      "reason": "Fixed FrostyToolsuite commit; no consumers found in focused repo scan, February history says Wine build removed due dependencies.",
+      "required_gate": "Usage audit and replacement/archive decision; no silent obsolete package freeze.",
+      "next_review": "2026-10-09",
+      "last_review": "2026-10-08",
+      "affected_hosts": [],
+      "gate_adapter": null,
+      "gate_status": "needs-usage-review",
+      "review_status": "daily-usage-and-replacement-review",
+      "candidate_policy": "stable-release",
+      "discovery_endpoints": [
+        "https://api.github.com/repos/HarGabt/FrostyToolsuite/releases?per_page=20"
+      ],
+      "reason_evidence": [
+        "repo:packages/frostycli/default.nix",
+        "https://github.com/HarGabt/FrostyToolsuite"
+      ],
+      "affected_versions": [
+        "c32856d45d7438379f295ffba46b2bd3c39abc5d"
+      ]
+    },
+    {
+      "id": "kernel-evdi",
+      "kind": "workaround",
+      "source": "modules/overrides/linux-zen-preempt-fix.nix",
+      "version": "linuxPackages_6_18",
+      "lane": "supported-release-migration",
+      "reason": "May 3: zen advanced to 7.0.3, evdi 1.14.12 compile failed. Upstream now declares preliminary Linux 7 support; reason deserves renewed examination, not blind removal.",
+      "required_gate": "Candidate kernel+EVDI+NVIDIA full build; DisplayLink screens/hotplug/suspend acceptance.",
+      "upstream": "https://github.com/DisplayLink/evdi/releases",
+      "next_review": "2026-10-09",
+      "last_review": "2026-10-08",
+      "affected_hosts": [
+        "nixy-laptop",
+        "nixy-desktop",
+        "michapc",
+        "michapc-debug"
+      ],
+      "gate_adapter": null,
+      "gate_status": "separate-migration-needed",
+      "review_status": "daily-migration-review",
+      "candidate_policy": "upstream-reviewed",
+      "discovery_endpoints": [],
+      "reason_evidence": [
+        "repo:modules/overrides/linux-zen-preempt-fix.nix",
+        "https://github.com/DisplayLink/evdi/releases"
+      ],
+      "affected_versions": [
+        "linuxPackages_6_18"
+      ]
+    },
+    {
+      "id": "netbird-ebpf-flag",
+      "kind": "workaround",
+      "source": "hosts/nixy-laptop/config.nix",
+      "version": "NB_DISABLE_EBPF_WG_PROXY=true",
+      "lane": "kernel-migration-review",
+      "reason": "Actual repeated split-lock freezes September 13/21/22. Upstream #7331 closed(not_planned) is kernel-side; issue closure does not prove fix in candidate kernel.",
+      "required_gate": "Prove exact candidate kernel contains page_pool fix and exercise overlay DNS/peers/relay; retain flag until verified.",
+      "upstream": "https://github.com/netbirdio/netbird/issues/7331",
+      "next_review": "2026-10-09",
+      "last_review": "2026-10-08",
+      "affected_hosts": [
+        "nixy-laptop"
+      ],
+      "gate_adapter": null,
+      "gate_status": "needs-verified-adapter",
+      "review_status": "daily-pin-reason-and-candidate-review",
+      "candidate_policy": "upstream-reviewed",
+      "discovery_endpoints": [],
+      "reason_evidence": [
+        "repo:hosts/nixy-laptop/config.nix",
+        "https://github.com/netbirdio/netbird/issues/7331"
+      ],
+      "affected_versions": [
+        "NB_DISABLE_EBPF_WG_PROXY=true"
+      ]
+    },
+    {
+      "id": "azuredatastudio",
+      "kind": "retired-active-package",
+      "source": "profiles/system/laptop.nix",
+      "lane": "replacement-review",
+      "reason": "Microsoft retired Azure Data Studio February 28, 2026; no updates or security fixes. Official suggested replacement is VS Code with MSSQL extension.",
+      "required_gate": "Audit database use/extensions and preserve connection/settings artifacts before replacement; migration outside routine version bump.",
+      "upstream": "https://learn.microsoft.com/en-us/sql/tools/whats-happening-azure-data-studio?view=sql-server-ver17",
+      "next_review": "2026-10-09",
+      "last_review": "2026-10-08",
+      "affected_hosts": [
+        "nixy-laptop",
+        "michapc",
+        "michapc-debug"
+      ],
+      "gate_adapter": null,
+      "gate_status": "separate-migration-needed",
+      "review_status": "daily-migration-review",
+      "candidate_policy": "upstream-reviewed",
+      "discovery_endpoints": [],
+      "reason_evidence": [
+        "repo:profiles/system/laptop.nix",
+        "https://learn.microsoft.com/en-us/sql/tools/whats-happening-azure-data-studio?view=sql-server-ver17"
+      ],
+      "affected_versions": [
+        "local source"
+      ]
+    }
+  ],
+  "review_rules": [
+    "Review every root and transitive flake.lock input and every custom source pin daily. Re-read actual source; inventory dates are not installed version evidence.",
+    "Every hold needs concrete reason, upstream evidence URL, affected versions, next review date and a candidate/check or bounded investigation. Missing adapter is an implementation task, not a permanent version hold.",
+    "Package gates are declarations of required checks. Historical tests never prove a newly built candidate.",
+    "All 70 locked nodes observed at seed date remain discoverable dynamically from current flake.lock; new inputs/pins must be added to the review.",
+    "Initial clean baseline2ad5d18 reproduced active generation223. Full flake check passed during setup; do not reuse the historical ew-cloud Fontconfig blocker without reproducing it. Current HEAD, declared pins and active versions must be freshly read."
+  ]
+}
