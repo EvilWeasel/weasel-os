@@ -908,3 +908,11 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Prepare chatgpt 26.930.31730 -> 26.1002.52244 with exact official source metadata.
 - Verification: Candidate package and laptop builds plus required isolated functional gates passed; preserve their receipts.
 - Activation: Pending independent submit verification; authoritative result is in /var/lib/weasel-updates/runs/20261008T203502Z-308348dd/journal.json.
+
+
+### 2026-10-08 (own VPS access and Proton SSH identities)
+
+- Change: Repair the existing Hephaestus/NetBird and Hephaestus-to-Iris SSH routes; add a native Proton key in the dedicated Own Infrastructure SSH vault and its scoped persistent user agent. Declare only the new SSH fragment and service in laptop Home Manager. Back up the unchanged encrypted legacy key in Personal without its passphrase.
+- Root cause: The personal NetBird daemon was idle, the old accepted key was locked, and Iris intentionally accepts SSH through Hephaestus. Preserve host keys, other identities, cloud firewall, Iris root-login ban, and default agent; source-restrict the new server keys. The Proton DBus keyring backend and exact vault scope are required.
+- Verification: New-key-only real SSH as Hephaestus hermes/root and Iris aidan plus sudo all passed after the service handover; forbidden forwarding denied, permitted Iris jump passed. Agent enabled/active with one expected identity and socket0600. Encrypted backup round-trip byte equality, original inode/mode preserved; exact Home Manager unit build, Nix format/parse and laptop drvPath evaluation passed.
+- Remote build limits: Hephaestus has an intentional Nix budget admission wrapper with zero budget and no exposed KVM; Iris has no Nix/KVM and little RAM. Neither was provisioned as a builder, rebooted or switched. Document evaluation/build/VM-test architecture separately from actual host activation.

@@ -40,6 +40,8 @@ in
     ../../programs/hephaestus-recovery-console.nix
     ../../programs/coding-tools.nix
     ../../programs/t3code-client.nix
+    ../../programs/vps-ssh.nix
+    ../../programs/proton-infra-ssh.nix
   ];
 
   home.packages = [
