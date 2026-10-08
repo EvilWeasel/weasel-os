@@ -49,7 +49,7 @@ x-scheme-handler/tg=org.telegram.desktop.desktop
 x-scheme-handler/tonsite=org.telegram.desktop.desktop
 x-scheme-handler/wispr-flow=wispr-flow.desktop
 x-scheme-handler/codex=chatgpt.desktop
-x-scheme-handler/t3code=t3code.desktop
+x-scheme-handler/t3code=com.t3tools.T3Code.desktop
 
 [Added Associations]
 x-scheme-handler/tg=org.telegram.desktop.desktop;
@@ -59,3 +59,4 @@ image/png=imv-dir.desktop;
 x-scheme-handler/http=zen.desktop;
 x-scheme-handler/https=zen.desktop;
 x-scheme-handler/chrome=zen.desktop;
+x-scheme-handler/t3code=com.t3tools.T3Code.desktop;

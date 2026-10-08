@@ -38,6 +38,17 @@
           Categories=Development;IDE;
           StartupWMClass=T3 Code
         '';
+        urlHandlerDesktopFile = pkgs.writeText "com.t3tools.T3Code.desktop" ''
+          [Desktop Entry]
+          Type=Application
+          Name=T3 Code URL handler
+          Exec=t3code %U
+          Icon=applications-development
+          Terminal=false
+          NoDisplay=true
+          StartupNotify=false
+          MimeType=x-scheme-handler/t3code;
+        '';
       in
       {
         # An FHS/AppImage bubblewrap launcher sets NoNewPrivs on T3 itself.
@@ -101,6 +112,7 @@
             chmod -R u+w "$out/lib/t3code"
             cp -a "$src/usr/share/icons" "$out/share/"
             install -Dm444 ${desktopFile} "$out/share/applications/t3code.desktop"
+            install -Dm444 ${urlHandlerDesktopFile} "$out/share/applications/com.t3tools.T3Code.desktop"
             runHook postInstall
           '';
 

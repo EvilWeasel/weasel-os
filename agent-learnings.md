@@ -939,3 +939,10 @@ Append-only log of implementation lessons for future agents working in this repo
 - Passwordless wheel sudo already exists. The AppImage/FHS bubblewrap launcher sets NoNewPrivs on T3 and its Codex backend, including approved out-of-sandbox commands. Package the same upstream payload natively with autoPatchelf and GTK/tray libraries; keep app.asar byte-identical and retain T3/Codex permission controls.
 - Verification: Nix parse/format and git diff checks; no-write-lock-file laptop drvPath evaluation and full build; full flake check without builds; native PTY, keyring, FFI, accessibility and SQLite smoke tests; isolated GUI window and Environment HTTP 200. Agent commands inherit ELECTRON_RUN_AS_NODE, and T3 overrides --user-data-dir, so GUI tests must unset the former and isolate XDG paths as well as T3CODE_HOME.
 - Activation remains pending: an existing NoNewPrivs process cannot clear the flag for children. Restart the native candidate once from the normal host terminal, then verify an approved sudo -n id -u. The Main system candidate also contains earlier pending tool/updater updates; do not silently activate those as part of this packaging task. See docs/t3-native-sudo.md.
+
+
+### 2026-10-09 (native T3 gates and canonical URI association)
+
+- Native T3 owns app.asar inside its own output; probe that archive before considering a legacy extracted AppImage closure. Ambiguous archives and embedded version mismatches fail closed.
+- Preserve the native app's actual com.t3tools.T3Code.desktop MIME association and package the same hidden URI alias. A pre-existing user-local generated desktop file may still shadow the packaged alias; do not claim that alias proves the live launch path.
+- Verification: 41 gate regressions; exact native m8jzhfcpqlnmfis7rfndw5fx0vx0hq4d package build; actual private renderer/backend and stable-to-nightly database migration pass. Four affected host evaluations passed. No user profiles or model requests.

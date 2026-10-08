@@ -7,6 +7,7 @@ import os
 from pathlib import Path
 import socket
 import sqlite3
+import struct
 import subprocess
 import sys
 import tempfile
@@ -256,6 +257,60 @@ class SourceTransitions(unittest.TestCase):
     def test_codex_acp_is_not_a_codex_app_root(self):
         with self.assertRaises(gates.GateError):
             gates._app_version("codex", "/nix/store/" + "a" * 32 + "-codex-acp-2.1.1")
+
+
+class ElectronArchives(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.addCleanup(self.temporary.cleanup)
+        self.directory = Path(self.temporary.name)
+        self.app = self.directory / "t3code-1.0.1"
+        self.app.mkdir()
+        patcher = mock.patch.object(gates, "_store_name", lambda path: Path(path).name)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+
+    def archive(self, root, relative="resources/app.asar", version="1.0.1"):
+        package = json.dumps({"version": version}).encode()
+        header = json.dumps({"files": {"package.json": {"size": len(package), "offset": "0"}}}).encode()
+        path = root / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_bytes(struct.pack("<4I", 4, len(header) + 8, len(header) + 4, len(header)) + header + package)
+        return path
+
+    def test_native_t3_reads_its_archive_without_selecting_legacy_dependencies(self):
+        self.archive(self.app, "lib/t3code/resources/app.asar")
+        legacy = self.directory / "t3code-1.0.1-extracted"
+        self.archive(legacy, version="9.9.9")
+        with mock.patch.object(gates, "_closure", return_value={str(legacy)}) as closure:
+            self.assertEqual(gates._electron_version("t3", self.app), "1.0.1")
+            closure.assert_not_called()
+
+    def test_legacy_t3_uses_exactly_one_extracted_archive(self):
+        extracted = self.directory / "t3code-1.0.1-extracted"
+        self.archive(extracted)
+        with mock.patch.object(gates, "_closure", return_value={str(self.app), str(extracted)}) as closure:
+            self.assertEqual(gates._electron_version("t3", self.app), "1.0.1")
+            closure.assert_called_once_with(str(self.app))
+
+    def test_native_archive_ambiguity_never_falls_back_to_legacy(self):
+        self.archive(self.app, "first/app.asar")
+        self.archive(self.app, "second/app.asar")
+        with mock.patch.object(gates, "_closure") as closure:
+            with self.assertRaises(gates.GateError):
+                gates._electron_version("t3", self.app)
+            closure.assert_not_called()
+
+    def test_native_and_legacy_archives_still_require_the_exact_package_version(self):
+        native = self.archive(self.app, version="9.9.9")
+        with self.assertRaises(gates.GateError):
+            gates._electron_version("t3", self.app)
+        native.unlink()
+        extracted = self.directory / "t3code-1.0.1-extracted"
+        self.archive(extracted, version="9.9.9")
+        with mock.patch.object(gates, "_closure", return_value={str(extracted)}):
+            with self.assertRaises(gates.GateError):
+                gates._electron_version("t3", self.app)
 
 
 class ProbeBoundaries(unittest.TestCase):

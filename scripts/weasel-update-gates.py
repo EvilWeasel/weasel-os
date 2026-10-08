@@ -383,10 +383,12 @@ def _tool(name):
 
 
 def _electron_version(kind, app):
-    candidates = [app]
-    if kind == "t3":
+    # Native packages own their archive. Legacy T3 FHS wrappers instead retain
+    # the extracted AppImage in their runtime closure.
+    archives = list(app.rglob("app.asar"))
+    if kind == "t3" and not archives:
         candidates = [Path(p) for p in _closure(str(app)) if _store_name(p).endswith("-extracted") and "t3code-" in _store_name(p)]
-    archives = [p for root in candidates for p in root.rglob("app.asar")]
+        archives = [p for root in candidates for p in root.rglob("app.asar")]
     if len(archives) != 1:
         raise GateError("Built Electron app must contain exactly one app.asar archive")
     try:
