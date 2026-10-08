@@ -4,6 +4,9 @@ result
 **/__pycache__/
 *.py[cod]
 
+# Nested local agent checkouts are managed worktrees, not repository sources.
+/.worktrees/
+
 # Local WLAN debugging artifacts
 /wifi-ap-*-diagnostics-*.log
 /wifi-connect-*.sh

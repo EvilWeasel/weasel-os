@@ -1,0 +1,197 @@
+{
+  "agent_servers": {
+    "codex-acp": {
+      "type": "custom",
+      "command": "/etc/profiles/per-user/evilweasel/bin/codex-acp",
+      "args": []
+    }
+  },
+  "project_panel": {
+    "dock": "left"
+  },
+  "outline_panel": {
+    "dock": "left"
+  },
+  "collaboration_panel": {
+    "dock": "left"
+  },
+  "git_panel": {
+    "dock": "left"
+  },
+  "search": {
+    "whole_word": false
+  },
+  "terminal": {
+    "font_size": 17.0
+  },
+  "scrollbar": {
+    "show": "system"
+  },
+  "gutter": {
+    "min_line_number_digits": 5
+  },
+  "relative_line_numbers": "enabled",
+  "autosave": {
+    "after_delay": {
+      "milliseconds": 1000
+    }
+  },
+  "buffer_font_family": "Monaspace Neon",
+  "icon_theme": "Catppuccin Frappé",
+  "session": {
+    "trust_all_worktrees": true
+  },
+  "vim_mode": true,
+  "base_keymap": "Cursor",
+  "ui_font_size": 16,
+  "buffer_font_size": 16.0,
+  "theme": {
+    "mode": "system",
+    "light": "One Light",
+    "dark": "Catppuccin Frappé"
+  },
+  "helix_mode": true,
+  "which_key": {
+    "enabled": true
+  },
+  "agent": {
+    "dock": "right",
+    "single_file_review": true,
+    "show_turn_stats": true,
+    "use_modifier_to_send": true,
+    "favorite_models": [],
+    "play_sound_when_agent_done": true,
+    "model_parameters": []
+  },
+  "format_on_save": "on",
+  "languages": {
+    "Nix": {
+      "formatter": {
+        "external": {
+          "command": "nixfmt"
+        }
+      },
+      "format_on_save": "on",
+      "language_servers": [
+        "nixd"
+      ]
+    },
+    "Python": {
+      "language_servers": [
+        "pyright",
+        "ruff"
+      ]
+    },
+    "Lua": {
+      "language_servers": [
+        "lua-language-server"
+      ]
+    },
+    "JavaScript": {
+      "language_servers": [
+        "vtsls"
+      ]
+    },
+    "TypeScript": {
+      "language_servers": [
+        "vtsls"
+      ]
+    },
+    "TSX": {
+      "language_servers": [
+        "vtsls"
+      ]
+    }
+  },
+  "lsp": {
+    "nixd": {
+      "binary": {
+        "path": "/etc/profiles/per-user/evilweasel/bin/nixd",
+        "arguments": []
+      }
+    },
+    "pyright": {
+      "binary": {
+        "path": "/etc/profiles/per-user/evilweasel/bin/pyright-langserver",
+        "arguments": [
+          "--stdio"
+        ]
+      }
+    },
+    "ruff": {
+      "binary": {
+        "path": "/etc/profiles/per-user/evilweasel/bin/ruff",
+        "arguments": [
+          "server"
+        ]
+      }
+    },
+    "lua-language-server": {
+      "binary": {
+        "path": "/etc/profiles/per-user/evilweasel/bin/lua-language-server",
+        "arguments": []
+      }
+    },
+    "rust-analyzer": {
+      "binary": {
+        "path": "/etc/profiles/per-user/evilweasel/bin/rust-analyzer",
+        "arguments": []
+      }
+    },
+    "vtsls": {
+      "binary": {
+        "path": "/etc/profiles/per-user/evilweasel/bin/vtsls",
+        "arguments": [
+          "--stdio"
+        ]
+      }
+    },
+    "bash-language-server": {
+      "binary": {
+        "path": "/etc/profiles/per-user/evilweasel/bin/bash-language-server",
+        "arguments": [
+          "start"
+        ]
+      }
+    },
+    "json-language-server": {
+      "binary": {
+        "path": "/etc/profiles/per-user/evilweasel/bin/vscode-json-language-server",
+        "arguments": [
+          "--stdio"
+        ]
+      }
+    },
+    "yaml-language-server": {
+      "binary": {
+        "path": "/etc/profiles/per-user/evilweasel/bin/yaml-language-server",
+        "arguments": [
+          "--stdio"
+        ]
+      }
+    },
+    "taplo": {
+      "binary": {
+        "path": "/etc/profiles/per-user/evilweasel/bin/taplo",
+        "arguments": [
+          "lsp",
+          "stdio"
+        ]
+      }
+    },
+    "qmljs": {
+      "binary": {
+        "path": "/etc/profiles/per-user/evilweasel/bin/qmlls",
+        "arguments": [
+          "-E"
+        ]
+      }
+    }
+  },
+  "auto_install_extensions": {
+    "nix": true,
+    "lua": true,
+    "toml": true,
+    "qml": true
+  }
+}

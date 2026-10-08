@@ -131,6 +131,14 @@
   };
 
   hardware = {
+    # RazerGenie is installed for all client machines.  Its backend was only
+    # enabled on the desktop, leaving the laptop GUI unable to talk to the
+    # Naga V2 HyperSpeed receiver.
+    openrazer = {
+      enable = true;
+      users = [ username ];
+    };
+
     sane = {
       enable = true;
       extraBackends = [ pkgs.sane-airscan ];
