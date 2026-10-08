@@ -927,6 +927,13 @@ Append-only log of implementation lessons for future agents working in this repo
 - Initial candidates above were integrated as separately signed pin commits for the combined first bootstrap, not submitted as daily activation requests; their private tested receipts exist, their illustrative root run journals do not. Root service/first Home checkpoint/system switch remain unobserved until the one normal-terminal bootstrap. NoNewPrivs1 blocks sudo; manual scheduler dispatch was denied in runtimeauto and was not bypassed. Review receipts distinguish unresolved upstream research from passed candidate gates; supported26.05 migration and remaining adapters stay explicit separate work.
 
 - Bootstrap reporting correction: The root installer does not observe or control T3 scheduler enablement. Return managed-separately-by-T3 rather than inventing scheduler_enabled=false; native API state is recorded independently. Bootstrap14 tests passed again. The preceding full-build path is retained as an intermediate result; the final immutable receipt selects the rebuilt reporting correction.
+
+
+### 2026-10-08 (actual bootstrap invocation and Nix multicall names)
+
+- Root cause: The final real built UserRunner preflight caught a failure that mocked transaction tests missed: resolving env/nix-store to their final coreutils/nix binary changes argv0 and loses the requested applet. Pin the immutable containing directory, preserve the requested basename, and independently require the final target inside the Store. Reject mutable FHS parents; the service already supplies an immutable runtime PATH.
+- Verification: Real isolated env output and actual nix-store --version pass in the new regression; activation29 and bootstrap14 tests pass. Normal-user signed-source/remote/manifest/exact-system preflight is repeated using the final built code before producing the replacement receipt. No sudo, privileged executor or system activation occurred. The previous receipt is superseded by a new exact signed-source receipt.
+
 ### 2026-10-08 (native T3 launcher for approved sudo)
 
 - Passwordless wheel sudo already exists. The AppImage/FHS bubblewrap launcher sets NoNewPrivs on T3 and its Codex backend, including approved out-of-sandbox commands. Package the same upstream payload natively with autoPatchelf and GTK/tray libraries; keep app.asar byte-identical and retain T3/Codex permission controls.
