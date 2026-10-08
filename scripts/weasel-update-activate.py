@@ -236,9 +236,15 @@ class Runner:
     def executable(self, name):
         if name not in self.paths:
             found = shutil.which(name)
-            if not found or not str(Path(found).resolve()).startswith("/nix/store/"):
+            if not found:
                 raise ActivationError("Required executable is not from the Nix store: " + name)
-            self.paths[name] = str(Path(found).resolve())
+            # Preserve argv[0] for Nix/coreutils multicall symlinks such as
+            # nix-store and env, while pinning their containing directory.
+            pinned = Path(found).parent.resolve() / Path(found).name
+            if (not str(pinned).startswith("/nix/store/")
+                    or not str(pinned.resolve()).startswith("/nix/store/")):
+                raise ActivationError("Required executable is not from the Nix store: " + name)
+            self.paths[name] = str(pinned)
         return self.paths[name]
 
     def user(self, name, arguments, *, cwd=None, extra_env=None, timeout=10800):

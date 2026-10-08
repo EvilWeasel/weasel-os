@@ -37,6 +37,18 @@ class LocalGit:
 
 
 class ActivationTests(unittest.TestCase):
+    def test_real_store_multicall_tools_keep_the_requested_program(self):
+        # Match the service's immutable runtime PATH, independent of a harness
+        # that places mutable FHS aliases such as /usr/bin/env first.
+        bins = [str(Path(shutil.which(name)).resolve().parent) for name in ['env', 'bash', 'nix-store']]
+        with patch.dict(os.environ, {"PATH": os.pathsep.join(bins)}):
+            runner = activation.Runner()
+            result = runner.run([runner.executable("env"), "-i", "WEASEL_FIXTURE=isolated",
+                                 runner.executable("bash"), "-c", 'printf %s "$WEASEL_FIXTURE"'])
+            self.assertEqual(result, b"isolated")
+            version = runner.run([runner.executable("nix-store"), "--version"])
+            self.assertIn(b"nix-store (Nix)", version)
+
     def setUp(self):
         self.temporary = tempfile.TemporaryDirectory(prefix="weasel-update-activation-test-")
         self.root = Path(self.temporary.name)
