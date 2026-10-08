@@ -3,6 +3,7 @@
 import importlib.util
 import datetime as dt
 import json
+import os
 from pathlib import Path
 import subprocess
 import tempfile
@@ -260,6 +261,336 @@ class PreparationTests(unittest.TestCase):
                 finally:
                     if stream:
                         stream.close()
+
+
+class BatchPreparationTests(unittest.TestCase):
+    """Use real Git trees and requests; replace Nix workloads and fixture signing."""
+
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix='weasel-update-batch-prepare-test-')
+        self.addCleanup(temporary.cleanup)
+        self.root = Path(temporary.name)
+        self.repo, self.state = self.root / 'main', self.root / 'state'
+        self.repo.mkdir()
+        self.state.mkdir(mode=0o700)
+        self.original_command = p.command
+        for arguments in [
+                ['init', '-q', '-b', 'main'], ['config', 'user.name', 'Fixture'],
+                ['config', 'user.email', 'fixture@example.invalid'],
+                ['config', 'commit.gpgsign', 'false'], ['config', 'core.hooksPath', '/dev/null']]:
+            p.git(self.repo, *arguments)
+        for name, content in {
+                'flake.nix': '{ inputs = {}; }\n',
+                'flake.lock': '{"nodes":{"root":{"inputs":{}}},"root":"root","version":7}\n',
+                '.gitignore': 'ignored.txt\n',
+                'packages/demo.nix': '{ version = "1.0.0"; }\n',
+                'agent-learnings.md': '# Previous learning\n'}.items():
+            target = self.repo / name
+            target.parent.mkdir(parents=True, exist_ok=True)
+            target.write_text(content)
+        p.git(self.repo, 'add', '.')
+        p.git(self.repo, 'commit', '-qm', 'fixture baseline')
+        self.baseline_commit = p.git(self.repo, 'rev-parse', 'HEAD').decode().strip()
+        self.old_system = Path('/nix/store/' + 'a' * 32 + '-nixos-system-nixy-laptop-25.11.fixture')
+        self.new_system = Path('/nix/store/' + 'b' * 32 + '-nixos-system-nixy-laptop-25.11.fixture')
+        current, profile = self.root / 'current', self.root / 'profile'
+        current.symlink_to(self.old_system)
+        profile.symlink_to(self.old_system)
+        self.batch, self.gates = p.peer('batch'), p.peer('gates')
+        self.sign_requests, self.verified, self.workloads, self.probes = [], [], [], []
+        self.changed_apps = {'t3', 'codex', 'chatgpt', 'acp'}
+        self.niri_ok = True
+        for patcher in [
+                patch.object(p, 'STATUS', self.root / 'absent-status'),
+                patch.object(p, 'CURRENT', current), patch.object(p, 'PROFILE', profile),
+                patch.object(p, 'candidate_id', return_value='20261008T140000Z-1234abcd'),
+                patch.object(p, 'require_power'), patch.object(p, 'require_space'),
+                patch.object(p, 'baseline', side_effect=lambda repo: (p.source_manifest(repo), self.old_system)),
+                patch.object(p, 'command', side_effect=self.command),
+                patch.object(p, 'build', side_effect=self.build),
+                patch.object(p, 'peer', side_effect=lambda name: {'batch': self.batch, 'gates': self.gates}[name]),
+                patch.object(self.batch, 'verify_published', return_value={'ok': True, 'published_pins': {}}),
+                patch.object(self.batch, 'verify_closure', side_effect=self.closure),
+                patch.object(self.gates, 'probe', side_effect=self.probe)]:
+            patcher.start()
+            self.addCleanup(patcher.stop)
+        self.record = p.new_batch(self.repo, self.state, 'batch')
+        self.source = Path(self.record['source'])
+        self.directory = self.source.parent
+        self.file = self.source / 'packages/demo.nix'
+        self.file.write_text('{ version = "1.0.1"; }\n')
+
+    def command(self, arguments, **kwargs):
+        arguments = list(map(str, arguments))
+        if len(arguments) > 1 and Path(arguments[1]).name == 'weasel-update-niri.py':
+            self.workloads.append(arguments)
+            self.assertEqual(arguments[arguments.index('--source') + 1], str(self.source))
+            directory = Path(arguments[arguments.index('--run-dir') + 1])
+            directory.mkdir(mode=0o700, parents=True)
+            receipt = {'ok': self.niri_ok, 'kind': 'fixture-niri-config',
+                       'receipt_path': str(directory / 'receipt.json')}
+            (directory / 'receipt.json').write_text(json.dumps(receipt))
+            return json.dumps(receipt).encode()
+        if arguments[0] == 'git':
+            if 'verify-commit' in arguments:
+                self.verified.append(arguments[-1])
+                return b''
+            if 'commit' in arguments:
+                # Exercise a real commit without accessing the user's GPG key.
+                # Removing -S in production must still fail this regression.
+                self.assertIn('-S', arguments)
+                self.sign_requests.append(list(arguments))
+                arguments.remove('-S')
+                arguments[1:1] = ['-c', 'commit.gpgsign=false']
+            return self.original_command(arguments, **kwargs)
+        if arguments[0] == 'nix-instantiate' or arguments[:3] == ['nix', 'flake', 'check']:
+            self.workloads.append(arguments)
+            return b''
+        if arguments[:2] == ['nix', 'eval']:
+            self.workloads.append(arguments)
+            if '--expr' in arguments:
+                if 'config.system.nixos.release' in arguments[-1]:
+                    return b'25.11'
+                return b'f' * 64
+            return ('/nix/store/' + 'c' * 32 + '-host.drv').encode()
+        self.fail('Unexpected external fixture command: ' + arguments[0])
+
+    def build(self, source, destination, arguments):
+        self.workloads.append(['build', str(source), str(destination)])
+        name = Path(destination).name
+        if name == 'tested-system':
+            return self.new_system
+        kind = name.removeprefix('old-').removeprefix('new-').removeprefix('tested-')
+        old = name.startswith('old-') or kind not in self.changed_apps
+        return Path('/nix/store/' + ('d' if old else 'e') * 32 + '-' + kind + '-fixture')
+
+    def probe(self, kind, app, directory, **kwargs):
+        # Preserve the real gate's empty-directory contract, including retries.
+        directory = self.gates._private_directory(Path(directory))
+        receipt = {'ok': True, 'kind': kind, 'app': str(app), 'receipt_path': str(directory / 'receipt.json')}
+        (directory / 'receipt.json').write_text(json.dumps(receipt))
+        self.probes.append((kind, app, kwargs))
+        return receipt
+
+    def closure(self, old, new, app_pairs, changes):
+        self.assertEqual((old, new), (self.old_system, self.new_system))
+        self.assertEqual(set(app_pairs), {'t3', 'codex', 'chatgpt', 'codex-acp'})
+        return {'ok': True, 'policy': 'fixture-build-inventory', 'source_changes': sorted(changes)}
+
+    def prepare(self, *, source=None, mode='batch'):
+        return p.prepare_batch(self.repo, self.state, source or self.source, mode)
+
+    def assert_not_committed(self):
+        self.assertEqual(p.git(self.repo, 'rev-parse', self.record['candidate_ref']).decode().strip(), self.baseline_commit)
+        self.assertEqual(self.sign_requests, [])
+
+    def test_foreign_worktree_path_and_source_symlink_are_refused(self):
+        foreign = self.root / 'other-task' / self.directory.name / 'source'
+        foreign.parent.mkdir(parents=True)
+        p.git(self.repo, 'worktree', 'add', '-q', '-b', 'other-task', foreign)
+        with self.assertRaises(p.Blocked):
+            self.prepare(source=foreign)
+        kept = self.directory / 'kept-source'
+        self.source.rename(kept)
+        self.source.symlink_to(kept, target_is_directory=True)
+        with self.assertRaises(OSError):
+            self.prepare()
+        self.assertEqual((kept / 'packages/demo.nix').read_text(), '{ version = "1.0.1"; }\n')
+        self.assertEqual(p.git(foreign, 'branch', '--show-current').decode().strip(), 'other-task')
+        self.assert_not_committed()
+
+    def test_wrong_mode_and_changed_main_baseline_are_refused(self):
+        with self.assertRaises(p.Blocked):
+            self.prepare(mode='release-migration')
+        (self.repo / 'packages/demo.nix').write_text('later main editor save\n')
+        with self.assertRaises(p.Blocked):
+            self.prepare()
+        self.assertEqual((self.repo / 'packages/demo.nix').read_text(), 'later main editor save\n')
+        self.assert_not_committed()
+
+    def test_changed_active_baseline_is_refused_before_building(self):
+        with patch.object(p, 'baseline', return_value=(p.source_manifest(self.repo), self.new_system)):
+            with self.assertRaises(p.Blocked):
+                self.prepare()
+        self.assertEqual(self.workloads, [])
+        self.assert_not_committed()
+
+    def test_owned_worktree_on_another_tasks_branch_is_preserved(self):
+        p.git(self.source, 'switch', '-q', '-c', 'other-task')
+        with self.assertRaises(p.Blocked):
+            self.prepare()
+        self.assertEqual(p.git(self.source, 'branch', '--show-current').decode().strip(), 'other-task')
+        self.assertEqual(self.file.read_text(), '{ version = "1.0.1"; }\n')
+        self.assert_not_committed()
+
+    def test_new_tracked_source_is_refused_and_preserved(self):
+        added = self.source / 'packages/new.nix'
+        added.write_text('{ added = true; }\n')
+        p.git(self.source, 'add', 'packages/new.nix')
+        with self.assertRaises(p.Blocked):
+            self.prepare()
+        self.assertEqual(added.read_text(), '{ added = true; }\n')
+        self.assert_not_committed()
+
+    def test_deleted_source_is_refused_without_recreating_it(self):
+        self.file.unlink()
+        with self.assertRaises(p.Blocked):
+            self.prepare()
+        self.assertFalse(self.file.exists())
+        self.assert_not_committed()
+
+    def test_source_mode_change_and_symlink_are_refused(self):
+        self.file.chmod(0o755)
+        with self.assertRaises(p.Blocked):
+            self.prepare()
+        self.file.chmod(0o644)
+        personal = self.root / 'personal-note'
+        personal.write_text('private retained note\n')
+        self.file.unlink()
+        self.file.symlink_to(personal)
+        with self.assertRaises(p.Blocked):
+            self.prepare()
+        self.assertTrue(self.file.is_symlink())
+        self.assertEqual(personal.read_text(), 'private retained note\n')
+        self.assert_not_committed()
+
+    def test_untracked_source_is_refused_and_preserved(self):
+        for name in ['notes.txt', 'ignored.txt']:
+            with self.subTest(name=name):
+                note = self.source / name
+                note.write_text('untracked editor work\n')
+                with self.assertRaises(p.Blocked):
+                    self.prepare()
+                self.assertEqual(note.read_text(), 'untracked editor work\n')
+                note.unlink()
+        self.assert_not_committed()
+
+    def test_hidden_source_change_cannot_be_certified_as_a_tested_child(self):
+        for flag in ['assume-unchanged', 'skip-worktree']:
+            with self.subTest(flag=flag):
+                p.git(self.source, 'update-index', '--' + flag, 'packages/demo.nix')
+                with self.assertRaises(p.Blocked):
+                    self.prepare()
+                p.git(self.source, 'update-index', '--no-' + flag, 'packages/demo.nix')
+        self.assertEqual(self.file.read_text(), '{ version = "1.0.1"; }\n')
+        self.assert_not_committed()
+
+    def test_signing_or_signature_verification_failure_never_produces_tested_receipt(self):
+        for operation in ['commit', 'verify-commit']:
+            with self.subTest(operation=operation):
+                def refuse_signing(arguments, **kwargs):
+                    values = list(map(str, arguments))
+                    if values[0] == 'git' and operation in values and (operation == 'commit' or values[-1] == 'HEAD'):
+                        raise p.Blocked('Fixture signing unavailable')
+                    return self.command(arguments, **kwargs)
+                with patch.object(p, 'command', side_effect=refuse_signing):
+                    with self.assertRaises(p.Blocked):
+                        self.prepare()
+                record = p.read_json(self.directory / 'candidate.json')
+                self.assertEqual(record['phase'], 'failed')
+                self.assertNotIn('candidate_commit', record)
+                if operation == 'commit':
+                    self.assert_not_committed()
+                else:
+                    child = p.git(self.source, 'rev-parse', 'HEAD').decode().strip()
+                    self.assertNotEqual(child, self.baseline_commit)
+                    self.assertEqual(p.git(self.source, 'rev-list', '--parents', '-n', '1', child).decode().split(),
+                                     [child, self.baseline_commit])
+
+    def test_editor_save_after_checks_prevents_commit_and_retains_bytes(self):
+        def save_after_checks(*args):
+            self.file.write_text('editor save after all builds\n')
+            return {'ok': True}
+        with patch.object(self.batch, 'verify_runtime_units', side_effect=save_after_checks):
+            with self.assertRaisesRegex(p.Blocked, 'changed while testing'):
+                self.prepare()
+        self.assertEqual(self.file.read_text(), 'editor save after all builds\n')
+        self.assert_not_committed()
+        self.assertEqual(p.read_json(self.directory / 'candidate.json')['phase'], 'failed')
+
+    def test_success_checks_signing_exact_child_and_schema2_submission(self):
+        expected = self.file.read_bytes()
+        record = self.prepare()
+        self.assertEqual(record['phase'], 'tested')
+        self.assertEqual(record['schema'], 2)
+        self.assertEqual(record['mode'], 'batch')
+        self.assertEqual(len(self.sign_requests), 1)
+        self.assertIn('HEAD', self.verified)
+        self.assertEqual(p.git(self.source, 'show', record['candidate_commit'] + ':packages/demo.nix'), expected)
+        self.assertEqual(p.git(self.source, 'rev-list', '--parents', '-n', '1', record['candidate_commit']).decode().split(),
+                         [record['candidate_commit'], self.baseline_commit])
+        self.assertEqual(record['candidate_manifest'], p.source_manifest(self.source))
+        self.assertTrue(record['niri']['ok'])
+        self.assertTrue(record['published']['ok'])
+        self.assertEqual(set(record['host_derivations']), set(self.batch.HOSTS))
+        self.assertEqual({kind for kind, *_ in self.probes}, {'t3', 'codex', 'chatgpt'})
+        self.assertTrue(any(command[:3] == ['nix', 'flake', 'check'] for command in self.workloads))
+        inbox = self.root / 'inbox' / 'request.json'
+        inbox.parent.mkdir(mode=0o700)
+        result = p.submit(self.repo, self.state, record['id'], inbox=inbox)
+        request = p.read_json(inbox)
+        self.assertEqual(result['phase'], 'submitted')
+        self.assertEqual(request, {name: record[name] for name in (
+            'schema', 'mode', 'id', 'baseline_commit', 'baseline_system', 'candidate_commit', 'candidate_ref')})
+        self.assertIn(record['candidate_commit'], self.verified)
+        self.assertEqual(inbox.stat().st_nlink, 1)
+        self.assertEqual(p.read_json(self.directory / 'candidate.json')['phase'], 'submitted')
+        self.assertEqual(p.git(self.repo, 'rev-parse', 'HEAD').decode().strip(), self.baseline_commit)
+
+    def test_private_cli_umask_stages_a_preparable_batch_without_changing_main_modes(self):
+        before = p.source_manifest(self.repo)
+        previous_mask = os.umask(0o077)
+        try:
+            with patch.object(p, 'candidate_id', return_value='20261008T140001Z-1234abcd'):
+                self.record = p.new_batch(self.repo, self.state, 'batch')
+        finally:
+            os.umask(previous_mask)
+        self.source = Path(self.record['source'])
+        self.directory = self.source.parent
+        self.file = self.source / 'packages/demo.nix'
+        self.file.write_text('{ version = "1.0.1"; }\n')
+        result = self.prepare()
+        self.assertEqual(result['phase'], 'tested')
+        self.assertEqual(p.source_manifest(self.repo), before)
+        self.assertEqual(p.git(self.source, 'show', result['candidate_commit'] + ':packages/demo.nix'), self.file.read_bytes())
+
+    def test_acp_change_alone_still_probes_codex(self):
+        self.changed_apps = {'acp'}
+        record = self.prepare()
+        self.assertEqual([kind for kind, *_ in self.probes], ['codex'])
+        self.assertTrue(record['app_tests']['codex']['probed'])
+        self.assertFalse(record['app_tests']['t3']['probed'])
+        self.assertFalse(record['app_tests']['chatgpt']['probed'])
+
+    def test_failed_niri_validation_cannot_sign_or_probe_other_apps(self):
+        self.niri_ok = False
+        with self.assertRaisesRegex(p.Blocked, 'Niri configuration'):
+            self.prepare()
+        self.assert_not_committed()
+        self.assertEqual(self.probes, [])
+        self.assertEqual(p.read_json(self.directory / 'candidate.json')['phase'], 'failed')
+
+    def test_published_source_failure_stops_before_builds_or_signing(self):
+        with patch.object(self.batch, 'verify_published', side_effect=self.batch.BatchError('upstream identity failed')):
+            with self.assertRaises(self.batch.BatchError):
+                self.prepare()
+        self.assertEqual(self.workloads, [])
+        self.assertEqual(self.probes, [])
+        self.assert_not_committed()
+        self.assertEqual(p.read_json(self.directory / 'candidate.json')['phase'], 'failed')
+
+    def test_failed_checks_can_retry_in_new_private_probe_directories(self):
+        with patch.object(self.batch, 'verify_runtime_units', side_effect=self.batch.BatchError('repair required')):
+            with self.assertRaises(self.batch.BatchError):
+                self.prepare()
+        first_receipts = list(self.directory.glob('**/receipt.json'))
+        self.assertEqual(len(first_receipts), 4)
+        self.assert_not_committed()
+        record = self.prepare()
+        self.assertEqual(record['phase'], 'tested')
+        self.assertTrue(all(path.exists() for path in first_receipts))
+        fresh = [Path(record['app_tests'][kind]['receipt']['receipt_path']) for kind in ['t3', 'codex', 'chatgpt']]
+        self.assertTrue(all(path not in first_receipts for path in fresh))
 
 
 if __name__ == '__main__':

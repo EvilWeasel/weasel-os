@@ -29,7 +29,8 @@ Proton-SSH-Benutzerdienst ist davon unabhängig bereits beobachtet.
 
 Der native T3-Task heißt „Weasel OS: tägliche geprüfte Updates“, ist an diesen
 Update-Thread gebunden und verwendet `prompts/daily-update-review.md`. Seine
-Uhrzeit ist 14:00 in der Zeitzone des laufenden T3-Prozesses. T3 muss laufen;
+Uhrzeit ist 12:00 Europe/Berlin, erstmals 2026-10-09 um 12:00 MESZ
+(10:00 UTC). T3 muss laufen und der Laptop wach und am Netzteil sein;
 der Scheduler ist kein Dienst auf einem ausgeschalteten Laptop. Eine geöffnete
 ChatGPT-App ist nicht erforderlich. Die konkrete Task-ID und der beobachtete
 nächste Termin gehören in den Einrichtungsbeleg, statt einer angenommenen
@@ -45,11 +46,18 @@ gebunden an den aktuellen Main-Commit und dessen genaue `locked`-Daten.
 Fehlende Nodes, veraltete Revisionen und Quellenänderungen während der
 Aufzeichnung blockieren den Beleg. Ein mit `investigate` erfasster Knoten
 meldet offen fehlende Upstream-Prüfung und wird spätestens morgen untersucht.
-**Automatische Aktivierung ist derzeit auf drei
-Adapter begrenzt:** T3-Quell-JSON sowie Version und Quellhash der bestehenden
-Codex-/ChatGPT-Pakete. Packaging-Code, Patches, weitere Pakete und Flake-Inputs
-können diese Adapter nicht verändern. Andere Kandidaten erhalten eigene
-Builds und geprüfte Adapter; ein fehlender Adapter wird ausdrücklich gemeldet.
+**Der normale Tageslauf aktualisiert möglichst viele Quellen als gemeinsamen
+Batch:** alle konfigurierten Flake-Inputs und anwendbaren eigenen Paket-Pins.
+Stable, Unstable und Nightly behalten jeweils ihre konfigurierte Auswahl.
+Nach dem ersten breiten Build werden Fehler gezielt eingegrenzt, repariert
+oder einzelne belegte Verursacher zurückgenommen; die übrigen Updates bleiben.
+Fehlende Spezialadapter sind keine allgemeine Paket-Updatesperre. Ein kompletter
+Build belegt jedoch keine Laufzeitprüfung jedes Programms. Für T3, Codex/ACP
+und ChatGPT gibt es zusätzlich echte isolierte Proben geänderter Artefakte.
+Die drei älteren Einzelpin-Lanes bleiben als gezielte schnelle Möglichkeit.
+Der breite Batch erlaubt bestehende Paket- und Nix-Konfigurationsreparaturen,
+aber keine Änderung des privilegierten Updaters, Zugängen oder stateVersion,
+keine neuen/gelöschten Dateien und keinen unbenannten Release-Wechsel.
 
 NixOS 25.11 ist außerhalb des Supports. Der Wechsel zu einer unterstützten
 stabilen Basis gehört zusammen mit Home Manager in eine eigene Migration.
@@ -67,6 +75,8 @@ Stores und gelangen weder in Nix noch Git oder Review-Dateien.
 /run/current-system/sw/bin/weasel-update --status
 /run/current-system/sw/bin/weasel-update --review-start
 /run/current-system/sw/bin/weasel-update --record-review /absoluter/pfad/review.json
+/run/current-system/sw/bin/weasel-update --new-batch --mode batch
+/run/current-system/sw/bin/weasel-update --prepare-batch /ausgabe/SOURCE --mode batch
 /run/current-system/sw/bin/weasel-update --discover codex
 /run/current-system/sw/bin/weasel-update --prepare codex --metadata /ausgabe/metadata.json
 /run/current-system/sw/bin/weasel-update --submit 20261008T120000Z-0123abcd
@@ -84,7 +94,9 @@ werden. Keine Kandidatenprüfungen schreiben in Main.
 
 `--submit` veröffentlicht exklusiv eine vollständig geschriebene Anfrage in
 `/var/lib/weasel-updates-inbox/request.json`. Sie enthält nur vollständige
-Commit-IDs, einen Update-Branch, ID und Baseline-Systempfad. Eine vorhandene
+Commit-IDs, einen Update-Branch, ID und Baseline-Systempfad. Schema 2 nennt
+zusätzlich ausdrücklich `batch` oder `release-migration`; Review-Schema 1
+ist davon unabhängig. Eine vorhandene
 Anfrage bleibt erhalten. `weasel-update-activate.path` startet darauf den
 festen Dienst `weasel-update-activate.service`.
 
@@ -99,16 +111,30 @@ Editoränderungen werden anhand der Dateiinhalte erkannt.
 
 Der Root-Verifier verlangt einen direkten signierten Nachfolger der Baseline
 vom eingerichteten Signierschlüssel und prüft Git-Objekte anhand ihrer
-Inhalts-Hashes. Der Diff darf nur die unterstützten Pins und den unabhängig
-erzeugten Zusatz im Lernlog enthalten. Er friert die geprüften Quellen in
+Inhalts-Hashes. Schema 1 erlaubt nur die drei unterstützten Pin-Übergänge;
+Schema 2 prüft den breiten Quelldiff und den unabhängig erzeugten Zusatz im
+Lernlog. Authentifizierungs-, User-/Gruppen-, SSH-, Sudo-, Nix-Vertrauens- und
+Zustandsoptionen werden zusätzlich ausgewertet und ohne Geheimniswerte als
+Hash verglichen. Der effektive Root-Dienst und Inbox-Pfad müssen dem
+unveränderten geschützten Modul entsprechen. Er friert die geprüften Quellen in
 schreibgeschützten Root-Verzeichnissen ein. Nix-Evaluationen, Builds,
 Netzwerk-Discovery und App-Prüfungen laufen weiterhin als normaler Benutzer.
 
-Jeder Kandidat braucht Nix-Syntax, Evaluation aller betroffenen Hosts,
-Paket- und vollständigen Laptop-Build. T3 betrifft zusätzlich `michapc` und
-`michapc-debug`. Die Closure-Prüfung erlaubt App-Abhängigkeiten und paarweise
-verglichene erzeugte Dateien mit ansonsten identischen Inhalten, Modi und
-Linkzielen. Ein bloßer Namens-Whitelist-Treffer beweist keine Gleichheit.
+Jeder Batch braucht Nix-Syntax, Evaluation aller vier Hosts, den vollständigen
+Flake-Check und den kompletten Laptop-Build. Seine Closure-Prüfung hält alle
+hinzugefügten und entfernten Store-Artefakte mit vollständigen Inventar-Hashes
+fest; sie behauptet keine Gleichheit außerhalb dreier Apps. Die bisherigen
+Einzelpin-Lanes prüfen weiter strukturell identische erzeugte Ausgaben außerhalb
+der ausgewählten App-Closures. Ein bloßer Namens-Whitelist-Treffer reicht nicht.
+
+Der Kandidat validiert die ausgewertete Niri-Konfiguration mit dem tatsächlich
+gebauten Niri in einer privaten Kopie aller Includes. Das ist Syntax-/Config-
+Validierung, keine Laptop-GPU-/Overlay-Probe. Der Root-Verifier wiederholt sie.
+Geänderte Display-Manager-/Niri-Units einschließlich Drop-ins müssen die laufende
+Sitzung beim Switch erhalten. Der Updater installiert dafür Niris
+`restartIfChanged = false`. Kernel und laufender Compositor übernehmen neue
+Binärdateien erst nach einem späteren Boot beziehungsweise neuer Anmeldung;
+der Tageslauf startet diese nicht automatisch.
 
 Die realen Funktions-Gates verwenden leere Profile in privaten Benutzer-,
 PID- und Netzwerk-Namespaces. Sie lesen keine persönlichen App-Daten und
@@ -179,12 +205,14 @@ Ein Stromausfall während Cleanup hinterlässt ebenfalls einen Recoveryfall.
 ## Einmaliger Bootstrap
 
 Die erste Installation des festen Root-Dienstes braucht normale Hostrechte.
-Im aktuellen T3-Harness verhindert `NoNewPrivs` die Privilegienerhöhung auch
-bei freigegebenen Build-/Netzwerkbefehlen. Ein anderer User-Executor ist kein
-zulässiger Ausweg. Alle Quellen, Tests und Builds werden deshalb zuerst
-fertiggestellt; erst dann wird ein konkreter Bootstrap-Beleg erzeugt.
+Zunächst blockierte das aus dem alten Harness gestartete T3 mit `NoNewPrivs`
+auch normal freigegebenes sudo. Nach dem eigenständigen Neustart der nativen
+T3-App hat der normale genehmigte Hostprozess tatsächlich `NoNewPrivs: 0` und
+`sudo -n id -u` liefert 0. Damit kann der autorisierte Bootstrap regulär laufen,
+sobald alle konkreten Quellen, Tests und Builds fertig sind. Kein User-Executor,
+kein alternativer Dispatch und keine verweigerte T3-Capability werden umgangen.
 
-Der endgültige Terminalbefehl nennt einen unveränderlichen Store-Wrapper und
+Der konkrete Bootstrap-Befehl nennt einen unveränderlichen Store-Wrapper und
 einen unveränderlichen Beleg mit exaktem signiertem Commit, Quellmanifest,
 vorherigem System und gebautem neuen System. Der Bootstrap prüft diese
 Bindung erneut, erstellt den Home-Snapshot und aktiviert exakt diesen Pfad.

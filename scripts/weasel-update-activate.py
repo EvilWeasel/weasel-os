@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Trusted root transaction for narrowly scoped, signed laptop package updates.
+"""Trusted root transaction for policy-scoped, signed laptop source updates.
 
 Only this installed script and its immutable sibling verifiers execute as root.
 Nix evaluation/builds and application probes always run as the desktop user.
@@ -42,6 +42,9 @@ LANES = {
     "packages/chatgpt/default.nix": "chatgpt",
 }
 REQUEST_KEYS = {"schema", "id", "baseline_commit", "baseline_system", "candidate_commit", "candidate_ref"}
+BATCH_REQUEST_KEYS = REQUEST_KEYS | {"mode"}
+BATCH_MODES = {"batch", "release-migration"}
+BATCH_HOSTS = [HOST, "nixy-desktop", "michapc", "michapc-debug"]
 ORIGIN_URL = "https://github.com/EvilWeasel/weasel-os.git"
 OWNER_TAG = "weasel-daily-updates-v1"
 EXPECTED_PRIMARY_FINGERPRINT = "7D184861D38A4EA986C541FC9B2586DEDAFE5BEF"
@@ -90,7 +93,17 @@ def parse_request(data):
     if len(data) > 65536:
         raise ActivationError("Request exceeds 64 KiB")
     record = json_object(data)
-    if not isinstance(record, dict) or set(record) != REQUEST_KEYS or type(record["schema"]) is not int or record["schema"] != 1:
+    if not isinstance(record, dict) or type(record.get("schema")) is not int:
+        raise ActivationError("Unexpected request schema")
+    if record["schema"] == 1:
+        valid_keys = REQUEST_KEYS
+    elif record["schema"] == 2:
+        valid_keys = BATCH_REQUEST_KEYS
+        if not isinstance(record.get("mode"), str) or record["mode"] not in BATCH_MODES:
+            raise ActivationError("Unexpected batch update mode")
+    else:
+        raise ActivationError("Unexpected request schema")
+    if set(record) != valid_keys:
         raise ActivationError("Unexpected request schema")
     if not isinstance(record["id"], str) or not re.fullmatch(r"[0-9]{8}T[0-9]{6}Z-[0-9a-f]{8}", record["id"]):
         raise ActivationError("Invalid request identifier")
@@ -538,6 +551,114 @@ def build_application(runner, source, kind):
     return nix_build(runner, source, app_attribute(kind), app_expression(source) if kind == "chatgpt" else None)
 
 
+def acp_expression(source):
+    return ('let f = builtins.getFlake "path:' + str(source) + '"; in builtins.head '
+            '(builtins.filter (p: (p.pname or "") == "codex-acp") '
+            'f.nixosConfigurations.nixy-laptop.config.home-manager.users.evilweasel.home.packages)')
+
+
+def nix_check(runner, source):
+    """Build the flake's native checks without changing the archived lock."""
+    lock = (source / "flake.lock").read_bytes()
+    runner.user("nix", ["flake", "check", "--no-write-lock-file", "--max-jobs", "1", "--cores", "2", "path:" + str(source)])
+    if (source / "flake.lock").read_bytes() != lock:
+        raise ActivationError("Flake check changed frozen flake.lock")
+
+
+def validate_candidate_changes(runner, repository, request, old_tree, new_tree, discover=None, batch=None):
+    """Reconstruct the exact signed diff and apply only immutable policy code."""
+    if old_tree.keys() != new_tree.keys():
+        raise ActivationError("Candidate adds or removes tracked source files")
+    changed_names = sorted(name for name in old_tree if old_tree[name] != new_tree[name])
+    if not changed_names:
+        raise ActivationError("Candidate has no source changes")
+    changes = {}
+    for name in changed_names:
+        if old_tree[name][0] != new_tree[name][0]:
+            raise ActivationError("Candidate source mode changed")
+        changes[name] = (read_blob(runner, repository, old_tree[name][1]),
+                         read_blob(runner, repository, new_tree[name][1]))
+    if "agent-learnings.md" not in changes:
+        raise ActivationError("Candidate requires its deterministic learning entry")
+    old_log, new_log = changes["agent-learnings.md"]
+    if request["schema"] == 2:
+        if batch is None:
+            raise ActivationError("Installed batch policy is unavailable")
+        source_names = [name for name in changed_names if name != "agent-learnings.md"]
+        if not source_names:
+            raise ActivationError("Batch candidate has no package or input changes")
+        suffix = batch.learning_suffix(request["id"], request["mode"], source_names)
+        if new_log != old_log + suffix:
+            raise ActivationError("Learning entry differs from the independently generated batch suffix")
+        return {"batch": batch.validate_changes(changes, request["mode"], request["id"])}, changes
+    if any(name not in {*LANES, "agent-learnings.md"} for name in changed_names):
+        raise ActivationError("Candidate diff exceeds the package pin allowlist")
+    metadata = {}
+    for name, contents in changes.items():
+        if name != "agent-learnings.md":
+            metadata[LANES[name]] = discover.validate_transition(LANES[name], *contents, network=True)
+    if not metadata:
+        raise ActivationError("Package candidate has no pin changes")
+    suffix = b"".join(discover.learning_suffix(request["id"], kind, pin["old"]["version"], pin["new"]["version"])
+                      for kind, pin in sorted(metadata.items()))
+    if new_log != old_log + suffix:
+        raise ActivationError("Learning entry differs from the independently generated suffix")
+    return metadata, changes
+
+
+def probe_applications(runner, old_source, new_source, kinds, workspace, run, *, changed_outputs_only=False):
+    """Rebuild known apps and ACP independently, then exercise changed outputs."""
+    app_pairs, app_tests = {}, {}
+    for kind in kinds:
+        old_app = build_application(runner, old_source, kind)
+        new_app = build_application(runner, new_source, kind)
+        app_pairs[kind] = {"old": str(old_app), "new": str(new_app)}
+        changed = old_app != new_app
+        acp_app = None
+        if kind == "codex":
+            acp_app = nix_build(runner, new_source, None, acp_expression(new_source))
+            if changed_outputs_only:
+                old_acp = nix_build(runner, old_source, None, acp_expression(old_source))
+                app_pairs["codex-acp"] = {"old": str(old_acp), "new": str(acp_app)}
+                changed = changed or old_acp != acp_app
+        app_tests[kind] = {"output_changed": changed, "probed": False}
+        if changed_outputs_only and not changed:
+            continue
+        probe_dir = workspace / ("probe-" + kind)
+        probe_dir.mkdir(mode=0o700)
+        os.chown(probe_dir, runner.account.pw_uid, runner.account.pw_gid)
+        arguments = [Path(__file__).resolve().with_name("weasel-update-gates.py"),
+                     "--kind", kind, "--app", new_app, "--run-dir", probe_dir]
+        if kind == "t3":
+            arguments += ["--old-app", old_app]
+        if kind == "codex":
+            arguments += ["--acp-app", acp_app]
+        receipt = json_object(runner.user("python3", arguments))
+        if receipt.get("ok") is not True:
+            raise ActivationError("Trusted application probe did not pass")
+        atomic_write(run / ("probe-" + kind + ".json"), encoded(receipt))
+        app_tests[kind]["probed"] = True
+    return app_pairs, app_tests
+
+
+def published_batch_pins(runner, old_source, new_source):
+    output = runner.user("python3", [Path(__file__).resolve().with_name("weasel-update-batch.py"),
+                                    "--verify-published", "--baseline", old_source, "--source", new_source])
+    receipt = json_object(output)
+    if not isinstance(receipt, dict) or receipt.get("ok") is not True:
+        raise ActivationError("Published critical pin verification did not pass")
+    return receipt
+
+
+def probe_niri(runner, source, workspace):
+    output = runner.user("python3", [Path(__file__).resolve().with_name("weasel-update-niri.py"),
+                                    "--source", source, "--run-dir", workspace / "niri"])
+    receipt = json_object(output)
+    if not isinstance(receipt, dict) or receipt.get("ok") is not True:
+        raise ActivationError("Generated Niri configuration probe did not pass")
+    return receipt
+
+
 def create_snapshot(runner, identifier):
     check_space(50 * GIB)
     mount = json_object(runner.root("findmnt", ["--json", "--target", "/home", "--output", "TARGET,FSTYPE,OPTIONS"]))
@@ -798,8 +919,10 @@ def activate_exact(runner, system):
 
 
 def process_request(runner, request, state, repository, *, check_only=False):
-    discover = import_peer("weasel-update-discover.py")
-    gates = import_peer("weasel-update-gates.py")
+    batch_mode = request["schema"] == 2
+    discover = None if batch_mode else import_peer("weasel-update-discover.py")
+    batch = import_peer("weasel-update-batch.py") if batch_mode else None
+    gates = None if batch_mode else import_peer("weasel-update-gates.py")
     baseline = valid_system(request["baseline_system"])
     check_recovery(state, read_only=check_only)
     check_system(baseline)
@@ -823,35 +946,11 @@ def process_request(runner, request, state, repository, *, check_only=False):
     before_manifest, before_index = repository_manifest(runner, repository, request["baseline_commit"])
     old_tree = tracked_tree(runner, repository, request["baseline_commit"])
     new_tree = tracked_tree(runner, repository, request["candidate_commit"])
-    if old_tree.keys() != new_tree.keys():
-        raise ActivationError("Candidate adds or removes tracked source files")
-    changed_names = [name for name in old_tree if old_tree[name] != new_tree[name]]
-    if not changed_names or any(name not in {*LANES, "agent-learnings.md"} for name in changed_names):
-        raise ActivationError("Candidate diff exceeds the package pin allowlist")
-    changes = {}
-    metadata = {}
-    for name in changed_names:
-        if name == "agent-learnings.md":
-            continue
-        if old_tree[name][0] != new_tree[name][0]:
-            raise ActivationError("Package source mode changed")
-        contents = (read_blob(runner, repository, old_tree[name][1]), read_blob(runner, repository, new_tree[name][1]))
-        changes[name] = contents
-        metadata[LANES[name]] = discover.validate_transition(LANES[name], *contents, network=True)
-    if not metadata or "agent-learnings.md" not in changed_names:
-        raise ActivationError("Package candidate requires its deterministic learning entry")
-    if old_tree["agent-learnings.md"][0] != new_tree["agent-learnings.md"][0]:
-        raise ActivationError("Learning log mode changed")
-    old_log = read_blob(runner, repository, old_tree["agent-learnings.md"][1])
-    new_log = read_blob(runner, repository, new_tree["agent-learnings.md"][1])
-    suffix = b"".join(discover.learning_suffix(request["id"], kind, pin["old"]["version"], pin["new"]["version"])
-                      for kind, pin in sorted(metadata.items()))
-    if new_log != old_log + suffix:
-        raise ActivationError("Learning entry differs from the independently generated suffix")
-    changes["agent-learnings.md"] = (old_log, new_log)
+    metadata, changes = validate_candidate_changes(runner, repository, request, old_tree, new_tree, discover, batch)
     if check_only:
-        return {"schema": 1, "ok": True, "id": request["id"], "packages": metadata,
-                "checks": ["schema", "signed-direct-candidate", "clean-main", "exact-active-baseline", "published-pin-diff"],
+        return {"schema": request["schema"], "ok": True, "id": request["id"], "packages": metadata,
+                "checks": ["schema", "signed-direct-candidate", "clean-main", "exact-active-baseline",
+                           "batch-source-policy" if batch_mode else "published-pin-diff"],
                 "activation_verified": False}
     check_power()
     check_space(65 * GIB)
@@ -859,7 +958,7 @@ def process_request(runner, request, state, repository, *, check_only=False):
     prune_owned(runner, state, keep=3)
     run = state / "runs" / request["id"]
     run.mkdir(mode=0o700)
-    record = {"schema": 1, "marker": OWNER_TAG, "id": request["id"], "phase": "preparing", "request": request,
+    record = {"schema": request["schema"], "marker": OWNER_TAG, "id": request["id"], "phase": "preparing", "request": request,
               "source_before": before_manifest, "packages": metadata}
     def journal(phase, **fields):
         record.update(phase=phase, **fields)
@@ -875,46 +974,41 @@ def process_request(runner, request, state, repository, *, check_only=False):
     try:
         archive_source(runner, repository, request["baseline_commit"], old_source)
         archive_source(runner, repository, request["candidate_commit"], new_source)
+        if batch_mode:
+            published_pins = published_batch_pins(runner, old_source, new_source)
+            journal("preparing", published_pins=published_pins)
         baseline_result = nix_eval(runner, old_source, "nixosConfigurations.nixy-laptop.config.system.build.toplevel.outPath")
         if baseline_result != str(baseline):
             raise ActivationError("Frozen committed baseline does not reproduce the running system")
         for name in changes:
             if name.endswith(".nix"):
                 runner.user("nix-instantiate", ["--parse", new_source / name])
-        affected_hosts = [HOST, "michapc", "michapc-debug"] if "t3" in metadata else [HOST]
+        affected_hosts = BATCH_HOSTS if batch_mode else ([HOST, "michapc", "michapc-debug"] if "t3" in metadata else [HOST])
         host_derivations = {}
         for host in affected_hosts:
             host_derivations[host] = nix_eval(runner, new_source, "nixosConfigurations." + host + ".config.system.build.toplevel.drvPath")
-        journal("preparing", host_derivations=host_derivations)
-        app_pairs = {}
-        for kind in metadata:
-            old_app = build_application(runner, old_source, kind)
-            new_app = build_application(runner, new_source, kind)
-            app_pairs[kind] = {"old": str(old_app), "new": str(new_app)}
-            probe_dir = workspace / ("probe-" + kind)
-            probe_dir.mkdir(mode=0o700)
-            os.chown(probe_dir, runner.account.pw_uid, runner.account.pw_gid)
-            probe_arguments = [Path(__file__).resolve().with_name("weasel-update-gates.py"),
-                               "--kind", kind, "--app", new_app, "--run-dir", probe_dir]
-            if kind == "t3":
-                probe_arguments += ["--old-app", old_app]
-            if kind == "codex":
-                acp_expression = ('let f = builtins.getFlake "path:' + str(new_source) + '"; in builtins.head '
-                                  '(builtins.filter (p: (p.pname or "") == "codex-acp") '
-                                  'f.nixosConfigurations.nixy-laptop.config.home-manager.users.evilweasel.home.packages)')
-                acp_app = nix_build(runner, new_source, None, acp_expression)
-                probe_arguments += ["--acp-app", acp_app]
-            probe_output = runner.user("python3", probe_arguments)
-            receipt = json_object(probe_output)
-            if receipt.get("ok") is not True:
-                raise ActivationError("Trusted application probe did not pass")
-            atomic_write(run / ("probe-" + kind + ".json"), encoded(receipt))
+        sensitive_state = None
+        if batch_mode:
+            sensitive_state = batch.verify_sensitive_state(
+                old_source, new_source,
+                lambda expression: runner.user("nix", ["eval", "--raw", "--impure", "--no-write-lock-file", "--expr", expression]),
+                mode=request["mode"])
+            nix_check(runner, new_source)
+        journal("preparing", host_derivations=host_derivations, flake_check_passed=batch_mode, sensitive_state=sensitive_state)
+        app_pairs, app_tests = probe_applications(runner, old_source, new_source,
+                                                 ["t3", "codex", "chatgpt"] if batch_mode else list(metadata),
+                                                 workspace, run, changed_outputs_only=batch_mode)
         new_system = nix_build(runner, new_source, "nixosConfigurations.nixy-laptop.config.system.build.toplevel")
         valid_system(str(new_system))
         if new_system == baseline:
             raise ActivationError("Candidate build equals baseline")
-        closure = gates.verify_closure(str(baseline), str(new_system), app_pairs, changes)
-        journal("tested", new_system=str(new_system), closure=closure)
+        niri_receipt = probe_niri(runner, new_source, workspace) if batch_mode else None
+        if niri_receipt is not None:
+            atomic_write(run / "probe-niri.json", encoded(niri_receipt))
+            app_tests["niri"] = {"probed": True, "coverage": niri_receipt.get("coverage")}
+        closure = (batch if batch_mode else gates).verify_closure(str(baseline), str(new_system), app_pairs, changes)
+        runtime_units = batch.verify_runtime_units(str(baseline), str(new_system)) if batch_mode else None
+        journal("tested", new_system=str(new_system), closure=closure, app_tests=app_tests, niri=niri_receipt, runtime_units=runtime_units)
         # Root-owned GC roots survive reboot/power loss and retain both recovery closures.
         for label, system in [("baseline-system", baseline), ("tested-system", new_system)]:
             runner.root("nix-store", ["--add-root", run / label, "--indirect", "--realise", system])
@@ -942,6 +1036,9 @@ def process_request(runner, request, state, repository, *, check_only=False):
             if read_regular(backup / name.replace("/", "__"), maximum=128 * 1024 * 1024)[0] != old_bytes:
                 raise ActivationError("Save through displaced original retained; recovery required")
         check_remote(runner, repository, request["baseline_commit"])
+        if batch_mode:
+            runtime_units = batch.verify_runtime_units(str(baseline), str(new_system))
+            journal(record["phase"], runtime_units=runtime_units)
         journal("activating")
         try:
             activate_exact(runner, new_system)
@@ -977,7 +1074,8 @@ def process_request(runner, request, state, repository, *, check_only=False):
             retention = ["Cleanup deferred; tagged artifacts retained for review"]
         write_status("updated", request["id"], "complete", snapshot=number, system=str(new_system), packages=metadata, retention=retention)
         notify_outcome(runner, "updated")
-        return {"schema": 1, "ok": True, "id": request["id"], "system": str(new_system), "snapshot": number, "packages": metadata}
+        return {"schema": request["schema"], "ok": True, "id": request["id"], "system": str(new_system),
+                "snapshot": number, "packages": metadata, "app_tests": app_tests}
     except Exception as exc:
         if record["phase"] not in TERMINAL_PHASES and record["phase"] not in {"recovery-required", "rolling-back-system"}:
             journal("failed-before-integration" if record["phase"] in {"preparing", "tested"} else "recovery-required", error=type(exc).__name__)

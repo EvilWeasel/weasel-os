@@ -7,6 +7,8 @@ let
     cp ${../scripts/weasel-update-gates.py} "$out/weasel-update-gates.py"
     cp ${../scripts/weasel-update-activate.py} "$out/weasel-update-activate.py"
     cp ${../scripts/weasel-update-bootstrap.py} "$out/weasel-update-bootstrap.py"
+    cp ${../scripts/weasel-update-batch.py} "$out/weasel-update-batch.py"
+    cp ${../scripts/weasel-update-niri.py} "$out/weasel-update-niri.py"
     cp ${../config/update-pins.json} "$out/update-pins.json"
   '';
   runtimeInputs = [
@@ -51,6 +53,13 @@ let
   };
 in
 {
+  # Package updates must not terminate the compositor hosting the scheduler.
+  # NixOS merges this with Niri's packaged user unit as a drop-in.
+  systemd.user.services.niri = {
+    restartIfChanged = false;
+    enableDefaultPath = false;
+  };
+
   environment.systemPackages = [
     prepare
     bootstrap
@@ -103,7 +112,7 @@ in
   # A fixed path dispatches a schema-checked request, never a caller command.
   # The activator consumes it before processing and serializes with flock.
   systemd.paths.weasel-update-activate = {
-    description = "Watch the narrowly scoped laptop update inbox";
+    description = "Watch the signed laptop update inbox";
     wantedBy = [ "multi-user.target" ];
     after = [ "systemd-tmpfiles-setup.service" ];
     pathConfig = {

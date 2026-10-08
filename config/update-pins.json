@@ -3,11 +3,12 @@
   "last_review": "2026-10-08",
   "review_every_days": 1,
   "automatic_lanes": [
+    "batch",
     "t3",
     "codex",
     "chatgpt"
   ],
-  "activation_policy": "only-built-and-gated-candidates-after-home-snapshot",
+  "activation_policy": "reviewed-configured-channel-batch-after-host-checks-critical-probes-and-home-snapshot",
   "source_scope": {
     "t3": [
       "packages/t3code/source.json"
@@ -19,6 +20,13 @@
     "chatgpt": [
       "packages/chatgpt/default.nix:version",
       "packages/chatgpt/default.nix:src.hash"
+    ],
+    "batch": [
+      "flake.nix:existing-input-url-literals-only; preserve-owner-repository-and-configured-channel",
+      "flake.lock:normal-upstream-root-and-transitive-lock-graph-revisions",
+      "packages/t3code/source.json:verified-official-version-url-hash",
+      "existing-tracked-.nix-files-under-packages-programs-hosts-modules-profiles-lib-flake:reviewed-package-input-and-compatibility-repairs",
+      "paired-stable-release-migration:nixpkgs-nixos-25.11-to-nixos-26.05-and-home-manager-release-25.11-to-release-26.05-only"
     ]
   },
   "support": {
@@ -28,7 +36,7 @@
     "supported_until": "2026-12-31",
     "official_source": "https://nixos.org/blog/announcements/2026/nixos-2605/"
   },
-  "migration_status": "required-separate-25.11-to-supported-stable-migration",
+  "migration_status": "required-typed-paired-25.11-to-26.05-migration-with-preserved-stateVersion",
   "entries": [
     {
       "id": "disko",
@@ -49,8 +57,8 @@
       "affected_hosts": [
         "nixy-laptop"
       ],
-      "gate_adapter": null,
-      "gate_status": "needs-verified-adapter",
+      "gate_adapter": "batch",
+      "gate_status": "batch-build-coverage; package-runtime-not-generically-verified",
       "review_status": "daily-pin-reason-and-candidate-review",
       "candidate_policy": "upstream-reviewed",
       "discovery_endpoints": [
@@ -63,7 +71,11 @@
       ],
       "affected_versions": [
         "63b4e7e6cf75307c1d26ac3762b886b5b0247267"
-      ]
+      ],
+      "batch_adapter": "batch",
+      "batch_gate_status": "host-checks-and-build-required; critical-probe-when-relevant-output-changes",
+      "package_specific_checks": "Official upstream change review; dependency graph/affected hosts and relevant build.",
+      "runtime_coverage": "Host evaluation, full flake check and laptop build only. The package-specific checks are not claimed as implemented or passed by this declaration."
     },
     {
       "id": "dms",
@@ -88,8 +100,8 @@
         "michapc",
         "michapc-debug"
       ],
-      "gate_adapter": null,
-      "gate_status": "needs-verified-adapter",
+      "gate_adapter": "batch",
+      "gate_status": "batch-build-coverage; package-runtime-not-generically-verified",
       "review_status": "daily-pin-reason-and-candidate-review",
       "candidate_policy": "upstream-reviewed",
       "discovery_endpoints": [
@@ -102,7 +114,11 @@
       ],
       "affected_versions": [
         "eb5afcdc40ea5446c27e18552ff4a19f9daf9484"
-      ]
+      ],
+      "batch_adapter": "batch",
+      "batch_gate_status": "host-checks-and-build-required; critical-probe-when-relevant-output-changes",
+      "package_specific_checks": "Qt/quickshell compatibility, compositor and greeter candidates; no surprise session restarts.",
+      "runtime_coverage": "Host evaluation, full flake check and laptop build only. The package-specific checks are not claimed as implemented or passed by this declaration."
     },
     {
       "id": "fine-cmdline",
@@ -126,8 +142,8 @@
         "michapc",
         "michapc-debug"
       ],
-      "gate_adapter": null,
-      "gate_status": "needs-verified-adapter",
+      "gate_adapter": "batch",
+      "gate_status": "batch-build-coverage; package-runtime-not-generically-verified",
       "review_status": "daily-pin-reason-and-candidate-review",
       "candidate_policy": "upstream-reviewed",
       "discovery_endpoints": [
@@ -140,7 +156,11 @@
       ],
       "affected_versions": [
         "6e646f4da6afe856e36f3d952489b723d1475638"
-      ]
+      ],
+      "batch_adapter": "batch",
+      "batch_gate_status": "host-checks-and-build-required; critical-probe-when-relevant-output-changes",
+      "package_specific_checks": "Neovim startup/plugin command and shared host evaluation.",
+      "runtime_coverage": "Host evaluation, full flake check and laptop build only. The package-specific checks are not claimed as implemented or passed by this declaration."
     },
     {
       "id": "flake-parts",
@@ -165,8 +185,8 @@
         "michapc-debug",
         "ew-cloud"
       ],
-      "gate_adapter": null,
-      "gate_status": "needs-verified-adapter",
+      "gate_adapter": "batch",
+      "gate_status": "batch-build-coverage; package-runtime-not-generically-verified",
       "review_status": "daily-pin-reason-and-candidate-review",
       "candidate_policy": "upstream-reviewed",
       "discovery_endpoints": [
@@ -179,7 +199,11 @@
       ],
       "affected_versions": [
         "5250617bffd85403b14dbf43c3870e7f255d2c16"
-      ]
+      ],
+      "batch_adapter": "batch",
+      "batch_gate_status": "host-checks-and-build-required; critical-probe-when-relevant-output-changes",
+      "package_specific_checks": "Official upstream change review; dependency graph/affected hosts and relevant build.",
+      "runtime_coverage": "Host evaluation, full flake check and laptop build only. The package-specific checks are not claimed as implemented or passed by this declaration."
     },
     {
       "id": "handy",
@@ -203,8 +227,8 @@
         "michapc",
         "michapc-debug"
       ],
-      "gate_adapter": null,
-      "gate_status": "needs-verified-adapter",
+      "gate_adapter": "batch",
+      "gate_status": "batch-build-coverage; package-runtime-not-generically-verified",
       "review_status": "daily-pin-reason-and-candidate-review",
       "candidate_policy": "upstream-reviewed",
       "discovery_endpoints": [
@@ -217,7 +241,11 @@
       ],
       "affected_versions": [
         "af48dd68a64d58aad128fdbb920492a03da53c79"
-      ]
+      ],
+      "batch_adapter": "batch",
+      "batch_gate_status": "host-checks-and-build-required; critical-probe-when-relevant-output-changes",
+      "package_specific_checks": "Build paired handy+handy-nixpkgs candidate and existing-model synthetic offline transcription; preserve checksums.",
+      "runtime_coverage": "Host evaluation, full flake check and laptop build only. The package-specific checks are not claimed as implemented or passed by this declaration."
     },
     {
       "id": "handy-nixpkgs",
@@ -241,8 +269,8 @@
         "michapc",
         "michapc-debug"
       ],
-      "gate_adapter": null,
-      "gate_status": "needs-verified-adapter",
+      "gate_adapter": "batch",
+      "gate_status": "batch-build-coverage; package-runtime-not-generically-verified",
       "review_status": "daily-pin-reason-and-candidate-review",
       "candidate_policy": "upstream-reviewed",
       "discovery_endpoints": [
@@ -255,7 +283,11 @@
       ],
       "affected_versions": [
         "46db2e09e1d3f113a13c0d7b81e2f221c63b8ce9"
-      ]
+      ],
+      "batch_adapter": "batch",
+      "batch_gate_status": "host-checks-and-build-required; critical-probe-when-relevant-output-changes",
+      "package_specific_checks": "Update with Handy only, compare lock graph and build/transcription.",
+      "runtime_coverage": "Host evaluation, full flake check and laptop build only. The package-specific checks are not claimed as implemented or passed by this declaration."
     },
     {
       "id": "helium",
@@ -278,8 +310,8 @@
         "michapc",
         "michapc-debug"
       ],
-      "gate_adapter": null,
-      "gate_status": "needs-verified-adapter",
+      "gate_adapter": "batch",
+      "gate_status": "batch-build-coverage; package-runtime-not-generically-verified",
       "review_status": "daily-pin-reason-and-candidate-review",
       "candidate_policy": "upstream-reviewed",
       "discovery_endpoints": [
@@ -292,7 +324,11 @@
       ],
       "affected_versions": [
         "98e2d707c457106f0821166ad29e053f6ed0f872"
-      ]
+      ],
+      "batch_adapter": "batch",
+      "batch_gate_status": "host-checks-and-build-required; critical-probe-when-relevant-output-changes",
+      "package_specific_checks": "Current upstream stable packaging, browser renderer with isolated profile, profile migration.",
+      "runtime_coverage": "Host evaluation, full flake check and laptop build only. The package-specific checks are not claimed as implemented or passed by this declaration."
     },
     {
       "id": "hermes-agent",
@@ -314,8 +350,8 @@
       "affected_hosts": [
         "nixy-laptop"
       ],
-      "gate_adapter": null,
-      "gate_status": "needs-verified-adapter",
+      "gate_adapter": "batch",
+      "gate_status": "batch-build-coverage; package-runtime-not-generically-verified",
       "review_status": "unknown-hold-reason-investigate",
       "candidate_policy": "upstream-reviewed",
       "discovery_endpoints": [
@@ -329,7 +365,11 @@
       "investigation_due": "2026-10-09",
       "affected_versions": [
         "3ef6bbd201263d354fd83ec55b3c306ded2eb72a"
-      ]
+      ],
+      "batch_adapter": "batch",
+      "batch_gate_status": "host-checks-and-build-required; critical-probe-when-relevant-output-changes",
+      "package_specific_checks": "Review actual client usage, upstream release and harness compatibility; isolated desktop/state migration probes.",
+      "runtime_coverage": "Host evaluation, full flake check and laptop build only. The package-specific checks are not claimed as implemented or passed by this declaration."
     },
     {
       "id": "home-manager",
@@ -355,8 +395,8 @@
         "michapc-debug",
         "ew-cloud"
       ],
-      "gate_adapter": null,
-      "gate_status": "separate-migration-needed",
+      "gate_adapter": "batch",
+      "gate_status": "batch-build-coverage; package-runtime-not-generically-verified",
       "review_status": "daily-migration-review",
       "candidate_policy": "upstream-reviewed",
       "discovery_endpoints": [
@@ -369,7 +409,11 @@
       ],
       "affected_versions": [
         "0585fbf645640973e3398863bbaf3bd1ddce4a51"
-      ]
+      ],
+      "batch_adapter": "batch",
+      "batch_gate_status": "host-checks-and-build-required; critical-probe-when-relevant-output-changes",
+      "package_specific_checks": "Paired release compatibility and Home Manager activation with preserved mutable settings.",
+      "runtime_coverage": "Host evaluation, full flake check and laptop build only. The package-specific checks are not claimed as implemented or passed by this declaration."
     },
     {
       "id": "millennium",
@@ -394,8 +438,8 @@
         "michapc",
         "michapc-debug"
       ],
-      "gate_adapter": null,
-      "gate_status": "needs-verified-adapter",
+      "gate_adapter": "batch",
+      "gate_status": "batch-build-coverage; package-runtime-not-generically-verified",
       "review_status": "daily-pin-reason-and-candidate-review",
       "candidate_policy": "upstream-reviewed",
       "discovery_endpoints": [
@@ -408,7 +452,11 @@
       ],
       "affected_versions": [
         "8f6a93c62a8d2ed246fb61b0b354dccb2d2b396c"
-      ]
+      ],
+      "batch_adapter": "batch",
+      "batch_gate_status": "host-checks-and-build-required; critical-probe-when-relevant-output-changes",
+      "package_specific_checks": "Overlay evaluation/all consumers, build and Steam compatibility without disturbing live games.",
+      "runtime_coverage": "Host evaluation, full flake check and laptop build only. The package-specific checks are not claimed as implemented or passed by this declaration."
     },
     {
       "id": "nix-openclaw",
@@ -429,8 +477,8 @@
       "affected_hosts": [
         "ew-cloud"
       ],
-      "gate_adapter": null,
-      "gate_status": "needs-verified-adapter",
+      "gate_adapter": "batch",
+      "gate_status": "batch-build-coverage; package-runtime-not-generically-verified",
       "review_status": "daily-pin-reason-and-candidate-review",
       "candidate_policy": "upstream-reviewed",
       "discovery_endpoints": [
@@ -443,7 +491,11 @@
       ],
       "affected_versions": [
         "53aac0dce0810c40c75793fdad3d41b0f7e7baaf"
-      ]
+      ],
+      "batch_adapter": "batch",
+      "batch_gate_status": "host-checks-and-build-required; critical-probe-when-relevant-output-changes",
+      "package_specific_checks": "Separate server scope and state backup; no autonomous laptop update may silently deploy server.",
+      "runtime_coverage": "Host evaluation, full flake check and laptop build only. The package-specific checks are not claimed as implemented or passed by this declaration."
     },
     {
       "id": "nixos-anywhere",
@@ -464,8 +516,8 @@
       "affected_hosts": [
         "nixy-laptop"
       ],
-      "gate_adapter": null,
-      "gate_status": "needs-verified-adapter",
+      "gate_adapter": "batch",
+      "gate_status": "batch-build-coverage; package-runtime-not-generically-verified",
       "review_status": "daily-pin-reason-and-candidate-review",
       "candidate_policy": "upstream-reviewed",
       "discovery_endpoints": [
@@ -478,7 +530,11 @@
       ],
       "affected_versions": [
         "92f82c5196a5f8588be4967e535c4cfd35e85902"
-      ]
+      ],
+      "batch_adapter": "batch",
+      "batch_gate_status": "host-checks-and-build-required; critical-probe-when-relevant-output-changes",
+      "package_specific_checks": "Official upstream change review; dependency graph/affected hosts and relevant build.",
+      "runtime_coverage": "Host evaluation, full flake check and laptop build only. The package-specific checks are not claimed as implemented or passed by this declaration."
     },
     {
       "id": "nixos-hardware",
@@ -500,8 +556,8 @@
       "affected_hosts": [
         "nixy-laptop"
       ],
-      "gate_adapter": null,
-      "gate_status": "needs-verified-adapter",
+      "gate_adapter": "batch",
+      "gate_status": "batch-build-coverage; package-runtime-not-generically-verified",
       "review_status": "daily-pin-reason-and-candidate-review",
       "candidate_policy": "upstream-reviewed",
       "discovery_endpoints": [
@@ -514,7 +570,11 @@
       ],
       "affected_versions": [
         "eeb02f6e29fc8139c0b15af5ff0fdfdc6d0d3d90"
-      ]
+      ],
+      "batch_adapter": "batch",
+      "batch_gate_status": "host-checks-and-build-required; critical-probe-when-relevant-output-changes",
+      "package_specific_checks": "Official upstream change review; dependency graph/affected hosts and relevant build.",
+      "runtime_coverage": "Host evaluation, full flake check and laptop build only. The package-specific checks are not claimed as implemented or passed by this declaration."
     },
     {
       "id": "nixpkgs",
@@ -540,8 +600,8 @@
         "michapc-debug",
         "ew-cloud"
       ],
-      "gate_adapter": null,
-      "gate_status": "separate-migration-needed",
+      "gate_adapter": "batch",
+      "gate_status": "batch-build-coverage; package-runtime-not-generically-verified",
       "review_status": "daily-migration-review",
       "candidate_policy": "upstream-reviewed",
       "discovery_endpoints": [
@@ -554,7 +614,11 @@
       ],
       "affected_versions": [
         "26ef669cffa904b6f6832ab57b77892a37c1a671"
-      ]
+      ],
+      "batch_adapter": "batch",
+      "batch_gate_status": "host-checks-and-build-required; critical-probe-when-relevant-output-changes",
+      "package_specific_checks": "NixOS support, release notes, all affected host eval/build, initrd/kernel/NVIDIA/EVDI/network probes.",
+      "runtime_coverage": "Host evaluation, full flake check and laptop build only. The package-specific checks are not claimed as implemented or passed by this declaration."
     },
     {
       "id": "nixpkgs-unstable",
@@ -580,8 +644,8 @@
         "michapc-debug",
         "ew-cloud"
       ],
-      "gate_adapter": null,
-      "gate_status": "needs-verified-adapter",
+      "gate_adapter": "batch",
+      "gate_status": "batch-build-coverage; package-runtime-not-generically-verified",
       "review_status": "daily-pin-reason-and-candidate-review",
       "candidate_policy": "upstream-reviewed",
       "discovery_endpoints": [
@@ -594,7 +658,11 @@
       ],
       "affected_versions": [
         "64c08a7ca051951c8eae34e3e3cb1e202fe36786"
-      ]
+      ],
+      "batch_adapter": "batch",
+      "batch_gate_status": "host-checks-and-build-required; critical-probe-when-relevant-output-changes",
+      "package_specific_checks": "Diff transitive closure, affected hosts, package probes, no kernel or system release surprises.",
+      "runtime_coverage": "Host evaluation, full flake check and laptop build only. The package-specific checks are not claimed as implemented or passed by this declaration."
     },
     {
       "id": "quickshell",
@@ -612,8 +680,8 @@
       "next_review": "2026-10-09",
       "last_review": "2026-10-08",
       "affected_hosts": [],
-      "gate_adapter": null,
-      "gate_status": "needs-usage-review",
+      "gate_adapter": "batch",
+      "gate_status": "batch-build-coverage; package-runtime-not-generically-verified",
       "review_status": "daily-usage-and-replacement-review",
       "candidate_policy": "upstream-reviewed",
       "discovery_endpoints": [
@@ -625,7 +693,11 @@
       ],
       "affected_versions": [
         "8db8ca1fecfcce8def1f9265fa1742baa0e0c271"
-      ]
+      ],
+      "batch_adapter": "batch",
+      "batch_gate_status": "host-checks-and-build-required; critical-probe-when-relevant-output-changes",
+      "package_specific_checks": "Resolve input graph and actual derivation use before deciding update/removal.",
+      "runtime_coverage": "Host evaluation, full flake check and laptop build only. The package-specific checks are not claimed as implemented or passed by this declaration."
     },
     {
       "id": "serena",
@@ -647,8 +719,8 @@
       "affected_hosts": [
         "nixy-laptop"
       ],
-      "gate_adapter": null,
-      "gate_status": "needs-verified-adapter",
+      "gate_adapter": "batch",
+      "gate_status": "batch-build-coverage; package-runtime-not-generically-verified",
       "review_status": "daily-pin-reason-and-candidate-review",
       "candidate_policy": "upstream-reviewed",
       "discovery_endpoints": [
@@ -661,7 +733,11 @@
       ],
       "affected_versions": [
         "949a27ef1e5fda1a6e7b561e777bcece345c6ffd"
-      ]
+      ],
+      "batch_adapter": "batch",
+      "batch_gate_status": "host-checks-and-build-required; critical-probe-when-relevant-output-changes",
+      "package_specific_checks": "Official release source hash; ten LSP handshakes and isolated symbol lookup/references/rename/body replacement with execution.",
+      "runtime_coverage": "Host evaluation, full flake check and laptop build only. The package-specific checks are not claimed as implemented or passed by this declaration."
     },
     {
       "id": "sops-nix",
@@ -685,8 +761,8 @@
         "michapc",
         "michapc-debug"
       ],
-      "gate_adapter": null,
-      "gate_status": "needs-verified-adapter",
+      "gate_adapter": "batch",
+      "gate_status": "batch-build-coverage; package-runtime-not-generically-verified",
       "review_status": "daily-pin-reason-and-candidate-review",
       "candidate_policy": "upstream-reviewed",
       "discovery_endpoints": [
@@ -699,7 +775,11 @@
       ],
       "affected_versions": [
         "8eaee5c45428b28b8c47a83e4c09dccec5f279b5"
-      ]
+      ],
+      "batch_adapter": "batch",
+      "batch_gate_status": "host-checks-and-build-required; critical-probe-when-relevant-output-changes",
+      "package_specific_checks": "Official upstream change review; dependency graph/affected hosts and relevant build.",
+      "runtime_coverage": "Host evaluation, full flake check and laptop build only. The package-specific checks are not claimed as implemented or passed by this declaration."
     },
     {
       "id": "t3code",
@@ -719,8 +799,8 @@
       "affected_hosts": [
         "nixy-laptop"
       ],
-      "gate_adapter": null,
-      "gate_status": "needs-verified-adapter",
+      "gate_adapter": "batch",
+      "gate_status": "batch-build-and-relevant-critical-probe-required",
       "review_status": "daily-pin-reason-and-candidate-review",
       "candidate_policy": "upstream-reviewed",
       "discovery_endpoints": [],
@@ -729,7 +809,12 @@
       ],
       "affected_versions": [
         "./packages/t3code"
-      ]
+      ],
+      "batch_adapter": "batch",
+      "batch_gate_status": "host-checks-and-build-required; critical-probe-when-relevant-output-changes",
+      "package_specific_checks": "Official upstream change review; dependency graph/affected hosts and relevant build.",
+      "critical_probe": "t3",
+      "runtime_coverage": "Actual critical probe required for the exact changed output; other package-specific checks must be named in the receipt."
     },
     {
       "id": "zen-browser",
@@ -752,8 +837,8 @@
         "michapc",
         "michapc-debug"
       ],
-      "gate_adapter": null,
-      "gate_status": "needs-verified-adapter",
+      "gate_adapter": "batch",
+      "gate_status": "batch-build-coverage; package-runtime-not-generically-verified",
       "review_status": "daily-pin-reason-and-candidate-review",
       "candidate_policy": "upstream-reviewed",
       "discovery_endpoints": [
@@ -766,7 +851,11 @@
       ],
       "affected_versions": [
         "239dc504b56eabcfc1dce945e7e22ca99694be89"
-      ]
+      ],
+      "batch_adapter": "batch",
+      "batch_gate_status": "host-checks-and-build-required; critical-probe-when-relevant-output-changes",
+      "package_specific_checks": "Browser isolated profile renderer and migration gates.",
+      "runtime_coverage": "Host evaluation, full flake check and laptop build only. The package-specific checks are not claimed as implemented or passed by this declaration."
     },
     {
       "id": "t3",
@@ -787,7 +876,7 @@
         "michapc-debug"
       ],
       "gate_adapter": "t3",
-      "gate_status": "baseline-startup-and-distinct-migration-tested",
+      "gate_status": "native-startup-and-distinct-migration-tested; batch-retest-required",
       "review_status": "daily-candidate-discovery",
       "automatic_scope": "exact-source-metadata-only",
       "candidate_policy": "regular-nightly",
@@ -805,8 +894,21 @@
         "date": "2026-10-08",
         "candidate": "none-newer-at-discovery",
         "migration": "official stable 0.0.45 to installed nightly, 54 to 60 migrations; synthetic data preserved",
-        "activation": "no new T3 activation performed"
-      }
+        "activation": "Native startup and synthetic migration observed in private fixtures; this receipt does not prove system activation.",
+        "native_candidate": "/nix/store/wfp3580fjvl3nwk96ghc9dip0x552bqx-t3code-0.0.46-nightly.20261008.2833",
+        "native_receipt": "/tmp/weasel-update-gates-t3-native-20261008-s_7drs99/receipt.json",
+        "native_checks": [
+          "owned native renderer/backend",
+          "stable 0.0.45 to nightly migration 54 to 60",
+          "synthetic project/thread/message preserved; legacy source unchanged",
+          "disabled candidate schedule roundtrip; zero enabled tasks and zero runs"
+        ]
+      },
+      "batch_adapter": "batch",
+      "batch_gate_status": "host-checks-and-build-required; critical-probe-when-relevant-output-changes",
+      "package_specific_checks": "Exact official AppImage SHA256 digest and full bytes; SHA256SUMS if desktop listed, otherwise validate CLI manifest plus official Electron desktop SHA512/size; isolated T3 DB migration and GUI with Clerk requirement addressed; no downgrade.",
+      "critical_probe": "t3",
+      "runtime_coverage": "Actual critical probe required for the exact changed output; other package-specific checks must be named in the receipt."
     },
     {
       "id": "codex",
@@ -853,7 +955,12 @@
         "activation": "pending exact bootstrap",
         "source_commit": "4f8e152",
         "installed_at_seed": "0.160.0"
-      }
+      },
+      "batch_adapter": "batch",
+      "batch_gate_status": "host-checks-and-build-required; critical-probe-when-relevant-output-changes",
+      "package_specific_checks": "Official npm tarball integrity, --version, codex app-server/ACP handshake; inspect executable ownership without paid model run.",
+      "critical_probe": "codex",
+      "runtime_coverage": "Actual critical probe required for the exact changed output; other package-specific checks must be named in the receipt."
     },
     {
       "id": "chatgpt",
@@ -901,7 +1008,12 @@
         "activation": "pending exact bootstrap",
         "source_commit": "b57dd3b",
         "installed_at_seed": "26.930.31730"
-      }
+      },
+      "batch_adapter": "batch",
+      "batch_gate_status": "host-checks-and-build-required; critical-probe-when-relevant-output-changes",
+      "package_specific_checks": "Resolve official latest RPM metadata once; pin versioned RPM/hash; startup native watcher + audio integration + isolated renderer; no live app closure.",
+      "critical_probe": "chatgpt",
+      "runtime_coverage": "Actual critical probe required for the exact changed output; other package-specific checks must be named in the receipt."
     },
     {
       "id": "codex-acp",
@@ -919,8 +1031,8 @@
       "affected_hosts": [
         "nixy-laptop"
       ],
-      "gate_adapter": null,
-      "gate_status": "needs-verified-adapter",
+      "gate_adapter": "batch",
+      "gate_status": "batch-build-and-relevant-critical-probe-required",
       "review_status": "daily-pin-reason-and-candidate-review",
       "candidate_policy": "stable-release",
       "discovery_endpoints": [
@@ -932,7 +1044,12 @@
       ],
       "affected_versions": [
         "2.1.1"
-      ]
+      ],
+      "batch_adapter": "batch",
+      "batch_gate_status": "host-checks-and-build-required; critical-probe-when-relevant-output-changes",
+      "package_specific_checks": "ACP initialize/session handshake against actual CLI; preserve CODEX_PATH wrapper.",
+      "critical_probe": "codex",
+      "runtime_coverage": "Actual critical probe required for the exact changed output; other package-specific checks must be named in the receipt."
     },
     {
       "id": "tuios",
@@ -950,8 +1067,8 @@
       "affected_hosts": [
         "nixy-laptop"
       ],
-      "gate_adapter": null,
-      "gate_status": "needs-verified-adapter",
+      "gate_adapter": "batch",
+      "gate_status": "batch-build-coverage; package-runtime-not-generically-verified",
       "review_status": "daily-pin-reason-and-candidate-review",
       "candidate_policy": "stable-release",
       "discovery_endpoints": [
@@ -963,7 +1080,11 @@
       ],
       "affected_versions": [
         "0.8.5"
-      ]
+      ],
+      "batch_adapter": "batch",
+      "batch_gate_status": "host-checks-and-build-required; critical-probe-when-relevant-output-changes",
+      "package_specific_checks": "Release integrity, --version and PTY renderer/new-pane command smoke.",
+      "runtime_coverage": "Host evaluation, full flake check and laptop build only. The package-specific checks are not claimed as implemented or passed by this declaration."
     },
     {
       "id": "proton-pass-cli",
@@ -981,8 +1102,8 @@
       "affected_hosts": [
         "nixy-laptop"
       ],
-      "gate_adapter": null,
-      "gate_status": "needs-verified-adapter",
+      "gate_adapter": "batch",
+      "gate_status": "batch-build-coverage; package-runtime-not-generically-verified",
       "review_status": "daily-pin-reason-and-candidate-review",
       "candidate_policy": "stable-release",
       "discovery_endpoints": [
@@ -994,7 +1115,11 @@
       ],
       "affected_versions": [
         "2.4.2"
-      ]
+      ],
+      "batch_adapter": "batch",
+      "batch_gate_status": "host-checks-and-build-required; critical-probe-when-relevant-output-changes",
+      "package_specific_checks": "Official version/hash, version/help and Secret Service compatibility without printing credentials.",
+      "runtime_coverage": "Host evaluation, full flake check and laptop build only. The package-specific checks are not claimed as implemented or passed by this declaration."
     },
     {
       "id": "netbird-daemon",
@@ -1012,8 +1137,8 @@
       "affected_hosts": [
         "nixy-laptop"
       ],
-      "gate_adapter": null,
-      "gate_status": "needs-verified-adapter",
+      "gate_adapter": "batch",
+      "gate_status": "batch-build-coverage; package-runtime-not-generically-verified",
       "review_status": "daily-pin-reason-and-candidate-review",
       "candidate_policy": "stable-release",
       "discovery_endpoints": [
@@ -1025,7 +1150,11 @@
       ],
       "affected_versions": [
         "0.77.1"
-      ]
+      ],
+      "batch_adapter": "batch",
+      "batch_gate_status": "host-checks-and-build-required; critical-probe-when-relevant-output-changes",
+      "package_specific_checks": "Pair daemon/UI versions; preserve socket env, resolver, routing policy and peers; network/DNS/relay regression probes.",
+      "runtime_coverage": "Host evaluation, full flake check and laptop build only. The package-specific checks are not claimed as implemented or passed by this declaration."
     },
     {
       "id": "netbird-ui",
@@ -1043,8 +1172,8 @@
       "affected_hosts": [
         "nixy-laptop"
       ],
-      "gate_adapter": null,
-      "gate_status": "needs-verified-adapter",
+      "gate_adapter": "batch",
+      "gate_status": "batch-build-coverage; package-runtime-not-generically-verified",
       "review_status": "daily-pin-reason-and-candidate-review",
       "candidate_policy": "stable-release",
       "discovery_endpoints": [
@@ -1056,7 +1185,11 @@
       ],
       "affected_versions": [
         "0.77.1"
-      ]
+      ],
+      "batch_adapter": "batch",
+      "batch_gate_status": "host-checks-and-build-required; critical-probe-when-relevant-output-changes",
+      "package_specific_checks": "Daemon paired candidate; existing test-netbird-ui-integration.sh plus isolated GUI.",
+      "runtime_coverage": "Host evaluation, full flake check and laptop build only. The package-specific checks are not claimed as implemented or passed by this declaration."
     },
     {
       "id": "vesktop",
@@ -1077,8 +1210,8 @@
         "michapc",
         "michapc-debug"
       ],
-      "gate_adapter": null,
-      "gate_status": "needs-verified-adapter",
+      "gate_adapter": "batch",
+      "gate_status": "batch-build-coverage; package-runtime-not-generically-verified",
       "review_status": "daily-pin-reason-and-candidate-review",
       "candidate_policy": "stable-release",
       "discovery_endpoints": [
@@ -1090,7 +1223,11 @@
       ],
       "affected_versions": [
         "1.6.7"
-      ]
+      ],
+      "batch_adapter": "batch",
+      "batch_gate_status": "host-checks-and-build-required; critical-probe-when-relevant-output-changes",
+      "package_specific_checks": "Existing Wayland/Vencord integration checks, renderer and unsent microphone capture; verify upstream patch removal criteria.",
+      "runtime_coverage": "Host evaluation, full flake check and laptop build only. The package-specific checks are not claimed as implemented or passed by this declaration."
     },
     {
       "id": "wispr-flow",
@@ -1111,8 +1248,8 @@
       "affected_hosts": [
         "nixy-laptop"
       ],
-      "gate_adapter": null,
-      "gate_status": "needs-verified-adapter",
+      "gate_adapter": "batch",
+      "gate_status": "batch-build-coverage; package-runtime-not-generically-verified",
       "review_status": "daily-pin-reason-and-candidate-review",
       "candidate_policy": "stable-release",
       "discovery_endpoints": [
@@ -1125,7 +1262,11 @@
       "affected_versions": [
         "1.6.7-1.0.3",
         "0.1.2-release-all-keys"
-      ]
+      ],
+      "batch_adapter": "batch",
+      "batch_gate_status": "host-checks-and-build-required; critical-probe-when-relevant-output-changes",
+      "package_specific_checks": "Chromium sandbox, udev/uinput ACL, held Ctrl/Meta differential event sink and paste-cycle regression; no live microphone required.",
+      "runtime_coverage": "Host evaluation, full flake check and laptop build only. The package-specific checks are not claimed as implemented or passed by this declaration."
     },
     {
       "id": "cua-driver",
@@ -1143,8 +1284,8 @@
       "affected_hosts": [
         "nixy-laptop"
       ],
-      "gate_adapter": null,
-      "gate_status": "needs-verified-adapter",
+      "gate_adapter": "batch",
+      "gate_status": "batch-build-coverage; package-runtime-not-generically-verified",
       "review_status": "daily-pin-reason-and-candidate-review",
       "candidate_policy": "stable-release",
       "discovery_endpoints": [
@@ -1156,7 +1297,11 @@
       ],
       "affected_versions": [
         "0.23.2"
-      ]
+      ],
+      "batch_adapter": "batch",
+      "batch_gate_status": "host-checks-and-build-required; critical-probe-when-relevant-output-changes",
+      "package_specific_checks": "doctor, API/window/screen/AT-SPI smoke preserving Wayland opt-in and telemetry settings.",
+      "runtime_coverage": "Host evaluation, full flake check and laptop build only. The package-specific checks are not claimed as implemented or passed by this declaration."
     },
     {
       "id": "screenpipe",
@@ -1175,8 +1320,8 @@
       "next_review": "2026-10-09",
       "last_review": "2026-10-08",
       "affected_hosts": [],
-      "gate_adapter": null,
-      "gate_status": "needs-usage-review",
+      "gate_adapter": "batch",
+      "gate_status": "batch-build-coverage; package-runtime-not-generically-verified",
       "review_status": "daily-usage-and-replacement-review",
       "candidate_policy": "stable-release",
       "discovery_endpoints": [
@@ -1189,7 +1334,11 @@
       "affected_versions": [
         "2.2.293",
         "2.10.0"
-      ]
+      ],
+      "batch_adapter": "batch",
+      "batch_gate_status": "host-checks-and-build-required; critical-probe-when-relevant-output-changes",
+      "package_specific_checks": "Inventory output, source and vendor hashes; test only if requested/actual consumers, no recording service start.",
+      "runtime_coverage": "Host evaluation, full flake check and laptop build only. The package-specific checks are not claimed as implemented or passed by this declaration."
     },
     {
       "id": "local-helium",
@@ -1205,8 +1354,8 @@
       "next_review": "2026-10-09",
       "last_review": "2026-10-08",
       "affected_hosts": [],
-      "gate_adapter": null,
-      "gate_status": "needs-usage-review",
+      "gate_adapter": "batch",
+      "gate_status": "batch-build-coverage; package-runtime-not-generically-verified",
       "review_status": "daily-usage-and-replacement-review",
       "candidate_policy": "stable-release",
       "discovery_endpoints": [
@@ -1218,7 +1367,11 @@
       ],
       "affected_versions": [
         "0.10.6.1"
-      ]
+      ],
+      "batch_adapter": "batch",
+      "batch_gate_status": "host-checks-and-build-required; critical-probe-when-relevant-output-changes",
+      "package_specific_checks": "Usage audit before archival/removal; do not confuse with active external input.",
+      "runtime_coverage": "Host evaluation, full flake check and laptop build only. The package-specific checks are not claimed as implemented or passed by this declaration."
     },
     {
       "id": "frostycli",
@@ -1236,8 +1389,8 @@
       "next_review": "2026-10-09",
       "last_review": "2026-10-08",
       "affected_hosts": [],
-      "gate_adapter": null,
-      "gate_status": "needs-usage-review",
+      "gate_adapter": "batch",
+      "gate_status": "batch-build-coverage; package-runtime-not-generically-verified",
       "review_status": "daily-usage-and-replacement-review",
       "candidate_policy": "stable-release",
       "discovery_endpoints": [
@@ -1249,7 +1402,11 @@
       ],
       "affected_versions": [
         "c32856d45d7438379f295ffba46b2bd3c39abc5d"
-      ]
+      ],
+      "batch_adapter": "batch",
+      "batch_gate_status": "host-checks-and-build-required; critical-probe-when-relevant-output-changes",
+      "package_specific_checks": "Usage audit and replacement/archive decision; no silent obsolete package freeze.",
+      "runtime_coverage": "Host evaluation, full flake check and laptop build only. The package-specific checks are not claimed as implemented or passed by this declaration."
     },
     {
       "id": "kernel-evdi",
@@ -1268,8 +1425,8 @@
         "michapc",
         "michapc-debug"
       ],
-      "gate_adapter": null,
-      "gate_status": "separate-migration-needed",
+      "gate_adapter": "batch",
+      "gate_status": "batch-build-coverage; package-runtime-not-generically-verified",
       "review_status": "daily-migration-review",
       "candidate_policy": "upstream-reviewed",
       "discovery_endpoints": [],
@@ -1279,7 +1436,11 @@
       ],
       "affected_versions": [
         "linuxPackages_6_18"
-      ]
+      ],
+      "batch_adapter": "batch",
+      "batch_gate_status": "host-checks-and-build-required; critical-probe-when-relevant-output-changes",
+      "package_specific_checks": "Candidate kernel+EVDI+NVIDIA full build; DisplayLink screens/hotplug/suspend acceptance.",
+      "runtime_coverage": "Host evaluation, full flake check and laptop build only. The package-specific checks are not claimed as implemented or passed by this declaration."
     },
     {
       "id": "netbird-ebpf-flag",
@@ -1295,8 +1456,8 @@
       "affected_hosts": [
         "nixy-laptop"
       ],
-      "gate_adapter": null,
-      "gate_status": "needs-verified-adapter",
+      "gate_adapter": "batch",
+      "gate_status": "batch-build-coverage; package-runtime-not-generically-verified",
       "review_status": "daily-pin-reason-and-candidate-review",
       "candidate_policy": "upstream-reviewed",
       "discovery_endpoints": [],
@@ -1306,7 +1467,11 @@
       ],
       "affected_versions": [
         "NB_DISABLE_EBPF_WG_PROXY=true"
-      ]
+      ],
+      "batch_adapter": "batch",
+      "batch_gate_status": "host-checks-and-build-required; critical-probe-when-relevant-output-changes",
+      "package_specific_checks": "Prove exact candidate kernel contains page_pool fix and exercise overlay DNS/peers/relay; retain flag until verified.",
+      "runtime_coverage": "Host evaluation, full flake check and laptop build only. The package-specific checks are not claimed as implemented or passed by this declaration."
     },
     {
       "id": "azuredatastudio",
@@ -1323,8 +1488,8 @@
         "michapc",
         "michapc-debug"
       ],
-      "gate_adapter": null,
-      "gate_status": "separate-migration-needed",
+      "gate_adapter": "batch",
+      "gate_status": "batch-build-coverage; package-runtime-not-generically-verified",
       "review_status": "daily-migration-review",
       "candidate_policy": "upstream-reviewed",
       "discovery_endpoints": [],
@@ -1334,14 +1499,49 @@
       ],
       "affected_versions": [
         "local source"
-      ]
+      ],
+      "batch_adapter": "batch",
+      "batch_gate_status": "host-checks-and-build-required; critical-probe-when-relevant-output-changes",
+      "package_specific_checks": "Audit database use/extensions and preserve connection/settings artifacts before replacement; migration outside routine version bump.",
+      "runtime_coverage": "Host evaluation, full flake check and laptop build only. The package-specific checks are not claimed as implemented or passed by this declaration."
     }
   ],
   "review_rules": [
-    "Review every root and transitive flake.lock input and every custom source pin daily. Re-read actual source; inventory dates are not installed version evidence.",
-    "Every hold needs concrete reason, upstream evidence URL, affected versions, next review date and a candidate/check or bounded investigation. Missing adapter is an implementation task, not a permanent version hold.",
-    "Package gates are declarations of required checks. Historical tests never prove a newly built candidate.",
-    "All 70 locked nodes observed at seed date remain discoverable dynamically from current flake.lock; new inputs/pins must be added to the review.",
-    "Initial clean baseline2ad5d18 reproduced active generation223. Full flake check passed during setup; do not reuse the historical ew-cloud Fontconfig blocker without reproducing it. Current HEAD, declared pins and active versions must be freshly read."
-  ]
+    "Review every root and transitive flake.lock input and every configured custom source pin daily. Re-read actual source; inventory dates are not installed version evidence.",
+    "Every hold needs concrete reason, upstream evidence URL, affected versions, next review date and a candidate/check or bounded investigation. Missing package-specific runtime coverage is explicit; it is not a blanket ban on batch source updates.",
+    "Configured-channel batches support reviewed updates and compatibility repairs in existing allowed tracked Nix files. Protected updater/auth/SSH definitions, file additions/deletions/modes and stateVersion edits remain excluded.",
+    "Every batch needs four client host evaluations, full flake checking and full laptop build. Changed T3/Codex-ACP/ChatGPT outputs require their real critical probes; other app runtime behavior is unverified unless actually checked.",
+    "All 70 locked nodes observed at seed date remain discoverable dynamically from current flake.lock; all 37 seeded entries remain reviewed and new inputs/pins join the private schema-version-1 review.",
+    "Initial clean baseline2ad5d18 reproduced active generation223. Full flake check passed during setup; do not reuse the historical ew-cloud Fontconfig blocker without reproducing it. Current HEAD, declared pins and active versions must be freshly read.",
+    "The typed NixOS 25.11 to 26.05 migration updates the matching Home Manager release in the same reviewed batch, preserves stateVersion and needs explicit compatibility evidence. Runtime or migration failures are repaired and rechecked before activation."
+  ],
+  "batch_policy": {
+    "submission_schema_version": 2,
+    "daily_review_schema_version": 1,
+    "review_inventory": "All actual root and transitive lock nodes and configured custom pins; the 37 seeded entries and 70 observed locked nodes are starting inventory, not a limit.",
+    "configured_channels": "Refresh each existing input within its declared owner, repository and channel. Exact revision pins need a documented reason and reviewed replacement. Release-family changes require the typed paired migration.",
+    "source_repairs": "Reviewed repairs may change existing tracked Nix files within the declared directories. New files, deleted files and file-mode changes are rejected by automatic submission.",
+    "protected_sources": [
+      "Updater implementation, module and command rules",
+      "Credential, authentication and SSH definitions",
+      "All system.stateVersion and home.stateVersion values",
+      "Metadata registry; daily findings remain private review receipts"
+    ],
+    "required_checks": [
+      "Evaluate nixy-laptop, nixy-desktop, michapc and michapc-debug with --no-write-lock-file",
+      "Complete full flake check without lock mutation",
+      "Build the full candidate nixy-laptop system",
+      "Run independently verified T3, Codex/ACP and ChatGPT probes whenever their relevant outputs change",
+      "Preserve source/index originals and obtain a read-only Home snapshot before exact candidate activation"
+    ],
+    "critical_probes": {
+      "t3": "Owned renderer/backend and distinct synthetic database migration; no user-profile copy or scheduled/model execution",
+      "codex": "CLI version, app-server initialize and candidate-bound ACP initialize; no paid model request",
+      "chatgpt": "Owned hydrated renderer, native watcher event and required audio-library packaging"
+    },
+    "runtime_limits": "Full host evaluation, flake checking and a laptop build do not prove every application, hardware path or state migration works. Apps outside the three critical probes have build coverage only unless an actual package-specific check is recorded. Unresolved relevant failures require a concrete repair and rerun, or an explicit evidence-backed hold.",
+    "host_activation_scope": "Only nixy-laptop is automatically activated. Other host evaluations and full-flake checks do not deploy or runtime-test remote servers or other desktops.",
+    "release_migration": "NixOS 25.11 to 26.05 and matching Home Manager are one typed reviewed pair. Preserve stateVersion; review kernel/EVDI/NVIDIA/initrd/network and mutable /var compatibility explicitly.",
+    "evidence_scope": "Registry gate descriptions are requirements and coverage declarations. Only fresh candidate receipts prove a test; historical receipts do not establish a later batch or an activation."
+  }
 }

@@ -358,7 +358,10 @@ def prune_candidates(repo, state, *, keep=3):
         resolved.append(directory)
     for directory in sorted(resolved, reverse=True)[keep:]:
         record = read_json(directory / 'candidate.json')
-        known = {'source', 'candidate.json', 'old-app', 'new-app', 'tested-system', 'tested-acp', 'probe'}
+        known = {'source', 'candidate.json', 'old-app', 'new-app', 'tested-system', 'tested-acp', 'old-acp', 'probe', 'probes'}
+        known |= {'old-' + kind for kind in ('t3', 'codex', 'chatgpt')}
+        known |= {'new-' + kind for kind in ('t3', 'codex', 'chatgpt')}
+        known |= {'probe-' + kind for kind in ('t3', 'codex', 'chatgpt')}
         if any(child.name not in known for child in directory.iterdir()) or open_candidate_file(directory):
             continue
         source = directory / 'source'
@@ -483,6 +486,169 @@ def prepare(repo, state, lane, metadata):
         raise
 
 
+def new_batch(repo, state, mode):
+    batch = peer('batch')
+    if mode not in batch.MODES:
+        raise Blocked('Unknown batch mode')
+    require_resolved()
+    require_power()
+    require_space([repo, state, Path('/nix/store')])
+    manifest, system = baseline(repo)
+    git(repo, 'verify-commit', manifest['head'])
+    identifier = candidate_id()
+    directory = candidate_directory(state, identifier)
+    directory.mkdir(mode=0o700, parents=True)
+    source = directory / 'source'
+    record = {'schema': 2, 'mode': mode, 'id': identifier, 'phase': 'staging',
+              'baseline_commit': manifest['head'], 'baseline_system': str(system),
+              'candidate_ref': 'refs/heads/weasel-update-' + identifier,
+              'source': str(source), 'manifest': manifest}
+    atomic_write(directory / 'candidate.json', encoded(record))
+    try:
+        git(repo, 'worktree', 'add', '-b', record['candidate_ref'].removeprefix('refs/heads/'), source, manifest['head'])
+        # Git checks out respecting this helper's private umask. Preserve the
+        # original physical modes inside the still-private candidate parent.
+        for name, entry in manifest['files'].items():
+            if 'mode' in entry:
+                (source / name).chmod(entry['mode'])
+        if source_manifest(repo) != manifest:
+            raise Blocked('Baseline changed while staging; candidate retained')
+        return record
+    except Exception as error:
+        record.update(phase='failed', error=str(error))
+        atomic_write(directory / 'candidate.json', encoded(record))
+        raise
+
+
+def batch_source_changes(source, record):
+    """Read exact working bytes; refuse new/deleted/symlink or hidden mode edits."""
+    current = source_manifest(source)
+    before = record['manifest']
+    if current['head'] != before['head'] or current['files'].keys() != before['files'].keys():
+        raise Blocked('Batch must remain on its original baseline with the same tracked file set')
+    if git(source, 'ls-files', '--others', '--exclude-standard').strip():
+        raise Blocked('Batch contains untracked files; retain them outside the candidate before preparing')
+    if git(source, 'ls-files', '--others', '--ignored', '--exclude-standard').strip():
+        raise Blocked('Batch contains ignored personal/artifact files; preserve them outside the source')
+    if any(row[:1] != b'H' for row in git(source, 'ls-files', '-v', '-z').split(b'\0') if row):
+        raise Blocked('Batch index hides files with assume-unchanged or sparse flags')
+    changes = {}
+    for name, value in current['files'].items():
+        old = before['files'][name]
+        if value == old:
+            continue
+        if 'link' in value or 'link' in old or value.get('mode') != old.get('mode'):
+            raise Blocked('Batch changes a symlink or source file mode')
+        changes[name] = (git(source, 'show', before['head'] + ':' + name), (source / name).read_bytes())
+    return changes
+
+
+def prepare_batch(repo, state, source, mode):
+    batch, gates = peer('batch'), peer('gates')
+    source = Path(source).absolute()
+    # Use the original spelling and anchored traversal; resolving first would
+    # hide an alias into an unrelated worktree or replace a parent beneath us.
+    identifier = source.parent.name
+    directory = candidate_directory(state, identifier)
+    if source != directory / 'source':
+        raise Blocked('Batch source must be the helper-created private candidate worktree')
+    fd = directory_fd(source)
+    os.close(fd)
+    record = read_json(directory / 'candidate.json')
+    if (record.get('schema') != 2 or record.get('mode') != mode or record.get('id') != identifier
+            or record.get('source') != str(source) or record.get('phase') not in {'staging', 'failed'}):
+        raise Blocked('Batch does not match its helper-owned staging record')
+    if git(source, 'symbolic-ref', '-q', 'HEAD').decode().strip() != record['candidate_ref']:
+        raise Blocked('Batch branch changed')
+    require_resolved()
+    require_power()
+    require_space([repo, state, Path('/nix/store')])
+    manifest, old_system = baseline(repo)
+    if manifest != record['manifest'] or str(old_system) != record['baseline_system']:
+        raise Blocked('Main/active baseline changed; keep the batch and create a new one')
+    try:
+        changes = batch_source_changes(source, record)
+        old_log = git(source, 'show', record['baseline_commit'] + ':agent-learnings.md')
+        actual_log = (source / 'agent-learnings.md').read_bytes()
+        previous = record.get('helper_learning', '').encode()
+        if actual_log not in {old_log, old_log + previous}:
+            raise Blocked('Batch learning was edited outside the helper')
+        changes.pop('agent-learnings.md', None)
+        learning = batch.learning_suffix(identifier, mode, changes)
+        changes['agent-learnings.md'] = (old_log, old_log + learning)
+        policy = batch.validate_changes(changes, mode, identifier)
+        published = batch.verify_published(repo, source)
+        atomic_write(source / 'agent-learnings.md', old_log + learning)
+        (source / 'agent-learnings.md').chmod(manifest['files']['agent-learnings.md']['mode'])
+        record.update(phase='building', policy=policy, helper_learning=learning.decode())
+        atomic_write(directory / 'candidate.json', encoded(record))
+        tested_manifest = source_manifest(source)
+        for name in changes:
+            if name.endswith('.nix'):
+                command(['nix-instantiate', '--parse', source / name])
+        derivations = {}
+        for host in batch.HOSTS:
+            attribute = f'nixosConfigurations.{host}.config.system.build.toplevel.drvPath'
+            derivations[host] = command(['nix', 'eval', '--raw', '--no-write-lock-file', f'{source}#{attribute}']).decode().strip()
+        sensitive = batch.verify_sensitive_state(repo, source, lambda expr: command(
+            ['nix', 'eval', '--raw', '--impure', '--no-write-lock-file', '--expr', expr]), mode=mode)
+        lock_before = (source / 'flake.lock').read_bytes()
+        command(['nix', 'flake', 'check', '--no-write-lock-file', '--max-jobs', '1', '--cores', '2', str(source)], timeout=10800)
+        if (source / 'flake.lock').read_bytes() != lock_before:
+            raise Blocked('Flake checks changed the staged lock')
+        new_system = build(source, directory / 'tested-system', [f'{source}#{TOPLEVEL}'])
+        niri = json.loads(command([sys.executable, Path(__file__).with_name('weasel-update-niri.py'),
+                                  '--source', source, '--run-dir', directory / 'probes' / ('niri-' + uuid.uuid4().hex)], timeout=300))
+        if niri.get('ok') is not True:
+            raise Blocked('Built Niri configuration validation failed')
+        app_pairs, probes = {}, {}
+        probe_root = directory / 'probes' / uuid.uuid4().hex
+        probe_root.mkdir(mode=0o700, parents=True)
+        old_acp = build(repo, directory / 'old-acp', acp_args(repo))
+        new_acp = build(source, directory / 'tested-acp', acp_args(source))
+        app_pairs['codex-acp'] = {'old': str(old_acp), 'new': str(new_acp)}
+        for kind in ('t3', 'codex', 'chatgpt'):
+            old_app = build(repo, directory / ('old-' + kind), app_args(repo, kind))
+            new_app = build(source, directory / ('new-' + kind), app_args(source, kind))
+            app_pairs[kind] = {'old': str(old_app), 'new': str(new_app)}
+            if old_app == new_app and (kind != 'codex' or old_acp == new_acp):
+                probes[kind] = {'changed': False, 'probed': False, 'reason': 'exact immutable app/adapter unchanged'}
+                continue
+            kwargs = {'old_app': old_app} if kind == 't3' else {'acp_app': new_acp} if kind == 'codex' else {}
+            result = gates.probe(kind, new_app, probe_root / kind, **kwargs)
+            if result.get('ok') is not True:
+                raise Blocked('Critical application probe failed: ' + kind)
+            probes[kind] = {'changed': True, 'probed': True, 'receipt': result}
+        closure = batch.verify_closure(old_system, new_system, app_pairs, changes)
+        units = batch.verify_runtime_units(old_system, new_system)
+        if (source_manifest(source) != tested_manifest or source_manifest(repo) != manifest
+                or CURRENT.resolve() != old_system or PROFILE.resolve() != old_system):
+            raise Blocked('Source/editor/index/system changed while testing; candidate retained')
+        require_power()
+        require_space([repo, state, Path('/nix/store')], reserve=50)
+        git(source, 'add', '--', *sorted(changes))
+        git(source, 'commit', '-S', '-m', 'update: verify ' + mode + ' ' + identifier)
+        git(source, 'verify-commit', 'HEAD')
+        commit = git(source, 'rev-parse', 'HEAD').decode().strip()
+        if (source_manifest(source)['files'] != tested_manifest['files']
+                or git(source, 'status', '--porcelain=v1').strip()
+                or git(source, 'rev-list', '--parents', '-n', '1', commit).decode().split() != [commit, record['baseline_commit']]):
+            raise Blocked('Commit hook/editor changed tested batch or its parent; candidate retained')
+        if not candidate_source_unchanged(source, {'candidate_commit': commit}):
+            raise Blocked('Signed Git blobs differ from tested working bytes; candidate retained')
+        record.update(phase='tested', candidate_commit=commit, tested_system=str(new_system),
+                      host_derivations=derivations, app_tests=probes, closure=closure, runtime_units=units, sensitive_policy=sensitive,
+                      niri=niri,
+                      published=published,
+                      candidate_manifest=source_manifest(source))
+        atomic_write(directory / 'candidate.json', encoded(record))
+        return record
+    except Exception as error:
+        record.update(phase='failed', error=str(error))
+        atomic_write(directory / 'candidate.json', encoded(record))
+        raise
+
+
 def submit(repo, state, identifier, *, inbox=INBOX):
     require_resolved()
     directory = candidate_directory(state, identifier)
@@ -497,7 +663,9 @@ def submit(repo, state, identifier, *, inbox=INBOX):
     git(repo, 'verify-commit', record['candidate_commit'])
     request = {name: record[name] for name in ('id', 'baseline_commit', 'baseline_system',
                                              'candidate_commit', 'candidate_ref')}
-    request['schema'] = 1
+    request['schema'] = record.get('schema', 1)
+    if request['schema'] == 2:
+        request['mode'] = record['mode']
     if not inbox.parent.is_dir() or inbox.parent.is_symlink():
         raise Blocked('Activation inbox is not installed; perform verified bootstrap first')
     # A complete single-link inode avoids partial-file/inbox observation races.
@@ -649,9 +817,12 @@ def main(argv=None):
     action.add_argument('--record-review', type=Path)
     action.add_argument('--discover', choices=['t3', 'codex', 'chatgpt'])
     action.add_argument('--prepare', choices=['t3', 'codex', 'chatgpt'])
+    action.add_argument('--new-batch', action='store_true')
+    action.add_argument('--prepare-batch', type=Path)
     action.add_argument('--submit')
     action.add_argument('--status', action='store_true')
     parser.add_argument('--metadata', type=Path)
+    parser.add_argument('--mode', choices=['batch', 'release-migration'], default='batch')
     parser.add_argument('--repository', type=Path, default=REPOSITORY)
     parser.add_argument('--state', type=Path, default=STATE)
     parser.add_argument('--output', type=Path)
@@ -688,6 +859,10 @@ def main(argv=None):
             if not args.metadata:
                 raise Blocked('--prepare needs --metadata from bounded discovery')
             result = prepare(args.repository, args.state, args.prepare, args.metadata)
+        elif args.new_batch:
+            result = new_batch(args.repository, args.state, args.mode)
+        elif args.prepare_batch:
+            result = prepare_batch(args.repository, args.state, args.prepare_batch, args.mode)
         else:
             result = submit(args.repository, args.state, check_id(args.submit))
     if args.output:
