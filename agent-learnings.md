@@ -901,3 +901,10 @@ Append-only log of implementation lessons for future agents working in this repo
 - Change: Prepare codex 0.160.0 -> 0.162.0 with exact official source metadata.
 - Verification: Candidate package and laptop builds plus required isolated functional gates passed; preserve their receipts.
 - Activation: Pending independent submit verification; authoritative result is in /var/lib/weasel-updates/runs/20261008T201955Z-eaff4a88/journal.json.
+
+
+### 2026-10-08 (daily update candidate 20261008T203502Z-308348dd)
+
+- Change: Prepare chatgpt 26.930.31730 -> 26.1002.52244 with exact official source metadata.
+- Verification: Candidate package and laptop builds plus required isolated functional gates passed; preserve their receipts.
+- Activation: Pending independent submit verification; authoritative result is in /var/lib/weasel-updates/runs/20261008T203502Z-308348dd/journal.json.
