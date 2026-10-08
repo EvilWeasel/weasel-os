@@ -181,7 +181,7 @@ def install(runner, receipt, expected, run, receipt_path, *, repository=a.REPOSI
         a.write_status("installed", identifier, "complete", system=receipt["new_system"], snapshot=number,
                        note="Root activation path verified; daily T3 schedule remains separately controlled")
         return {"schema": 1, "ok": True, "system": receipt["new_system"], "snapshot": number,
-                "root_activation_observed": True, "scheduler_enabled": False}
+                "root_activation_observed": True, "scheduler_state": "managed-separately-by-T3"}
     except Exception as exc:
         if attempted:
             journal("rolling-back-system", error=type(exc).__name__)
