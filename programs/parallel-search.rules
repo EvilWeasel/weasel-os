@@ -1,0 +1,25 @@
+# Parallel Search and Extract use the existing private OAuth store.
+# Permit only these provider read operations; no login, billing, monitors,
+# research jobs, skill installation, or arbitrary CLI subcommands are included.
+# Search/Extract may write their requested local JSON output path.
+prefix_rule(
+    pattern = [
+        ["parallel-cli", "/home/evilweasel/.npm-global/bin/parallel-cli"],
+        ["search", "extract"],
+    ],
+    decision = "allow",
+    justification = "Use the existing Parallel OAuth setup for authorized web search and page extraction when sandbox networking is unavailable.",
+    match = [
+        "parallel-cli search example --max-results 1 --json -o /tmp/parallel-example.json",
+        "parallel-cli extract https://docs.parallel.ai/search-api --json -o /tmp/parallel-extract.json",
+        "/home/evilweasel/.npm-global/bin/parallel-cli search example --max-results 1",
+    ],
+    not_match = [
+        "parallel-cli balance add 1000",
+        "parallel-cli login --json",
+        "parallel-cli research run example",
+        "parallel-cli monitor create example",
+        "parallel-cli skills install",
+        "parallel-cli search-malicious example",
+    ],
+)

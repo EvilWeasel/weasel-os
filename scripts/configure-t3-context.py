@@ -46,6 +46,21 @@ remains paused unless the user explicitly reopens it. Before work there, read
 its `AGENTS.md`, top `HANDOFF.md`, and `docs/handoff-2026-09-27-paused.md`; do not
 start its game, workers, model calls, or deploy helpers merely because the
 project is available in a new client.
+
+For web research, prefer a callable Parallel MCP tool; otherwise use the
+existing OAuth-authenticated `parallel-cli` through its relevant skill. If
+Search or Extract fails with `APIConnectionError` in a restricted session,
+check auth metadata without printing credentials, then retry the same bounded
+read operation with network access (`sandbox_permissions = "require_escalated"`
+and the exact `parallel-cli search` or `parallel-cli extract` prefix). Validate
+the saved JSON receipt. Preserve working OAuth; do not copy API keys, loosen
+global sandboxing, add credits, or create monitors automatically.
+
+For imported document, PDF, presentation and spreadsheet skills, preserve the
+bundled interpreter and renderer required by the skill. On NixOS, invoke local
+artifact commands through `codex-artifact-run` so the bundled LibreOffice finds
+its required lcms2 and OpenSSL-versioned curl libraries. Do not substitute a
+system renderer silently or modify the imported plugin cache.
 {END}"""
 
 

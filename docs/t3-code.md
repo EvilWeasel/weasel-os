@@ -16,9 +16,10 @@ nicht fort. Der Factorio Companion bleibt pausiert.
 
 ## Deklarative Version und spätere Updates
 
-Die genaue stabile T3-Paketquelle steht in `packages/t3code/source.json` mit
-Version, versionierter URL und SHA-256. Der Launcher deaktiviert den eingebauten
-App-Updater. Neue Versionen sollen weiterhin über geprüfte deklarative
+Die genaue T3-Paketquelle steht in `packages/t3code/source.json` mit
+Version, versionierter URL und SHA-256. Seit dem Update vom 8. Oktober 2026
+wird der reguläre Nightly-Kanal verwendet; Maintainer-Preview-Testbuilds werden
+nicht installiert. Der Launcher deaktiviert den eingebauten App-Updater. Neue Versionen sollen weiterhin über geprüfte deklarative
 Kandidaten installiert werden.
 
 Der nächste Auftrag ist in [t3-update-handoff.md](t3-update-handoff.md)
@@ -60,3 +61,16 @@ Stitch und Supabase meldeten beim lesenden Inventar `not_logged_in`.
 `cua_repl` war deaktiviert; `node_repl` verwendet noch ChatGPT-App-Ressourcen.
 Der Migrationsbeleg liegt privat unter
 `/home/evilweasel/.local/state/weasel-os/t3-migration-20261008.json`.
+
+## Parallel Search in T3
+
+Die vorhandene Parallel-CLI und OAuth-Anmeldung funktionieren. Eine restriktive
+T3-/Codex-Netzwerksandbox kann trotzdem `APIConnectionError` verursachen. Der
+gemeinsame Kontext beschreibt deshalb den gezielten erneuten Search-/Extract-
+Aufruf mit Netzwerkfreigabe und Prüfung des gespeicherten JSON-Ergebnisses.
+Home Manager ergänzt dafür die separate Regel
+`.codex/rules/parallel-search.rules`; vorhandene Regeln bleiben erhalten.
+Die Freigabe gilt ausschließlich für Search und Extract. Sie schließt Login,
+Guthabenänderungen, Monitors und Research-Aufträge nicht ein. Regeln werden
+beim Start einer Codex-Sitzung geladen; eine bereits laufende restriktive
+Sitzung kann weiterhin eine explizite Tool-Eskalation benötigen.
