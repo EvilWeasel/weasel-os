@@ -7,9 +7,13 @@
 let
   cuaDriver = pkgs.callPackage ../packages/cua-driver-bin.nix { };
   computerUse = pkgs.callPackage ../packages/computer-use { cua-driver = cuaDriver; };
+  indicator = pkgs.callPackage ../packages/computer-use-indicator { };
 in
 {
-  home.packages = [ computerUse ];
+  home.packages = [
+    computerUse
+    indicator
+  ];
   home.file.".codex/skills/niri-computer-use".source = ../skills/niri-computer-use;
   # This key works independently of a busy or disconnected client.
   xdg.configFile."niri/config.kdl".text = lib.mkAfter ''

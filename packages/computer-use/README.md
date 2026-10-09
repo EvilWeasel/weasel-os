@@ -1,11 +1,40 @@
 # Niri computer use
 
 A persistent Rust desktop actor and stdio MCP bridge for the actual Wayland session.
+
+The cooperative desktop policy reserves physical Esc for explicit abort.
+Ordinary local keyboard/mouse activity advances an input generation without
+latching takeover. Old observations/semantic handles become stale; a collision
+with an executing batch stops that batch and releases owned inputs. The result
+reports completed and possibly partial effects. The planner then reads fresh
+state and continues the remaining work without automatically replaying edits
+or submissions. Physical Esc, explicit takeover and client cancellation still
+stop pending input. Shared desktop focus and physical input have an unavoidable
+race; fresh state and release are required after a collision.
+Authoritative bounded evdev key snapshots retain only the aggregate number of
+held physical controls. Held modifiers/buttons or unknown input state temporarily
+refuse dispatch, without latching takeover; release and fresh observation allow
+continuation. Raw key bitmasks are discarded immediately.
 The laptop Home Manager module installs the package, graphical-session service,
 additive Codex MCP entry and the `niri-computer-use` skill. T3 and ordinary Codex
 share the existing Codex home and the same single physical writer. Existing
 clients need their supported MCP reconnect or a fresh agent session after config
 changes. Source and service installation alone are not live acceptance.
+
+T3 desktop execution defaults to one delegated GPT-6-luna Codex worker with
+medium reasoning; the parent conversation can retain its selected model.
+The worker receives the full task and is the sole input owner. Optional
+`desktop_decide` uses the separately budgeted Decisions endpoint for bounded
+predicate/choice checks, rather than free action planning. Deterministic
+readback should avoid unnecessary paid model checks.
+
+A separate small GTK3/layer-shell indicator marks the selected output with a
+blue rim and `Computer Use · Esc zum Abbrechen`. It is click-through and never
+takes keyboard focus. The owned workflow helper spans model-thinking gaps,
+binds the actor session/epoch, and closes on end, disconnect, explicit abort or
+lease expiry. The renderer is C and the lifecycle helper is Python; capture,
+input, freshness and cancellation remain in Rust. This is an explicit workflow
+lifetime, not a claim that a per-action active flag covers an entire task.
 
 The managed `mcp_servers.weasel_desktop` entry uses
 `default_tools_approval_mode = "approve"` for the explicitly authorized desktop
@@ -119,8 +148,9 @@ Capture failure invalidates old observations/semantic handles until a successful
 fresh capture. Hotplug/global removal refreshes capabilities and refuses stale
 connections. One lifetime flock spans socket paths; a second daemon cannot own
 physical input. Normal-client disconnect/cancel applies only to its own request;
-explicit cancel/takeover stops the shared pending queue. Physical evdev activity
-latches takeover when available, without retaining event contents. Controlled
+explicit cancel/takeover stops the shared pending queue. Physical evdev Esc
+press latches takeover; other activity advances observation generation without
+retaining event contents or permanently stopping the task. Controlled
 input simulation is not a claim of real human takeover.
 
 ## Start, stop and handover
@@ -132,7 +162,9 @@ weasel-computer-use call desktop_cancel '{}'
 weasel-computer-use call desktop_takeover '{}'
 ```
 
-**Ctrl+Alt+Escape** independently requests takeover through Niri. Check confirmed
+Physical **Esc** requests abort; **Ctrl+Alt+Escape** also requests takeover
+through Niri. Synthetic agent Escape for dialogs does not trigger physical
+abort. Check confirmed
 input release; completed effects persist. Resume only when the user returns
 control, then obtain a fresh observation. Repair only this owned backend; do not
 restart T3, the compositor or foreign clients as chaos tests.

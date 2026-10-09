@@ -7,6 +7,35 @@ Use the `weasel_desktop` MCP tools for the real desktop. The daemon is shared
 by T3 and ordinary Codex sessions and serializes physical input. Prefer T3's
 preview tools for work explicitly targeting its managed preview browser.
 
+For T3 desktop execution, use an app-owned Codex child with model
+`gpt-6-luna` and medium reasoning by default. The planning/conversation model
+may remain unchanged. Discover the live provider/model catalog first; send the
+complete current task, target output, allowed files and success criteria to
+one child, without assuming it inherits this conversation. Retain its task ID.
+Only that worker owns desktop input until it finishes or confirms release.
+The parent may read status and report progress, but must not send competing
+input. Use the existing Codex authentication; do not extract OAuth tokens.
+Outside T3, use a supported Luna delegation path when available; explicitly
+report if the current client cannot provide the requested model separation.
+
+For the full workflow, keep the selected output visibly marked with the
+click-through blue indicator. Start `weasel-computer-use-indicator run
+--task-id ID --output OUTPUT --stdin-control` in the executing worker's owned
+foreground `exec_command` session with `tty=true`; retain the session ID and
+keep it alive across model-thinking gaps. End with `v1 end\n` through that
+session or the exact task helper's `end` command. End the exact
+task helper on completion or abort. Its monitor/epoch binding and bounded
+lease must hide it after disconnect/stop, without taking keyboard focus.
+Do not launch it as an unrelated permanent daemon or mark the user's other
+monitor. The indicator is lifecycle maintenance; desktop input still uses MCP.
+
+Optional `weasel_decisions.desktop_decide` supplies fast predicate/choice
+evidence using `gpt-6-luna`, separately from free action planning. Use a fresh
+bounded task-relevant crop or text, explicit safe candidates and the existing
+budget ledger. Its probability/choice never authorizes input or replaces fresh
+verification. Do not call it when deterministic readback already answers the
+question, and do not replay a paid request after an uncertain response.
+
 The owned `weasel_desktop` MCP entry preapproves this desktop transport. Tool
 annotations describe effects; they do not expand the user's task authorization.
 After a managed configuration change, prove the connection in a fresh ordinary
@@ -20,8 +49,11 @@ request authorizing desktop work permits an explicit `desktop_resume` once the
 actor is released and its input monitor is ready and quiet. Do not request a
 second generic permission for that already authorized work. A physical or
 explicit takeover waits for the user to return control; a backend restart does
-not grant that return. Never automatically clear `physical_input_activity` or
-`explicit_desktop_takeover`. Controlled evdev simulation is test evidence only.
+not grant that return. Never automatically clear `physical_escape` or
+`explicit_desktop_takeover`. Older `physical_input_activity` markers remain
+preserved across upgrade and need one current user-authorized explicit resume;
+ordinary input under the new policy does not create them. Controlled evdev
+simulation is test evidence only.
 A resume refusal requires bounded status checks or capability repair, and a
 successful resume always requires a fresh observation before input.
 
@@ -99,10 +131,22 @@ it clears old captures/handles, so obtain a new observation. It does not return
 control after a human takeover. Continued failure requires inspection and a
 deliberate reconnect of only this owned backend with the latch preserved.
 
-Physical input latches takeover when its evdev monitor is available. After a
-takeover, stop and wait for the user to request continuation. Only then call
-`desktop_resume` and obtain a new observation. The emergency key is
-**Ctrl+Alt+Escape**. Normal T3/Codex tool cancellation is forwarded to the actor;
+The cooperative input policy reserves physical **Esc** for explicit desktop
+abort. Ordinary local keyboard/mouse activity does not latch takeover: it
+invalidates stale observations and may interrupt a colliding action batch.
+For `input_conflict`, inspect completed/possible effects, confirm release,
+wait until `held_state_known=true` and `held_controls=0`, obtain a fresh
+observation and continue the remaining task after input is quiet. Held physical
+modifiers/buttons refuse input temporarily; releasing them permits fresh
+continuation without `desktop_resume`.
+Never replay an uncertain edit, copy, move or submission without checking its
+actual state. Keep recovery bounded and report sustained contention instead of
+fighting for focus. Physical Esc or an explicit takeover stops the task and
+requires the user to request continuation before resume. Synthetic agent Esc
+for dialogs does not count as physical abort. Backend startup/legacy takeover
+markers remain explicit and require the current user-authorized resume.
+The independent emergency chord **Ctrl+Alt+Escape** remains available.
+Normal T3/Codex tool cancellation is forwarded to the actor;
 this requires the installed scoped-cancel Codex build in the actual client
 process. A local Stop acknowledgement alone does not prove actor release.
 Use priority desktop cancel/takeover and check release if it remains active.

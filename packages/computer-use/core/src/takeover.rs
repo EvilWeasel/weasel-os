@@ -80,6 +80,7 @@ fn load(path: &Path) -> R<Option<Marker>> {
         || !matches!(
             marker.source.as_str(),
             "backend_startup"
+                | "physical_escape"
                 | "physical_input_activity"
                 | "controlled_evdev_simulation"
                 | "explicit_desktop_takeover"
@@ -167,7 +168,7 @@ impl Latch {
         Ok(())
     }
     pub fn status(&self) -> Value {
-        json!({"reason":self.reason,"marker_path":self.path,"marker_active":self.marker_active,"persistence_error":self.persistence_error,"backend_restart_requires_explicit_resume":true,"resume_policy":"Only after user returns control, actor released and physical input quiet. Resume is never automatic."})
+        json!({"reason":self.reason,"marker_path":self.path,"marker_active":self.marker_active,"persistence_error":self.persistence_error,"backend_restart_requires_explicit_resume":true,"resume_policy":"Startup, physical Escape, explicit takeover and legacy persisted causes require user-authorized resume with actor released and physical input quiet. Ordinary activity never creates a marker."})
     }
 }
 #[cfg(test)]
