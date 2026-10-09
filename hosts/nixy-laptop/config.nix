@@ -95,5 +95,6 @@
   environment.systemPackages = [
     (pkgs.callPackage ../../packages/chatgpt/default.nix { })
     (pkgs.callPackage ../../packages/tuios-bin.nix { })
+    (import ../../packages/mtcode/default.nix { inherit pkgs; })
   ];
 }

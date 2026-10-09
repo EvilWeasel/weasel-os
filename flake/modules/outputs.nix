@@ -22,6 +22,7 @@
           inherit screenpipeApp;
         };
         t3code = inputs.t3code.packages.${system}.default;
+        mtcode = import ../../packages/mtcode/default.nix { pkgs = env.pkgsStable; };
         wispr-flow = env.pkgsStable.callPackage ../../packages/wispr-flow/default.nix { };
       };
 

@@ -1023,3 +1023,9 @@ Append-only log of implementation lessons for future agents working in this repo
 
 - MT Code wrote two T3 scheme-handler lines through the existing out-of-store MIME symlink during R5 integration. The user expressly approved preserving both bytes in a separate signed commit before activation. Copy only that exact approved delta into the task worktree; never reset or rewrite live Main to silence the clean-source gate. The earlier frozen receipt was invalidated without attempting activation.
 - The existing desktop entry is mtcode.desktop pointing to the installed MT Code 0.1.24. No other default handler or user association was changed. Re-evaluate the affected host configurations and bind the final activation receipt to the resulting signed Main.
+
+### 2026-10-09 (MT Code parallel voice trial)
+
+- Add MT Code 0.1.24 as a separate pinned native AppImage package and laptop launcher, retaining the official T3 Nightly package. MT uses its own `.mt`/`.config/mt` data and local server port; do not inherit `T3CODE_HOME` or `T3CODE_PORT`. Keep app updates in Nix.
+- MT's OAuth transport registers `t3code://` at startup and can write through the existing Home Manager MIME symlink into the repository. Guard that registration in the packaged ASAR so future starts preserve the configured handler. Retain the separately approved handler commit from the concurrent Computer-Use task, and serialize activation after that task finishes.
+- Verification: scoped nixfmt and parse, `git diff --check`, no-write-lock laptop evaluation, flake check and full laptop build; actual separate MT window rendered its setup dialog with the local server connected. No voice/model request or remote-client compatibility trial was performed.
