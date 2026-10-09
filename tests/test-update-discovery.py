@@ -85,7 +85,7 @@ class PinTests(unittest.TestCase):
             d.validate_pin("t3", tampered)
 
     def test_nix_only_version_and_hash(self):
-        for lane in ["codex", "chatgpt"]:
+        for lane in ["chatgpt"]:
             before = (ROOT / d.SOURCE_FILES[lane]).read_bytes()
             old = d.read_pin(lane, before)
             new = pin(lane, "99.1.1")

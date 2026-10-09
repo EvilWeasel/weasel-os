@@ -220,7 +220,7 @@ class PreparationTests(unittest.TestCase):
             self.assertEqual(json.loads(marker.read_text())['phase'], 'failed')
 
     def test_prune_preserves_editor_changes_untracked_ignored_and_open_files(self):
-        for change in ['tracked', 'hidden', 'untracked', 'ignored', 'open', 'extra-artifact', 'clean']:
+        for change in ['tracked', 'hidden', 'untracked', 'ignored', 'open', 'extra-artifact', 'clean', 'profile-outlink', 'profile-outlink-with-foreign']:
             with self.subTest(change=change), tempfile.TemporaryDirectory() as folder:
                 root = Path(folder)
                 repo, state = root / 'main', root / 'state'
@@ -242,6 +242,14 @@ class PreparationTests(unittest.TestCase):
                     'id': identifier, 'source': str(source), 'phase': 'tested',
                     'candidate_commit': manifest['head'], 'candidate_manifest': manifest}))
                 stream = None
+                profile_target = None
+                if change.startswith('profile-outlink'):
+                    profile_target = root / 'owned-profile-fixture'
+                    profile_target.mkdir()
+                    (profile_target / 'preserve.txt').write_text('external profile target stays intact')
+                    (directory / 'tested-codex-profile').symlink_to(profile_target, target_is_directory=True)
+                    if change == 'profile-outlink-with-foreign':
+                        (directory / 'personal-notes.txt').write_text('foreign data stays intact')
                 if change in {'tracked', 'hidden'}:
                     if change == 'hidden':
                         subprocess.run(['git', '-C', source, 'update-index', '--assume-unchanged', 'source.nix'], check=True)
@@ -255,7 +263,11 @@ class PreparationTests(unittest.TestCase):
                 try:
                     with patch.object(p, 'STATUS', root / 'absent-status'):
                         p.prune_candidates(repo, state, keep=0)
-                    self.assertEqual(directory.exists(), change != 'clean')
+                    self.assertEqual(directory.exists(), change not in {'clean', 'profile-outlink'})
+                    if profile_target is not None:
+                        self.assertEqual((profile_target / 'preserve.txt').read_text(), 'external profile target stays intact')
+                    if change == 'profile-outlink-with-foreign':
+                        self.assertEqual((directory / 'personal-notes.txt').read_text(), 'foreign data stays intact')
                     if change in {'tracked', 'hidden'}:
                         self.assertEqual((source / 'source.nix').read_text(), 'later editor save')
                 finally:
@@ -298,6 +310,7 @@ class BatchPreparationTests(unittest.TestCase):
         profile.symlink_to(self.old_system)
         self.batch, self.gates = p.peer('batch'), p.peer('gates')
         self.sign_requests, self.verified, self.workloads, self.probes = [], [], [], []
+        self.profile_checks = []
         self.changed_apps = {'t3', 'codex', 'chatgpt', 'acp'}
         self.niri_ok = True
         for patcher in [
@@ -311,7 +324,8 @@ class BatchPreparationTests(unittest.TestCase):
                 patch.object(p, 'peer', side_effect=lambda name: {'batch': self.batch, 'gates': self.gates}[name]),
                 patch.object(self.batch, 'verify_published', return_value={'ok': True, 'published_pins': {}}),
                 patch.object(self.batch, 'verify_closure', side_effect=self.closure),
-                patch.object(self.gates, 'probe', side_effect=self.probe)]:
+                patch.object(self.gates, 'probe', side_effect=self.probe),
+                patch.object(self.gates, 'verify_codex_profile', side_effect=self.profile_ownership)]:
             patcher.start()
             self.addCleanup(patcher.stop)
         self.record = p.new_batch(self.repo, self.state, 'batch')
@@ -363,6 +377,10 @@ class BatchPreparationTests(unittest.TestCase):
         kind = name.removeprefix('old-').removeprefix('new-').removeprefix('tested-')
         old = name.startswith('old-') or kind not in self.changed_apps
         return Path('/nix/store/' + ('d' if old else 'e') * 32 + '-' + kind + '-fixture')
+
+    def profile_ownership(self, profile, codex, acp):
+        self.profile_checks.append((profile, codex, acp))
+        return {'ok': True, 'profile': str(profile), 'coverage': 'mocked orchestration only'}
 
     def probe(self, kind, app, directory, **kwargs):
         # Preserve the real gate's empty-directory contract, including retries.
@@ -522,6 +540,8 @@ class BatchPreparationTests(unittest.TestCase):
         self.assertEqual(record['candidate_manifest'], p.source_manifest(self.source))
         self.assertTrue(record['niri']['ok'])
         self.assertTrue(record['published']['ok'])
+        self.assertEqual(len(self.profile_checks), 1)
+        self.assertTrue(record['app_tests']['codex']['profile_ownership']['ok'])
         self.assertEqual(set(record['host_derivations']), set(self.batch.HOSTS))
         self.assertEqual({kind for kind, *_ in self.probes}, {'t3', 'codex', 'chatgpt'})
         self.assertTrue(any(command[:3] == ['nix', 'flake', 'check'] for command in self.workloads))

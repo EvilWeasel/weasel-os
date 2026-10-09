@@ -20,6 +20,7 @@ import select
 import selectors
 import shutil
 import signal
+import shlex
 import socket
 import socketserver
 import sqlite3
@@ -41,7 +42,7 @@ class GateError(RuntimeError):
 KINDS = {"t3": "t3code", "codex": "codex", "chatgpt": "chatgpt"}
 SOURCE_FILES = {
     "t3": "packages/t3code/source.json",
-    "codex": "packages/codex-bin.nix",
+    "codex": "packages/codex-source/default.nix",
     "chatgpt": "packages/chatgpt/default.nix",
 }
 STORE_PATH = re.compile(r"/nix/store/[0-9a-z]{32}-[^/\s]+\Z")
@@ -94,8 +95,8 @@ def _store_name(path):
 
 def _app_version(kind, path):
     name = _store_name(path)
-    prefix = KINDS[kind] + "-"
-    value = name[len(prefix):] if name.startswith(prefix) else ""
+    prefixes = ("codex-scoped-cancel-", "codex-") if kind == "codex" else (KINDS[kind] + "-",)
+    value = next((name[len(prefix):] for prefix in prefixes if name.startswith(prefix)), "")
     pattern = r"[0-9]+\.[0-9]+\.[0-9]+"
     if kind == "t3":
         pattern += r"(?:-nightly\.[0-9]{8}\.[0-9]+)?"
@@ -130,6 +131,8 @@ def _bytes(value):
 def _validate_source_changes(changes, selected):
     if not isinstance(changes, dict):
         raise GateError("Source transitions must include exact before/after bytes")
+    if any(isinstance(name, str) and name.startswith("packages/codex-source/") for name in changes):
+        raise GateError("Codex source/patch/toolchain changes require a reviewed source adapter")
     allowed = {SOURCE_FILES[kind] for kind in selected} | {"agent-learnings.md"}
     if set(changes) - allowed:
         raise GateError("Source change is outside the selected app pin files")
@@ -768,12 +771,74 @@ def _gui_worker(kind, app, run_dir, tools):
         proxy.server_close()
 
 
+def _acp_codex_path(data):
+    """Read one literal active makeWrapper export; comments are not bindings."""
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise GateError("ACP wrapper is not UTF-8 shell text") from error
+    bindings = []
+    for raw in text.splitlines():
+        line = raw.strip()
+        if not line or line.startswith("#") or "CODEX_PATH" not in line:
+            continue
+        try:
+            tokens = shlex.split(line, comments=True, posix=True)
+        except ValueError as error:
+            raise GateError("ACP wrapper has malformed CODEX_PATH syntax") from error
+        if len(tokens) != 2 or tokens[0] != "export" or not tokens[1].startswith("CODEX_PATH="):
+            raise GateError("ACP wrapper has unsupported active CODEX_PATH syntax")
+        bindings.append(tokens[1][len("CODEX_PATH="):])
+    if len(bindings) != 1 or not re.fullmatch(r"/nix/store/[0-9a-z]{32}-[^/\s]+/bin/codex", bindings[0]):
+        raise GateError("ACP wrapper must have one literal store CODEX_PATH export")
+    return bindings[0]
+
+
+def verify_codex_profile(profile, codex_app, acp_app):
+    """Verify the built user's actual CLI links, even for unchanged app outputs."""
+    profile, codex_app, acp_app = map(lambda p: Path(_store_root(p)), (profile, codex_app, acp_app))
+    checked = {}
+    for name, output in (("codex", codex_app), ("codex-acp", acp_app)):
+        selected = profile / "bin" / name
+        expected = output / "bin" / name
+        if not selected.is_symlink() or not expected.is_file() or selected.resolve() != expected.resolve():
+            raise GateError("Built Home Manager profile selects another " + name + " executable")
+        checked[name] = str(selected.resolve())
+    wrapper = (acp_app / "bin/codex-acp").read_bytes()
+    if _acp_codex_path(wrapper) != str(codex_app) + "/bin/codex":
+        raise GateError("Built ACP wrapper is not bound to the selected source Codex")
+    return {"ok": True, "profile": str(profile), "selected_executables": checked,
+            "coverage": "built declarative user-profile links/ACP binding; mutable client configuration not inferred"}
+
+
+def _codex_source_host(app):
+    """Both source-built companions must resolve inside this exact output."""
+    app = Path(_store_root(app))
+    roots = []
+    for name in ("codex", "codex-code-mode-host"):
+        binary = app / "bin" / name
+        linked = app / "lib/codex/bin" / name
+        if not binary.is_file() or not os.access(binary, os.X_OK):
+            raise GateError("Codex source companion is missing or not executable: " + name)
+        if not binary.resolve().is_relative_to(app):
+            raise GateError("Codex source companion escapes the selected package")
+        if not linked.is_symlink() or linked.resolve() != binary.resolve():
+            raise GateError("Codex source companion lookup differs from the selected package")
+        roots.append(str(binary.resolve()))
+    _command([str(app / "bin/codex-code-mode-host"), "--help"], timeout=10)
+    return {"package": str(app), "companions": roots, "host_help": True,
+            "coverage": "same-output companion identity/help; cancellation behavior not inferred"}
+
+
 def _codex_worker(app, run_dir):
     executable = str(app / "bin/codex")
     version = _command([executable, "--version"], timeout=10).decode().strip()
-    expected = _store_name(str(app))[len("codex-"):]
+    expected = _app_version("codex", str(app))
     if version != f"codex-cli {expected}":
         raise GateError("Codex runtime version differs from its built package")
+    host_evidence = None
+    if _store_name(str(app)).startswith("codex-scoped-cancel-"):
+        host_evidence = _codex_source_host(app)
     with (run_dir / "app-server.log").open("wb") as log:
         process = subprocess.Popen(
             [executable, "app-server", "-c", "mcp_servers={}", "-c", "analytics.enabled=false"],
@@ -811,7 +876,7 @@ def _codex_worker(app, run_dir):
                 raise GateError("Codex app-server failed its initialize protocol handshake")
             process.stdin.write(b'{"method":"initialized","params":{}}\n')
             process.stdin.flush()
-            return {"version_output": version, "app_server_initialize": received["result"], "model_requests": 0}
+            return {"version_output": version, "app_server_initialize": received["result"], "code_mode_host": host_evidence, "model_requests": 0}
         finally:
             if process.stdin is not None:
                 process.stdin.close()
@@ -827,7 +892,7 @@ def find_acp(system, codex_app):
             wrapper = Path(root) / "bin/codex-acp"
             if wrapper.is_file():
                 data = wrapper.read_bytes()
-                if b"CODEX_PATH" in data and (codex_app + "/bin/codex").encode() in data:
+                if _acp_codex_path(data) == codex_app + "/bin/codex":
                     found.append(root)
     if len(found) != 1:
         raise GateError("Candidate must contain one ACP adapter bound to its exact Codex")
@@ -837,7 +902,7 @@ def find_acp(system, codex_app):
 def _acp_worker(acp_app, codex_app, run_dir):
     executable = acp_app / "bin/codex-acp"
     data = executable.read_bytes()
-    if b"CODEX_PATH" not in data or (str(codex_app) + "/bin/codex").encode() not in data:
+    if _acp_codex_path(data) != str(codex_app) + "/bin/codex":
         raise GateError("ACP wrapper does not use the tested candidate Codex")
     with (run_dir / "acp.log").open("wb") as log:
         process = subprocess.Popen(

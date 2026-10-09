@@ -54,7 +54,14 @@ oder einzelne belegte Verursacher zurückgenommen; die übrigen Updates bleiben.
 Fehlende Spezialadapter sind keine allgemeine Paket-Updatesperre. Ein kompletter
 Build belegt jedoch keine Laufzeitprüfung jedes Programms. Für T3, Codex/ACP
 und ChatGPT gibt es zusätzlich echte isolierte Proben geänderter Artefakte.
-Die drei älteren Einzelpin-Lanes bleiben als gezielte schnelle Möglichkeit.
+Die Einzelpin-Lanes für T3 und ChatGPT bleiben als gezielte schnelle Möglichkeit.
+Codex nutzt packages/codex-source/ mit Produktions- und Testpatch sowie einer
+separat eingefrorenen Rust-Toolchain. --discover codex prüft offizielles
+npm-latest nur als Upstream-Versionshinweis und liefert held-local-patch,
+candidate: null und den nächsten Review am Folgetag. Ein npm-Archiv ersetzt
+diesen Source-Build nicht. --prepare codex ist bis zum geprüften Source-Adapter
+ausdrücklich gesperrt; andere Batchupdates laufen mit unverändertem Codex-Bundle
+weiter. Der nächste datierte Rebase-Review ist am 10.10.2026 fällig.
 Der breite Batch erlaubt bestehende Paket- und Nix-Konfigurationsreparaturen,
 aber keine Änderung des privilegierten Updaters, Zugängen oder stateVersion,
 keine neuen/gelöschten Dateien und keinen unbenannten Release-Wechsel.
@@ -78,7 +85,8 @@ Stores und gelangen weder in Nix noch Git oder Review-Dateien.
 /run/current-system/sw/bin/weasel-update --new-batch --mode batch
 /run/current-system/sw/bin/weasel-update --prepare-batch /ausgabe/SOURCE --mode batch
 /run/current-system/sw/bin/weasel-update --discover codex
-/run/current-system/sw/bin/weasel-update --prepare codex --metadata /ausgabe/metadata.json
+# Codex: nur Discovery/Review; kein --prepare ohne geprüften Source-Adapter.
+/run/current-system/sw/bin/weasel-update --discover chatgpt
 /run/current-system/sw/bin/weasel-update --submit 20261008T120000Z-0123abcd
 ```
 
@@ -124,7 +132,7 @@ Jeder Batch braucht Nix-Syntax, Evaluation aller vier Hosts, den vollständigen
 Flake-Check und den kompletten Laptop-Build. Seine Closure-Prüfung hält alle
 hinzugefügten und entfernten Store-Artefakte mit vollständigen Inventar-Hashes
 fest; sie behauptet keine Gleichheit außerhalb dreier Apps. Die bisherigen
-Einzelpin-Lanes prüfen weiter strukturell identische erzeugte Ausgaben außerhalb
+aktiven Einzelpin-Lanes für T3/ChatGPT prüfen strukturell identische erzeugte Ausgaben außerhalb
 der ausgewählten App-Closures. Ein bloßer Namens-Whitelist-Treffer reicht nicht.
 
 Der Kandidat validiert die ausgewertete Niri-Konfiguration mit dem tatsächlich

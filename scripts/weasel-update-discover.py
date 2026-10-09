@@ -22,7 +22,7 @@ import urllib.request
 SCHEMA_VERSION = 1
 SOURCE_FILES = {
     "t3": "packages/t3code/source.json",
-    "codex": "packages/codex-bin.nix",
+    "codex": "packages/codex-source/default.nix",
     "chatgpt": "packages/chatgpt/default.nix",
 }
 T3_API = "https://api.github.com/repos/pingdotgg/t3code"
@@ -101,6 +101,8 @@ def pin_url(lane, version):
 
 
 def validate_pin(lane, pin):
+    if lane == "codex":
+        return validate_codex_source_pin(pin)
     if not isinstance(pin, dict) or set(pin) != {"version", "url", "hash"}:
         raise DiscoveryError("Pin must have exactly version, url and hash")
     if pin["url"] != pin_url(lane, pin["version"]):
@@ -110,6 +112,147 @@ def validate_pin(lane, pin):
     if sri(base64.b64decode(pin["hash"][7:], validate=True)) != pin["hash"]:
         raise DiscoveryError("Noncanonical SHA-256 SRI hash")
     return dict(pin)
+
+
+
+CODEX_BUNDLE = (
+    "packages/codex-source/default.nix",
+    "packages/codex-source/toolchain.nix",
+    "packages/codex-source/codex-v0162-scoped-cancel.patch",
+    "packages/codex-source/scoped-cancel-memory-tests.patch",
+    "packages/codex-source/README.md",
+)
+CODEX_ADAPTER_REASON = (
+    "Codex source/patch/toolchain updates require a reviewed source adapter and "
+    "scoped-cancel patch rebase; npm binaries cannot replace this source bundle"
+)
+
+
+def _canonical_sri(value):
+    if not isinstance(value, str) or not SRI_RE.fullmatch(value):
+        raise DiscoveryError("Source pin must contain a SHA-256 SRI hash")
+    if sri(base64.b64decode(value[7:], validate=True)) != value:
+        raise DiscoveryError("Noncanonical SHA-256 SRI hash")
+    return value
+
+
+def validate_codex_source_pin(pin):
+    if not isinstance(pin, dict) or set(pin) != {"kind", "version", "commit", "url", "hash"}:
+        raise DiscoveryError("Codex source pin needs exactly kind/version/commit/url/hash")
+    if pin["kind"] != "pinned-source":
+        raise DiscoveryError("Codex source pin kind differs from pinned-source")
+    version_key(pin["version"])
+    if "-" in pin["version"]:
+        raise DiscoveryError("Codex source version must be stable")
+    commit = pin["commit"]
+    if not isinstance(commit, str) or not re.fullmatch(r"[0-9a-f]{40}", commit):
+        raise DiscoveryError("Codex source commit must be exact lowercase SHA-1")
+    if pin["url"] != f"https://codeload.github.com/openai/codex/tar.gz/{commit}":
+        raise DiscoveryError("Codex source URL does not match the exact official commit")
+    _canonical_sri(pin["hash"])
+    return dict(pin)
+
+
+def _source_literal(text, key, indent):
+    pattern = rf'(?m)^{" " * indent}{re.escape(key)} = "([^"\n]+)";$'
+    matches = list(re.finditer(pattern, text))
+    if len(matches) != 1 or len(re.findall(rf"\b{re.escape(key)}\s*=(?!=)", text)) != 1:
+        raise DiscoveryError("Expected one exact literal source assignment: " + key)
+    return matches[0].group(1)
+
+
+def _codex_source_fields(data):
+    try:
+        text = data.decode("utf-8")
+    except UnicodeDecodeError as error:
+        raise DiscoveryError("Codex source is not UTF-8") from error
+    blocks = {}
+    for key, fetcher in (("src", "fetchzip"), ("v8", "fetchurl"), ("v8Binding", "fetchurl")):
+        pattern = rf"(?ms)^  {key} = {fetcher} \{{\n(.*?)^  \}};$"
+        matches = list(re.finditer(pattern, text))
+        if len(matches) != 1 or len(re.findall(rf"\b{key}\s*=", text)) != 1:
+            raise DiscoveryError("Expected one exact literal source block: " + key)
+        blocks[key] = {field: _source_literal(matches[0].group(1), field, 4)
+                       for field in ("name", "url", "hash")}
+        _canonical_sri(blocks[key]["hash"])
+    url = blocks["src"]["url"]
+    match = re.fullmatch(r"https://codeload\.github\.com/openai/codex/tar\.gz/([0-9a-f]{40})", url)
+    if not match:
+        raise DiscoveryError("Codex source archive must identify an exact official commit")
+    commit = match.group(1)
+    if blocks["src"]["name"] != "codex-" + commit or _source_literal(text, "STABLE_GIT_COMMIT", 4) != commit:
+        raise DiscoveryError("Codex source name/embedded commit do not match the archive")
+    version = _source_literal(text, "version", 2)
+    pin = validate_codex_source_pin({"kind": "pinned-source", "version": version,
+                                    "commit": commit, "url": url, "hash": blocks["src"]["hash"]})
+    cargo_hash = _canonical_sri(_source_literal(text, "cargoHash", 2))
+    release = re.fullmatch(
+        r"https://github\.com/openai/codex/releases/download/rusty-v8-v([0-9]+\.[0-9]+\.[0-9]+)/"
+        r"librusty_v8_ptrcomp_sandbox_release_x86_64-unknown-linux-gnu\.a\.gz", blocks["v8"]["url"])
+    if not release or blocks["v8Binding"]["url"] != (
+            "https://github.com/openai/codex/releases/download/rusty-v8-v" + release.group(1) +
+            "/src_binding_ptrcomp_sandbox_release_x86_64-unknown-linux-gnu.rs"):
+        raise DiscoveryError("V8 archive and binding must be paired official release assets")
+    return pin, {"cargoHash": cargo_hash, "v8": blocks["v8"], "v8Binding": blocks["v8Binding"],
+                 "v8Version": release.group(1), "sourceHashMode": "recursive-fetchzip-NAR-not-raw-tarball"}
+
+
+def read_codex_source_pin(data):
+    return _codex_source_fields(data)[0]
+
+
+def codex_source_bundle(repository):
+    repository = Path(repository)
+    directory = repository / "packages/codex-source"
+    if directory.is_symlink() or not directory.is_dir():
+        raise DiscoveryError("Codex source bundle directory must be regular")
+    observed = set()
+    for path in directory.rglob("*"):
+        if path.is_symlink():
+            raise DiscoveryError("Codex source bundle must not contain symlinks")
+        if path.is_file():
+            observed.add(path.relative_to(repository).as_posix())
+    if observed != set(CODEX_BUNDLE):
+        raise DiscoveryError("Codex source bundle has missing or unexpected files")
+    files, contents = {}, {}
+    for name in CODEX_BUNDLE:
+        path = repository / name
+        if not path.is_file() or path.stat().st_size > MAX_JSON:
+            raise DiscoveryError("Codex bundle file is absent or exceeds its bound")
+        contents[name] = path.read_bytes()
+        files[name] = hashlib.sha256(contents[name]).hexdigest()
+    pin, dependencies = _codex_source_fields(contents[SOURCE_FILES["codex"]])
+    text = contents["packages/codex-source/toolchain.nix"].decode("utf-8")
+    revision = _source_literal(text, "rev", 4)
+    if not re.fullmatch(r"[0-9a-f]{40}", revision):
+        raise DiscoveryError("Frozen Rust package-set revision must be exact")
+    nar_hash = _canonical_sri(_source_literal(text, "narHash", 4))
+    if _source_literal(text, "type", 4) != "github" or _source_literal(text, "owner", 4) != "nixos" or _source_literal(text, "repo", 4) != "nixpkgs":
+        raise DiscoveryError("Frozen Rust package set must be official Nixpkgs")
+    return {"pin": pin, "files_sha256": files, "dependencies": dependencies,
+            "toolchain": {"revision": revision, "narHash": nar_hash, "rustVersion": "1.95.0",
+                          "note": "Toolchain builder frozen; non-Rust library arguments remain caller-bound"}}
+
+
+def held_codex_source_discovery(current, net):
+    current = validate_codex_source_pin(current)
+    endpoint = f"{NPM_METADATA}/latest"
+    metadata = net.json(endpoint)
+    if not isinstance(metadata, dict) or metadata.get("name") != "@openai/codex":
+        raise DiscoveryError("Unexpected npm latest package identity")
+    selected = metadata.get("version")
+    pin_url("codex", selected)  # Stable metadata validation only, never asset resolution.
+    now = dt.datetime.now(dt.timezone.utc)
+    return {"schema_version": SCHEMA_VERSION, "lane": "codex", "channel": "stable",
+            "current": current, "candidate": None, "status": "held-local-patch",
+            "reason": CODEX_ADAPTER_REASON, "adapter_status": "adapter-needed",
+            "upstream_latest": selected, "checked_at": now.isoformat(),
+            "next_review": (now.date() + dt.timedelta(days=1)).isoformat(),
+            "source_files": list(CODEX_BUNDLE),
+            "evidence": {"discovery_api": endpoint, "selected_version": selected,
+                         "upstream_newer": version_key(selected) > version_key(current["version"]),
+                         "verification": "Official CLI package metadata; no source/asset/patch rebase verification",
+                         "payload_downloads": 0}}
 
 
 def nix_fields(data):
@@ -130,6 +273,8 @@ def nix_fields(data):
 
 def read_pin(lane, data):
     lane_name(lane)
+    if lane == "codex":
+        return read_codex_source_pin(data)
     if lane == "t3":
         return validate_pin(lane, object_json(data))
     text, version, hash_field = nix_fields(data)
@@ -143,6 +288,8 @@ def read_pin(lane, data):
 
 
 def replace_pin(lane, old_bytes, pin):
+    if lane == "codex":
+        raise DiscoveryError(CODEX_ADAPTER_REASON)
     read_pin(lane, old_bytes)
     pin = validate_pin(lane, pin)
     if lane == "t3":
@@ -157,6 +304,8 @@ def replace_pin(lane, old_bytes, pin):
 
 
 def validate_transition(lane, before_bytes, after_bytes, network=True):
+    if lane == "codex":
+        raise DiscoveryError(CODEX_ADAPTER_REASON)
     old, new = read_pin(lane, before_bytes), read_pin(lane, after_bytes)
     if lane != "t3" and replace_pin(lane, before_bytes, new) != after_bytes:
         raise DiscoveryError("Transition modifies code outside version and src.hash")
@@ -448,6 +597,8 @@ def rpm_metadata(data):
 
 
 def verify_exact(lane, version, net):
+    if lane == "codex":
+        raise DiscoveryError(CODEX_ADAPTER_REASON)
     url = pin_url(lane, version)
     if lane == "t3":
         release = net.json(f"{T3_API}/releases/tags/v{version}")
@@ -469,6 +620,10 @@ def verify_exact(lane, version, net):
 
 
 def discover(lane, current, channel=None, net=None):
+    if lane == "codex":
+        if channel not in (None, "stable"):
+            raise DiscoveryError("Unsupported Codex channel")
+        return held_codex_source_discovery(current, net or Network(lane))
     current = validate_pin(lane, current)
     net = net or Network(lane)
     evidence = {}
@@ -565,7 +720,10 @@ def main():
         source = args.repository / SOURCE_FILES[args.lane]
         if source.is_symlink() or not source.is_file() or source.stat().st_size > MAX_JSON:
             raise DiscoveryError("Source pin must be a bounded regular file")
+        bundle = codex_source_bundle(args.repository) if args.lane == "codex" else None
         result = discover(args.lane, read_pin(args.lane, source.read_bytes()), args.channel)
+        if bundle is not None:
+            result["source_bundle"] = bundle
         private_output(args.output, result)
         print(json.dumps({"status": result["status"], "lane": args.lane, "output": str(args.output)}, sort_keys=True))
     except (DiscoveryError, OSError) as error:

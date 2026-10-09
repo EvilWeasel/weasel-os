@@ -15,6 +15,12 @@ Tool annotations identify observation tools as read-only, actions as potentially
 destructive writes, and cancel/takeover/resume as local control mutations. Use
 these tools within the user's requested task. After activation, verify the
 connection in a fresh ordinary agent session and complete an authorized workflow.
+The owned entry enables `supports_parallel_tool_calls` so status and priority
+control can reach the daemon while an action is waiting. The daemon still owns
+the single physical input queue. Existing Codex clients need a fresh connection
+to load this setting. The laptop's [source-built Codex](../codex-source/README.md)
+also forwards interrupted MCP requests; an agent's local Stop acknowledgement
+alone does not establish actor release.
 
 ## Operations and boundaries
 
@@ -55,6 +61,17 @@ Effects, partial effects, release status and failures remain explicit.
 Fields must match the selected action kind. An unknown or misplaced field
 rejects the complete batch before input. In particular, `restore_clipboard`
 belongs to `paste`; `type` always requests preservation of the prior selection.
+
+If a bounded cleanup receipt fails, new input remains refused. When the actor is
+idle and the queue is empty, `desktop_recover_release` explicitly retries only
+release/receipt on existing owned actuators. It never creates a device, moves the
+pointer, presses a key or replays an action. Its shared timeout is 200–2000 ms
+(default 1500 ms); busy locks refuse immediately. A successful retry preserves
+the takeover latch, cause and epoch, retains the original failed result, and
+invalidates captures and semantic targets. Check status, then obtain a new
+observation before input; a human takeover still requires the user's return of
+control. A genuinely broken connection remains unconfirmed and needs a deliberate
+repair of this owned backend. Receipt confirmation is separate from UI success.
 
 Auto text uses plain clipboard for verified Electron IDs and text over 1000
 characters; other shorter input uses wtype. Electron keyboard text is known to

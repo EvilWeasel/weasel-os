@@ -117,3 +117,14 @@ Berichte die gemeinsame Aktualisierung, echte Reparaturen und Rest-Ausnahmen;
 trenne vorbereitet, gebaut, aktiviert und tatsächlich beobachtet. Bei vollständig
 unverändertem, unauffälligem Ergebnis bleibe still. Versprich nicht „alles aktuell“,
 wenn Quellenrecherche, Tests oder Aktivierung noch offen sind; arbeite sie weiter ab.
+
+Codex-Source-Ausnahme (09.10.2026): Prüfe täglich die offizielle Upstream-Version
+und die konkrete Rebase-/Entfernungsoption der Scoped-Cancel-Patches; nächste
+Prüfung 10.10.2026. --discover codex meldet einen endlichen held-local-patch
+mit candidate: null; --prepare codex ist bis zum geprüften Source-Adapter
+abgewiesen. Alle fünf Dateien unter packages/codex-source/, Cargo/V8 und der
+separate Rust-1.95-Toolchain-Pin sind ein geprüftes Bundle. Keine npm-Substitution
+und kein automatischer Patchverlust. Führe andere geprüfte Batchupdates weiter;
+belege unverändertes Bundle, erwartete Source-Derivation je Kandidatenquelle und
+die tatsächlichen gebauten Codex-/ACP-Profillinks. Benenne einen erforderlichen
+Source-Adapter/Rebase ausdrücklich und mit neuem Reviewdatum.

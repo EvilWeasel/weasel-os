@@ -524,7 +524,10 @@ impl GlobalKeyboard {
         write_packet(self.fd()?, &event_packet(code, pressed), deadline, check)
     }
     pub fn release_all(&mut self) -> R<()> {
-        let deadline = Instant::now() + Duration::from_millis(100);
+        self.release_all_until(Instant::now() + Duration::from_millis(100))
+    }
+    // Explicit recovery shares one bounded budget; normal cleanup stays100ms.
+    pub fn release_all_until(&mut self, deadline: Instant) -> R<()> {
         let mut error = None;
         for code in self.held.clone().into_iter().rev() {
             match self.emit(code, false, deadline, &mut || Ok(())) {

@@ -171,6 +171,8 @@ def validate_changes(changes, mode, identifier):
     migrated = set()
     for name in names:
         path = Path(name)
+        if name.startswith("packages/codex-source/"):
+            raise BatchError("Codex source/patch/toolchain bundle needs a reviewed source adapter")
         if path.is_absolute() or ".." in path.parts or name in PROTECTED:
             raise BatchError("Protected source path")
         old, new = pair(changes[name])
@@ -197,7 +199,7 @@ def validate_changes(changes, mode, identifier):
             raise BatchError("Batch cannot change system/home stateVersion")
         if SECURITY.findall(old) != SECURITY.findall(new):
             raise BatchError("Batch cannot change authentication/credential policy")
-        lane = {"packages/t3code/source.json": "t3", "packages/codex-bin.nix": "codex", "packages/chatgpt/default.nix": "chatgpt"}.get(name)
+        lane = {"packages/t3code/source.json": "t3", "packages/codex-source/default.nix": "codex", "packages/chatgpt/default.nix": "chatgpt"}.get(name)
         if lane:
             try:
                 d = discovery()
@@ -292,6 +294,25 @@ def verify_runtime_units(old_system, new_system):
     return {"ok": True, "checked": checked, "reboot": "not performed; existing kernel/session may remain running"}
 
 
+def codex_ownership_predicate(source, host):
+    if host != "nixy-laptop":
+        return "true"
+    package = str(Path(source).absolute() / "packages/codex-source")
+    adapter = str(Path(source).absolute() / "packages/codex-acp.nix")
+    return (
+        "(let p = import f.inputs.nixpkgs-unstable { "
+        "system = host.pkgs.stdenv.hostPlatform.system; config.allowUnfree = true; }; "
+        "expectedCodex = p.callPackage " + package + " {}; "
+        "expectedAcp = p.callPackage " + adapter + " { codexPackage = expectedCodex; }; "
+        "home = hm.evilweasel; selected = home.weasel.hephaestusRecoveryConsole.package; "
+        "packages = home.home.packages; "
+        "in selected.drvPath == expectedCodex.drvPath && "
+        "builtins.any (pkg: (pkg.drvPath or null) == expectedAcp.drvPath) packages && "
+        "builtins.all (pkg: if builtins.elem (pkg.pname or \"\") [\"codex\" \"codex-scoped-cancel\"] "
+        "then (pkg.drvPath or null) == expectedCodex.drvPath else true) packages)"
+    )
+
+
 def sensitive_expression(source, host):
     """Hash semantic auth/state options in Nix, never return credential values."""
     if host not in HOSTS:
@@ -329,6 +350,7 @@ def sensitive_expression(source, host):
             'wanted = (c.systemd.paths.weasel-update-activate.wantedBy or []) == expected.systemd.paths.weasel-update-activate.wantedBy; '
             'tools = map toString c.environment.systemPackages; '
             'hasTools = builtins.all (p: builtins.elem (toString p) tools) expected.environment.systemPackages; '
+            'codexOwnershipOkay = ' + codex_ownership_predicate(source, host) + '; '
             'v = { stateVersion = c.system.stateVersion; '
             'homeStateVersions = builtins.mapAttrs (_: h: h.home.stateVersion) hm; '
             'homeInfrastructure = builtins.mapAttrs (_: h: let '
@@ -352,7 +374,7 @@ def sensitive_expression(source, host):
             'doas = select ["enable" "extraRules" "extraConfig"] (c.security.doas or {}); '
             'nix = select ["trusted-users" "allowed-users" "require-sigs" "trusted-public-keys" "substituters"] c.nix.settings; '
             '}; in assert (' + ('hasUpdater && ' if host == 'nixy-laptop' else '!hasUpdater || ') +
-            '(serviceOkay && pathOkay && serviceUnitOkay && pathUnitOkay && restartPolicyOkay && '
+            '(codexOwnershipOkay && serviceOkay && pathOkay && serviceUnitOkay && pathUnitOkay && restartPolicyOkay && '
             'safeEnvironment && enabled && wanted && hasTools)); '
             'builtins.hashString "sha256" (builtins.toJSON v)')
 
@@ -384,6 +406,16 @@ def verify_published(old_source, new_source):
         raise BatchError("Published-source discovery runs as the ordinary user")
     d, checked = discovery(), {}
     for lane, filename in d.SOURCE_FILES.items():
+        if lane == "codex":
+            try:
+                a, b = d.codex_source_bundle(old_source), d.codex_source_bundle(new_source)
+            except (OSError, ValueError, RuntimeError) as error:
+                raise BatchError("Invalid Codex source bundle: " + str(error)) from error
+            if a != b:
+                raise BatchError(d.CODEX_ADAPTER_REASON)
+            checked[lane] = {"changed": False, "kind": "pinned-source", "bundle": b,
+                             "verification": "Exact trusted baseline bundle preserved; no npm/source refresh claim"}
+            continue
         a = d.read_pin(lane, (Path(old_source) / filename).read_bytes())
         b = d.read_pin(lane, (Path(new_source) / filename).read_bytes())
         if a == b:

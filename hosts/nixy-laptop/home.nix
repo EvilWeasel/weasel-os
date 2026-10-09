@@ -7,7 +7,7 @@
 }:
 let
   hermesDesktop = inputs.hermes-agent.packages.${pkgs.stdenv.hostPlatform.system}.desktop;
-  codexLatest = pkgs.callPackage ../../packages/codex-bin.nix { };
+  codexLatest = pkgsUnstable.callPackage ../../packages/codex-source { };
   cuaDriver = pkgs.callPackage ../../packages/cua-driver-bin.nix { };
   laptopExecutor = pkgs.callPackage ../../scripts/weasel-laptop-executor.nix {
     codexPackage = codexLatest;

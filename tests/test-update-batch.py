@@ -432,7 +432,12 @@ class SemanticBatchTests(unittest.TestCase):
     def verify(self, candidate, mode="batch", *, ssh_fragment=None):
         self.write_source(self.before, self.config)
         self.write_source(self.after, candidate, ssh_fragment=ssh_fragment)
-        return batch.verify_sensitive_state(self.before, self.after, self.evaluate, mode=mode)
+        # This fixture isolates authentication/stateVersion invariants with a
+        # synthetic example user and no real package set. Source Codex ownership
+        # is evaluated separately by the source adapter's private Nix fixture.
+        from unittest.mock import patch
+        with patch.object(batch, "codex_ownership_predicate", return_value="true"):
+            return batch.verify_sensitive_state(self.before, self.after, self.evaluate, mode=mode)
 
     def candidate_agent(self, candidate):
         return candidate["home-manager"]["users"]["example"]["systemd"]["user"]["services"]["weasel-proton-infra-ssh-agent"]

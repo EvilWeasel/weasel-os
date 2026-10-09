@@ -358,7 +358,7 @@ def prune_candidates(repo, state, *, keep=3):
         resolved.append(directory)
     for directory in sorted(resolved, reverse=True)[keep:]:
         record = read_json(directory / 'candidate.json')
-        known = {'source', 'candidate.json', 'old-app', 'new-app', 'tested-system', 'tested-acp', 'old-acp', 'probe', 'probes'}
+        known = {'source', 'candidate.json', 'old-app', 'new-app', 'tested-system', 'tested-acp', 'tested-codex-profile', 'old-acp', 'probe', 'probes'}
         known |= {'old-' + kind for kind in ('t3', 'codex', 'chatgpt')}
         known |= {'new-' + kind for kind in ('t3', 'codex', 'chatgpt')}
         known |= {'probe-' + kind for kind in ('t3', 'codex', 'chatgpt')}
@@ -407,6 +407,8 @@ def require_resolved():
 
 def prepare(repo, state, lane, metadata):
     discover, gates = peer('discover'), peer('gates')
+    if lane == 'codex':
+        raise Blocked(discover.CODEX_ADAPTER_REASON)
     require_resolved()
     prune_candidates(repo, state, keep=2)
     require_power()
@@ -611,14 +613,20 @@ def prepare_batch(repo, state, source, mode):
             old_app = build(repo, directory / ('old-' + kind), app_args(repo, kind))
             new_app = build(source, directory / ('new-' + kind), app_args(source, kind))
             app_pairs[kind] = {'old': str(old_app), 'new': str(new_app)}
+            profile_ownership = None
+            if kind == 'codex':
+                profile = build(source, directory / 'tested-codex-profile',
+                                [f'{source}#nixosConfigurations.nixy-laptop.config.home-manager.users.evilweasel.home.path'])
+                profile_ownership = gates.verify_codex_profile(profile, new_app, new_acp)
             if old_app == new_app and (kind != 'codex' or old_acp == new_acp):
-                probes[kind] = {'changed': False, 'probed': False, 'reason': 'exact immutable app/adapter unchanged'}
+                probes[kind] = {'changed': False, 'probed': False, 'profile_ownership': profile_ownership,
+                                'reason': 'exact immutable app/adapter unchanged'}
                 continue
             kwargs = {'old_app': old_app} if kind == 't3' else {'acp_app': new_acp} if kind == 'codex' else {}
             result = gates.probe(kind, new_app, probe_root / kind, **kwargs)
             if result.get('ok') is not True:
                 raise Blocked('Critical application probe failed: ' + kind)
-            probes[kind] = {'changed': True, 'probed': True, 'receipt': result}
+            probes[kind] = {'changed': True, 'probed': True, 'receipt': result, 'profile_ownership': profile_ownership}
         closure = batch.verify_closure(old_system, new_system, app_pairs, changes)
         units = batch.verify_runtime_units(old_system, new_system)
         if (source_manifest(source) != tested_manifest or source_manifest(repo) != manifest
@@ -711,6 +719,7 @@ def review_start(repo, state):
     output = {'schema': 1, 'date': today, 'baseline_commit': head, 'repository': str(repo),
               'registry': registry, 'current_pins': current_pins, 'current_inputs': current_inputs,
               'all_lock_nodes': lock['nodes'],
+              'codex_source_bundle': discover.codex_source_bundle(repo),
               'activation_installed': INBOX.parent.is_dir(),
               'support': registry.get('support'),
               'note': 'Review every entry; build/activate only verified adapter candidates. Unknown reasons get dated investigation.'}

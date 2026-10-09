@@ -10,7 +10,7 @@ import sys
 import tempfile
 import types
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 SPEC = importlib.util.spec_from_file_location("activation", Path(__file__).resolve().parents[1] / "scripts/weasel-update-activate.py")
 activation = importlib.util.module_from_spec(SPEC)
@@ -442,10 +442,13 @@ class ActivationTests(unittest.TestCase):
         workspace.mkdir(); run.mkdir()
         runner = types.SimpleNamespace(account=types.SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid()),
                                        user=lambda *args: self.fail("Unchanged app executed a probe"))
-        with patch.object(activation, "build_application", side_effect=lambda runner, source, kind: Path("/nix/store/" + kind)) as builds, patch.object(activation, "nix_build", return_value=Path("/nix/store/acp")) as acp:
+        profile_verify = Mock(return_value={"ok": True, "coverage": "mocked orchestration only"})
+        peer = types.SimpleNamespace(verify_codex_profile=profile_verify)
+        with patch.object(activation, "build_application", side_effect=lambda runner, source, kind: Path("/nix/store/" + kind)) as builds, patch.object(activation, "nix_build", return_value=Path("/nix/store/acp")) as acp, patch.object(activation, "import_peer", return_value=peer):
             pairs, tests = activation.probe_applications(runner, old_source, new_source, ["t3", "codex", "chatgpt"], workspace, run, changed_outputs_only=True)
         self.assertEqual(builds.call_count, 6)
-        self.assertEqual(acp.call_count, 2)
+        self.assertEqual(acp.call_count, 3)
+        profile_verify.assert_called_once_with(Path("/nix/store/acp"), Path("/nix/store/codex"), Path("/nix/store/acp"))
         self.assertEqual(set(pairs), {"t3", "codex", "chatgpt", "codex-acp"})
         self.assertTrue(all(not t["output_changed"] and not t["probed"] for t in tests.values()))
         self.assertEqual(list(workspace.iterdir()), [])
@@ -460,7 +463,9 @@ class ActivationTests(unittest.TestCase):
             commands.append((name, args))
             return json.dumps({"ok": True, "kind": "codex"}).encode()
         runner = types.SimpleNamespace(account=types.SimpleNamespace(pw_uid=os.getuid(), pw_gid=os.getgid()), user=user)
-        with patch.object(activation, "build_application", return_value=Path("/nix/store/codex")), patch.object(activation, "nix_build", side_effect=lambda runner, source, *args: Path("/nix/store/" + source.name + "-acp")):
+        profile_verify = Mock(return_value={"ok": True, "coverage": "mocked orchestration only"})
+        peer = types.SimpleNamespace(verify_codex_profile=profile_verify)
+        with patch.object(activation, "build_application", return_value=Path("/nix/store/codex")), patch.object(activation, "nix_build", side_effect=lambda runner, source, *args: Path("/nix/store/" + source.name + "-acp")), patch.object(activation, "import_peer", return_value=peer):
             pairs, tests = activation.probe_applications(runner, old_source, new_source, ["codex"], workspace, run, changed_outputs_only=True)
         self.assertEqual(pairs["codex"]["old"], pairs["codex"]["new"])
         self.assertNotEqual(pairs["codex-acp"]["old"], pairs["codex-acp"]["new"])

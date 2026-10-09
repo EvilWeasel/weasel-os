@@ -35,6 +35,8 @@ command = {json.dumps(command)}
 args = ["mcp"]
 startup_timeout_sec = 10
 tool_timeout_sec = 135
+# The daemon serializes input; priority control must bypass Codex's tool gate.
+supports_parallel_tool_calls = true
 # Explicitly authorized desktop control, scoped to this owned server.
 default_tools_approval_mode = "approve"
 {END}'''

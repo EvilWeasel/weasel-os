@@ -38,7 +38,7 @@ PROFILE = Path("/nix/var/nix/profiles/system")
 GIB = 1024 ** 3
 LANES = {
     "packages/t3code/source.json": "t3",
-    "packages/codex-bin.nix": "codex",
+    "packages/codex-source/default.nix": "codex",
     "packages/chatgpt/default.nix": "chatgpt",
 }
 REQUEST_KEYS = {"schema", "id", "baseline_commit", "baseline_system", "candidate_commit", "candidate_ref"}
@@ -615,13 +615,17 @@ def probe_applications(runner, old_source, new_source, kinds, workspace, run, *,
         app_pairs[kind] = {"old": str(old_app), "new": str(new_app)}
         changed = old_app != new_app
         acp_app = None
+        profile_ownership = None
         if kind == "codex":
             acp_app = nix_build(runner, new_source, None, acp_expression(new_source))
+            profile = nix_build(runner, new_source,
+                                "nixosConfigurations.nixy-laptop.config.home-manager.users.evilweasel.home.path")
+            profile_ownership = import_peer("weasel-update-gates.py").verify_codex_profile(profile, new_app, acp_app)
             if changed_outputs_only:
                 old_acp = nix_build(runner, old_source, None, acp_expression(old_source))
                 app_pairs["codex-acp"] = {"old": str(old_acp), "new": str(acp_app)}
                 changed = changed or old_acp != acp_app
-        app_tests[kind] = {"output_changed": changed, "probed": False}
+        app_tests[kind] = {"output_changed": changed, "probed": False, "profile_ownership": profile_ownership}
         if changed_outputs_only and not changed:
             continue
         probe_dir = workspace / ("probe-" + kind)

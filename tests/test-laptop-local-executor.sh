@@ -13,12 +13,15 @@ home="$root/hosts/nixy-laptop/home.nix"
 laptop="$root/profiles/system/laptop.nix"
 executor="$root/scripts/weasel-laptop-executor.nix"
 cua="$root/packages/cua-driver-bin.nix"
-codex="$root/packages/codex-bin.nix"
+codex="$root/packages/codex-source/default.nix"
 
 require "$cua" 'version = "0.23.2";'
 require "$cua" 'sha256-Ab+DOewSnMAPS0ssYFbvGnxbUt85/4OtF8mxaBiuxQA='
-require "$codex" 'version = "0.153.3";'
-require "$codex" 'sha256-UFktUtFpRhX5zPPKUEMrtFIal8vJOqLDl2j6ZZ24FbU='
+require "$codex" 'pname = "codex-scoped-cancel";'
+require "$codex" './codex-v0162-scoped-cancel.patch'
+require "$codex" './scoped-cancel-memory-tests.patch'
+require "$codex" 'toolchain = import ./toolchain.nix { };'
+require "$codex" '"codex-code-mode-host"'
 require "$home" 'systemd.user.services.cua-driver'
 require "$home" 'cua-driver serve --permission-mode standard'
 require "$home" 'cua-driver telemetry disable'

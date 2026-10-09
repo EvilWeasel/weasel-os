@@ -5,7 +5,6 @@
   "automatic_lanes": [
     "batch",
     "t3",
-    "codex",
     "chatgpt"
   ],
   "activation_policy": "reviewed-configured-channel-batch-after-host-checks-critical-probes-and-home-snapshot",
@@ -14,8 +13,11 @@
       "packages/t3code/source.json"
     ],
     "codex": [
-      "packages/codex-bin.nix:version",
-      "packages/codex-bin.nix:src.hash"
+      "packages/codex-source/default.nix",
+      "packages/codex-source/toolchain.nix",
+      "packages/codex-source/codex-v0162-scoped-cancel.patch",
+      "packages/codex-source/scoped-cancel-memory-tests.patch",
+      "packages/codex-source/README.md"
     ],
     "chatgpt": [
       "packages/chatgpt/default.nix:version",
@@ -26,7 +28,8 @@
       "flake.lock:normal-upstream-root-and-transitive-lock-graph-revisions",
       "packages/t3code/source.json:verified-official-version-url-hash",
       "existing-tracked-.nix-files-under-packages-programs-hosts-modules-profiles-lib-flake:reviewed-package-input-and-compatibility-repairs",
-      "paired-stable-release-migration:nixpkgs-nixos-25.11-to-nixos-26.05-and-home-manager-release-25.11-to-release-26.05-only"
+      "paired-stable-release-migration:nixpkgs-nixos-25.11-to-nixos-26.05-and-home-manager-release-25.11-to-release-26.05-only",
+      "packages/codex-source/**: excluded pending reviewed source/patch/toolchain adapter; unchanged source and actual CLI/ACP ownership required"
     ]
   },
   "support": {
@@ -913,29 +916,35 @@
     {
       "id": "codex",
       "kind": "custom-package",
-      "source": "packages/codex-bin.nix",
+      "source": "packages/codex-source/default.nix",
       "versions": [
         "0.162.0"
       ],
-      "revisions": [],
-      "lane": "npm-versioned-asset",
-      "reason": "Custom package required when old nixpkgs CLI could not decode model catalog; multiple installed owners historically exist.",
-      "required_gate": "Official npm tarball integrity, --version, codex app-server/ACP handshake; inspect executable ownership without paid model run.",
-      "next_review": "2026-10-09",
-      "last_review": "2026-10-08",
+      "revisions": [
+        "c1382380de69521303b416720a52f42d51af6248"
+      ],
+      "lane": "pinned-source-local-patch",
+      "reason": "Scoped MCP cancellation needs reviewed local production/test patches. Rust 1.95 is frozen independently from global Unstable; libraries remain caller-bound.",
+      "required_gate": "Complete unchanged source/patch/toolchain bundle; exact source build including cancellation unit tests; CLI/companion same-output identity; owned app-server/ACP handshake; actual built user-profile Codex/ACP links and exact CODEX_PATH export.",
+      "next_review": "2026-10-10",
+      "last_review": "2026-10-09",
       "affected_hosts": [
         "nixy-laptop"
       ],
       "gate_adapter": "codex",
-      "gate_status": "candidate-tested-activation-pending",
-      "review_status": "daily-candidate-discovery",
-      "automatic_scope": "exact-source-metadata-only",
-      "candidate_policy": "stable-release",
+      "gate_status": "source-build-and-profile-probe-required; activation-unverified",
+      "review_status": "daily-upstream-metadata-and-scoped-cancel-rebase-review",
+      "automatic_scope": "discover-only-held-local-patch; typed source adapter required before source changes",
+      "candidate_policy": "candidate-null-until-reviewed-source-adapter; stable official metadata only",
       "discovery_endpoints": [
         "https://registry.npmjs.org/@openai%2Fcodex/latest"
       ],
       "reason_evidence": [
-        "repo:packages/codex-bin.nix",
+        "repo:packages/codex-source/default.nix",
+        "repo:packages/codex-source/toolchain.nix",
+        "repo:packages/codex-source/codex-v0162-scoped-cancel.patch",
+        "repo:packages/codex-source/scoped-cancel-memory-tests.patch",
+        "repo:packages/codex-source/README.md",
         "https://github.com/openai/codex"
       ],
       "affected_versions": [
@@ -954,13 +963,50 @@
         ],
         "activation": "pending exact bootstrap",
         "source_commit": "4f8e152",
-        "installed_at_seed": "0.160.0"
+        "installed_at_seed": "0.160.0",
+        "scope": "Historical npm binary verification only; not acceptance of the current source build or scoped cancellation"
       },
       "batch_adapter": "batch",
-      "batch_gate_status": "host-checks-and-build-required; critical-probe-when-relevant-output-changes",
-      "package_specific_checks": "Official npm tarball integrity, --version, codex app-server/ACP handshake; inspect executable ownership without paid model run.",
+      "batch_gate_status": "bundle unchanged; candidate-relative source ownership and built profile links; probes for relevant changed outputs",
+      "package_specific_checks": "Rebase both patches against upstream MCP SDK cancellation/drop handling; maintain commit/source recursive-NAR hash/Cargo/V8 archive+binding/frozen Rust together; no npm replacement.",
       "critical_probe": "codex",
-      "runtime_coverage": "Actual critical probe required for the exact changed output; other package-specific checks must be named in the receipt."
+      "runtime_coverage": "Historical stock-Codex proof is separate. Fresh source build/profile/app-server/ACP gates and actual T3/Codex stop behavior require their own receipts.",
+      "source_files": [
+        "packages/codex-source/default.nix",
+        "packages/codex-source/toolchain.nix",
+        "packages/codex-source/codex-v0162-scoped-cancel.patch",
+        "packages/codex-source/scoped-cancel-memory-tests.patch",
+        "packages/codex-source/README.md"
+      ],
+      "pin_type": "pinned-source",
+      "source_identity": {
+        "kind": "pinned-source",
+        "version": "0.162.0",
+        "commit": "c1382380de69521303b416720a52f42d51af6248",
+        "url": "https://codeload.github.com/openai/codex/tar.gz/c1382380de69521303b416720a52f42d51af6248",
+        "hash": "sha256-YG/9hFOCl4cMYzjaH/3gBid4osxcrvCYQUDDzdbIygo="
+      },
+      "dependency_pins": {
+        "cargoHash": "sha256-UTu+ws1DqL375C+1jaVI9HBqDHnTuAQr7/h1rSzsEzg=",
+        "v8": {
+          "name": "librusty_v8-ptrcomp-sandbox-150.4.0",
+          "url": "https://github.com/openai/codex/releases/download/rusty-v8-v150.4.0/librusty_v8_ptrcomp_sandbox_release_x86_64-unknown-linux-gnu.a.gz",
+          "hash": "sha256-o1x10fJuapg4haRbM0kKTr5U8FBQVosyuJz7QhswtYM="
+        },
+        "v8Binding": {
+          "name": "rusty-v8-ptrcomp-sandbox-binding-150.4.0",
+          "url": "https://github.com/openai/codex/releases/download/rusty-v8-v150.4.0/src_binding_ptrcomp_sandbox_release_x86_64-unknown-linux-gnu.rs",
+          "hash": "sha256-dyeCauR5vbZF6Acjn7EtH44uI956bPFvXuWSaQ0dhQY="
+        },
+        "v8Version": "150.4.0",
+        "sourceHashMode": "recursive-fetchzip-NAR-not-raw-tarball"
+      },
+      "frozen_toolchain": {
+        "revision": "64c08a7ca051951c8eae34e3e3cb1e202fe36786",
+        "narHash": "sha256-tpyBcxPpcQb8ukyNF7DoCwfSY3VPsxHoYwj00Cayv5o=",
+        "rustVersion": "1.95.0",
+        "note": "Toolchain builder frozen; non-Rust library arguments remain caller-bound"
+      }
     },
     {
       "id": "chatgpt",
@@ -1543,5 +1589,9 @@
     "host_activation_scope": "Only nixy-laptop is automatically activated. Other host evaluations and full-flake checks do not deploy or runtime-test remote servers or other desktops.",
     "release_migration": "NixOS 25.11 to 26.05 and matching Home Manager are one typed reviewed pair. Preserve stateVersion; review kernel/EVDI/NVIDIA/initrd/network and mutable /var compatibility explicitly.",
     "evidence_scope": "Registry gate descriptions are requirements and coverage declarations. Only fresh candidate receipts prove a test; historical receipts do not establish a later batch or an activation."
-  }
+  },
+  "discover_only_lanes": [
+    "codex"
+  ],
+  "codex_review_policy": "Check official upstream latest every day; next review 2026-10-10. Rebase/remove patches only after verified upstream scoped-cancel support and source adapter review; other batch updates continue."
 }

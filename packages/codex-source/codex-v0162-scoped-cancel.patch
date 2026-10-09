@@ -1,0 +1,142 @@
+--- a/codex-rs/rmcp-client/src/lib.rs
++++ b/codex-rs/rmcp-client/src/lib.rs
+@@ -26,6 +26,7 @@
+ mod perform_oauth_login;
+ mod program_resolver;
+ mod protocol_mode;
++mod request_cancel_guard;
+ mod rmcp_client;
+ mod service_error;
+ mod startup_error;
+--- a/codex-rs/rmcp-client/src/rmcp_client.rs
++++ b/codex-rs/rmcp-client/src/rmcp_client.rs
+@@ -882,7 +882,7 @@
+                     }
+                     let mut options = rmcp::service::PeerRequestOptions::no_options();
+                     options.meta = meta;
+-                    let result = service
++                    let handle = service
+                         .peer()
+                         .send_request_with_option(
+                             ClientRequest::CallToolRequest(rmcp::model::CallToolRequest::new(
+@@ -890,9 +890,8 @@
+                             )),
+                             options,
+                         )
+-                        .await?
+-                        .await_response()
+                         .await?;
++                    let result = crate::request_cancel_guard::await_tool_response(handle).await?;
+                     match result {
+                         ServerResult::CallToolResult(result) => Ok(result),
+                         _ => Err(rmcp::service::ServiceError::UnexpectedResponse),
+--- a/codex-rs/rmcp-client/src/tool_input.rs
++++ b/codex-rs/rmcp-client/src/tool_input.rs
+@@ -52,7 +52,7 @@
+                 )
+                 .await?;
+             let id = handle.id.clone();
+-            Ok::<_, ServiceError>((id, handle.await_response().await?))
++            Ok::<_, ServiceError>((id, crate::request_cancel_guard::await_tool_response(handle).await?))
+         }
+         .await;
+         let (id, result) = response.map_err(|error| {
+--- /dev/null
++++ b/codex-rs/rmcp-client/src/request_cancel_guard.rs
+@@ -0,0 +1,96 @@
++//! Scoped cancellation for pending tools/call requests.
++//! Dropping a tool's awaiter does not cancel the shared MCP connection.
++
++use std::future::Future;
++use std::time::Duration;
++
++use rmcp::Peer;
++use rmcp::model::CancelledNotificationParam;
++use rmcp::model::RequestId;
++use rmcp::model::ServerResult;
++use rmcp::service::RequestHandle;
++use rmcp::service::RoleClient;
++use rmcp::service::ServiceError;
++use tokio::runtime::Handle;
++use tracing::warn;
++
++const CANCEL_SEND_TIMEOUT: Duration = Duration::from_secs(2);
++
++struct ToolRequestCancelOnDrop {
++    peer: Peer<RoleClient>,
++    request_id: Option<RequestId>,
++    runtime: Handle,
++}
++
++impl ToolRequestCancelOnDrop {
++    fn new(handle: &RequestHandle<RoleClient>) -> Self {
++        Self {
++            peer: handle.peer.clone(),
++            request_id: Some(handle.id.clone()),
++            // MCP's Tokio transport requires this runtime. Capture it before
++            // awaiting so Drop itself never needs to discover a current runtime.
++            runtime: Handle::current(),
++        }
++    }
++
++    fn disarm(&mut self) {
++        self.request_id = None;
++    }
++}
++
++impl Drop for ToolRequestCancelOnDrop {
++    fn drop(&mut self) {
++        let Some(request_id) = self.request_id.take() else {
++            return;
++        };
++        let peer = self.peer.clone();
++        self.runtime.spawn(async move {
++            let params = CancelledNotificationParam::new(
++                Some(request_id),
++                Some("tools/call awaiter dropped or timed out".to_owned()),
++            );
++            // One scoped notification, no retry and no operation replay. A
++            // transport send acknowledgement is not a server-side stop receipt.
++            match tokio::time::timeout(CANCEL_SEND_TIMEOUT, peer.notify_cancelled(params)).await {
++                Ok(Ok(())) => {}
++                Ok(Err(error)) => {
++                    let kind = match error {
++                        ServiceError::TransportClosed => "transport_closed",
++                        ServiceError::TransportSend(_) => "transport_send",
++                        ServiceError::McpError(_) => "protocol_error",
++                        _ => "other",
++                    };
++                    warn!(kind, "failed to send scoped MCP tool cancellation");
++                }
++                Err(_) => warn!("timed out sending scoped MCP tool cancellation"),
++            }
++        });
++    }
++}
++
++pub(crate) fn await_tool_response(
++    handle: RequestHandle<RoleClient>,
++) -> impl Future<Output = Result<ServerResult, ServiceError>> + Send {
++    // Construct the guard synchronously: even a never-polled returned future
++    // cancels its already-enqueued request when dropped.
++    let mut guard = ToolRequestCancelOnDrop::new(&handle);
++    async move {
++        let result = handle.await_response().await;
++        if matches!(
++            &result,
++            Ok(_)
++                | Err(ServiceError::McpError(_))
++                | Err(ServiceError::Cancelled { .. })
++                | Err(ServiceError::Timeout { .. })
++        ) {
++            // A server result/error is terminal for this request. SDK timeout
++            // and cancellation already emitted their scoped cancellation. Both
++            // tool call sites use no_options(), so SDK timeouts are currently
++            // absent; outer active-time timeouts instead drop this future.
++            guard.disarm();
++        }
++        // Transport failures do not establish remote completion. Leave the
++        // guard armed for one bounded cancellation attempt; delivery may fail.
++        result
++    }
++}

@@ -1,4 +1,6 @@
 mod global_keyboard;
+mod mcp_cancel_registry;
+mod release_recovery;
 mod takeover;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use keyboard::Keyboard;
@@ -1625,6 +1627,9 @@ fn execute(
 
 fn act(state: &State, args: &Value, epoch: u64) -> R<Value> {
     let start = Instant::now();
+    if !state.release_confirmed.load(Ordering::SeqCst) {
+        return Err("Previous actuator release/receipt is unconfirmed; call desktop_recover_release explicitly while idle. No new input allowed.".into());
+    }
     if !state.capture_available.load(Ordering::SeqCst) {
         return Err(
             "No successful current capture available; call desktop_observe before input".into(),
@@ -1706,11 +1711,14 @@ fn act(state: &State, args: &Value, epoch: u64) -> R<Value> {
     state.queued.fetch_sub(1, Ordering::SeqCst);
     check_epoch(state, Some(epoch))?;
     check_epoch(state, Some(obs.epoch))?;
+    // Recovery clears cached targets without clearing/incrementing the epoch.
+    // A request that cloned an observation before recovery must not reuse it.
+    validate_retained_observation(state, &obs)?;
     if state.takeover.load(Ordering::SeqCst) {
         return Err("Desktop takeover is latched; pending batch rejected".into());
     }
     if !state.release_confirmed.load(Ordering::SeqCst) {
-        return Err("Previous actuator release/receipt is unconfirmed; no new input allowed. Repair/reconnect own backend and obtain release confirmation before resuming.".into());
+        return Err("Previous actuator release/receipt is unconfirmed; no new input allowed. Call desktop_recover_release explicitly while idle, then observe again.".into());
     }
     *state
         .active
@@ -2123,6 +2131,132 @@ fn semantic_direct(state: &State, args: &Value) -> R<Value> {
     ))
 }
 
+fn validate_retained_observation(state: &State, obs: &Observation) -> R<()> {
+    if !state
+        .observations
+        .lock()
+        .map_err(|_| "Observation storage poisoned")?
+        .contains_key(&obs.id)
+    {
+        return Err(
+            "Observation invalidated while waiting for actor; observe again before input".into(),
+        );
+    }
+    Ok(())
+}
+
+#[derive(Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ReleaseRecoveryArgs {
+    timeout_ms: Option<u64>,
+}
+
+fn recover_release(state: &State, args: &Value) -> R<Value> {
+    let start = Instant::now();
+    let parsed: ReleaseRecoveryArgs = serde_json::from_value(args.clone())
+        .map_err(|e| format!("Invalid release recovery arguments: {e}"))?;
+    let budget = Duration::from_millis(parsed.timeout_ms.unwrap_or(1500));
+    if !(Duration::from_millis(200)..=Duration::from_millis(2000)).contains(&budget) {
+        return Err("Release recovery timeout_ms must be 200..2000".into());
+    }
+    // No waiting for another writer, no construction/reconnect, no hidden replay.
+    let mut ptr = state
+        .actor
+        .try_lock()
+        .map_err(|_| "Actor busy/poisoned; release recovery refused")?;
+    let mut active = state
+        .active
+        .try_lock()
+        .map_err(|_| "Active state busy/poisoned; release recovery refused")?;
+    if !active.is_null() || state.queued.load(Ordering::SeqCst) != 0 {
+        return Err(
+            "Release recovery requires actor idle and queue empty; no release attempt made".into(),
+        );
+    }
+    if state.release_confirmed.load(Ordering::SeqCst) {
+        return Ok(text_result(
+            json!({"schema":1,"status":"already_confirmed","actor_release_confirmed":true,"release_attempted":false,"epoch":state.epoch.load(Ordering::SeqCst),"takeover_latched":state.takeover.load(Ordering::SeqCst),"takeover_cleared":false,"action_replayed":false}),
+        ));
+    }
+    let mut kb = state
+        .keyboard
+        .try_lock()
+        .map_err(|_| "Keyboard busy/poisoned; release recovery refused")?;
+    let mut global = state
+        .global_keyboard
+        .try_lock()
+        .map_err(|_| "Global keyboard busy/poisoned; release recovery refused")?;
+    let mut observations = state
+        .observations
+        .try_lock()
+        .map_err(|_| "Observations busy/poisoned; release recovery refused")?;
+    let mut semantic = state
+        .semantic_targets
+        .try_lock()
+        .map_err(|_| "Semantic storage busy/poisoned; release recovery refused")?;
+    let epoch_before = state.epoch.load(Ordering::SeqCst);
+    *active =
+        json!({"phase":"release_recovery","epoch":epoch_before,"timeout_ms":budget.as_millis()});
+    drop(active); // Cancel/takeover/status do not wait for this receipt retry.
+                  // Cancellation/takeover must not skip releases. Each call below can ONLY
+                  // release owned held inputs or confirm receipt; no new device/keymap/input.
+    let report = release_recovery::retry(budget, Instant::now, |backend, until| {
+        let remaining = || {
+            let left = until.saturating_duration_since(Instant::now());
+            if left.is_zero() {
+                Err("Release recovery stage deadline elapsed".to_string())
+            } else {
+                Ok(left)
+            }
+        };
+        match backend {
+            release_recovery::Backend::Pointer => match ptr.as_mut() {
+                Some(p) => {
+                    p.release_all().map_err(|e| e.to_string())?;
+                    p.sync_timeout(remaining()?).map_err(|e| e.to_string())?;
+                    Ok(true)
+                }
+                None => Ok(false),
+            },
+            release_recovery::Backend::Keyboard => match kb.as_mut() {
+                Some(k) => {
+                    k.release_all().map_err(|e| e.to_string())?;
+                    k.sync_timeout(remaining()?).map_err(|e| e.to_string())?;
+                    Ok(true)
+                }
+                None => Ok(false),
+            },
+            release_recovery::Backend::GlobalKeyboard => match global.as_mut() {
+                Some(k) => k.release_all_until(until).map(|_| true),
+                None => Ok(false),
+            },
+        }
+    })
+    .expect("Release recovery budget was validated before locking");
+    if report.confirmed {
+        observations.clear();
+        semantic.clear();
+        state.capture_available.store(false, Ordering::SeqCst);
+    }
+    state
+        .release_confirmed
+        .store(report.confirmed, Ordering::SeqCst);
+    *state
+        .active
+        .lock()
+        .map_err(|_| "Active state poisoned after release recovery")? = Value::Null;
+    let stages: Vec<Value> = report
+        .stages
+        .iter()
+        .map(|s| json!({"backend":s.backend.name(),"status":s.status,"error":s.error}))
+        .collect();
+    let data = json!({"schema":1,"status":if report.confirmed {"release_recovered"} else {"release_unconfirmed"},"actor_release_confirmed":report.confirmed,"release_attempted":true,"epoch_before":epoch_before,"epoch":state.epoch.load(Ordering::SeqCst),"takeover_latched":state.takeover.load(Ordering::SeqCst),"takeover_cleared":false,"action_replayed":false,"fresh_observation_required":report.confirmed,"queued_batches":state.queued.load(Ordering::SeqCst),"stages":stages,"elapsed_ms":start.elapsed().as_secs_f64()*1000.0,"note":"Owned release/receipt only. May finalize already-dispatched held input effects; never replays actions or resumes automation. Original last_result preserved. Inspect status and obtain a fresh observation before any continuation. A persistent transport failure remains unconfirmed and requires explicit owned-backend repair."});
+    record(state, "desktop_recover_release", data.clone());
+    let mut result = text_result(data);
+    result["isError"] = json!(!report.confirmed);
+    Ok(result)
+}
+
 fn handle(state: &State, tool: &str, args: &Value, epoch: u64) -> R<Value> {
     match tool {
         "desktop_status" => Ok(text_result(
@@ -2135,6 +2269,7 @@ fn handle(state: &State, tool: &str, args: &Value, epoch: u64) -> R<Value> {
         "desktop_semantic" => semantic(state, args),
         "desktop_semantic_direct" => semantic_direct(state, args),
         "desktop_act" => act(state, args, epoch),
+        "desktop_recover_release" => recover_release(state, args),
         "desktop_cancel" | "desktop_takeover" => {
             if tool == "desktop_takeover" {
                 state.takeover.store(true, Ordering::SeqCst);
@@ -2182,7 +2317,7 @@ fn handle(state: &State, tool: &str, args: &Value, epoch: u64) -> R<Value> {
                 );
             }
             if !state.release_confirmed.load(Ordering::SeqCst) {
-                return Err("Previous actor release was not confirmed by compositor; repair/reconnect own backend before resuming".into());
+                return Err("Previous actor release was not confirmed by compositor; call desktop_recover_release explicitly while idle; takeover remains latched".into());
             }
             // A fresh process has not yet observed a quiet interval. Missing
             // evdev observation is a capability failure, never evidence of idle.
@@ -2257,6 +2392,7 @@ fn tools() -> Value {
       {"name":"desktop_act","description":"Single-writer typed desktop actions against fresh observation. Rejects changed focus/geometry/scaling or changed pixels near pointer targets. x/y are local to displayed screenshot/crop. Focus must be standalone. Unknown or misplaced fields for an action kind reject the whole batch before input; restore_clipboard belongs only to paste, while type always preserves the prior selection. By default observe_after=true returns a new after_observation ID and image in this same response after dispatch/release and a bounded80ms defaultsettle wait; settle_ms=0..1000 can adjust. Use it for the next act and inspect expected result. A slow/unchanged frame needs another observation/semantic check, not repetition of toggle input. include_image=false omits its image. Acknowledgement is not UI success. Type text_method=auto uses clipboard for known Electron IDs (code/T3) and >1000-character text, keyboard for shorter text in other apps; explicit keyboard/clipboard are available. Electron wtype Unicode is unreliable on this laptop. Clipboard preserves supported text/rich app payloads and original Chromium provenance in bounded RAM from one offer, normalizes duplicate MIME names, omits SAVE_TARGETS and SAME_APP GTK_TEXT_BUFFER_CONTENTS transport markers, preserves serialized GTK rich text, and keeps a separate source holder across actor restarts. Unsupported/sensitive/oversized formats refuse before replacement. Own-source check runs after layout/keymap/window validation and before the first paste modifier press; ownership can still change between reply and input because Wayland has no atomic selection-check-and-paste. No restore after takeover/cancel/ownership loss. Scroll dx/dy are discrete wheel steps (integer -100..100), not pixels; positive dx moves right and positive dy moves down. Smooth-scroll animation needs another fresh observation/settle check before reusing visual targets. Keys are modifiers first e.g.[ctrl,l],[Return]. Explicit key_scope=compositor and Super/meta/logo chords use an owned persistent direct-uinput device because this Niri25.11 Wayland virtual keyboard bypasses compositor bindings; Ctrl/app chords retain the Wayland transport. A fresh proxy check requires backend routing_revision=2 and binds session/epoch/observation before forwarding a global batch; an older backend is refused. Missing permission/takeover monitor/compositor device-open evidence refuses the complete batch before input. Creating the own device is a capability side effect. A kernel input acknowledgement does not verify Niri/UI acceptance; inspect the fresh result. No automatic input fallback. Direct semantic_set_value(handle_id,text,expected_text optional) replaces exact editable contents; semantic_click(handle_id,action_name from direct tree) invokes only AT-SPI named action. Both freshly revalidate context and have no input fallback. Batch stable edits/shortcuts when intermediate states cannot invalidate later targets; changed-target actions need fresh observation.","inputSchema":{"type":"object","properties":{"observation_id":{"type":"string"},"window_id":{"type":"integer"},"task_id":{"type":"string"},"timeout_ms":{"type":"integer","minimum":100,"maximum":120000,"description":"Whole batch budget including queue, validation, capture, input and post-observe. Bounded release cleanup follows even after timeout."},"observe_after":{"type":"boolean","default":true},"include_image":{"type":"boolean","default":true},"settle_ms":{"type":"integer","default":80,"minimum":0,"maximum":1000,"description":"Bounded post-action settle wait before capture; not a proof of repaint. Slow conditions require fresh observations, never repeated blind input."},"actions":{"type":"array","items":action,"minItems":1,"maxItems":32}},"required":["observation_id","actions"]}},
       {"name":"desktop_cancel","description":"Priority epoch cancellation independent of actor lock. Pending batches stop; held buttons release. Already-dispatched effects remain. Wait for desktop_status active=null and actor_release_confirmed=true for full release.","inputSchema":{"type":"object","properties":{}}},
       {"name":"desktop_takeover","description":"Explicit human desktop takeover, persists its cause across backend restarts and latches refusal of future actions and cancels queued/active automation. Physical evdev input does this automatically when accessible. Wait active=null and actor_release_confirmed=true for full release. desktop_resume then fresh observation is required.","inputSchema":{"type":"object","properties":{}}},
+      {"name":"desktop_recover_release","description":"Explicit bounded recovery of unconfirmed release/receipt on existing owned actuators only. Refuses if writer busy, active task or queue nonempty. Sends only releases of owned held buttons/keys and receipt sync, no press/move/device creation/action replay, no epoch/latch/cause reset, no automatic resume. May finalize effects of already-held input. Default1500ms, maximum2000ms shared budget. Failure remains unconfirmed; original last_result preserved. Success invalidates old observations/semantic handles and requires fresh capture; inspect status queue and follow human return-of-control policy before resume.","inputSchema":{"type":"object","properties":{"timeout_ms":{"type":"integer","minimum":200,"maximum":2000,"default":1500}},"additionalProperties":false}},
       {"name":"desktop_resume","description":"Backend startup is always latched and preserves any prior human/explicit cause. Explicitly release takeover latch only after the user returns control, actor stopped and physical input idle. Do not automatically undo human takeover. Invalidates older observations. Call desktop_observe again before acting.","inputSchema":{"type":"object","properties":{}}}
     ]);
     // These hints describe desktop/app effects; private read caches do not
@@ -2273,6 +2409,7 @@ fn tools() -> Value {
                 | "desktop_semantic"
                 | "desktop_semantic_direct",
             ) => (true, false, true),
+            Some("desktop_recover_release") => (false, true, true),
             Some("desktop_cancel" | "desktop_takeover" | "desktop_resume") => (false, false, false),
             _ => (false, true, true),
         };
@@ -2420,6 +2557,8 @@ fn daemon_call_owned(
         cancel,
         if matches!(tool, "desktop_cancel" | "desktop_takeover") {
             Duration::from_secs(2)
+        } else if tool == "desktop_recover_release" {
+            Duration::from_secs(3)
         } else {
             Duration::from_secs(135)
         },
@@ -2628,11 +2767,13 @@ fn serve(socket: &Path) -> R<()> {
 }
 
 fn mcp(socket: &Path) -> R<()> {
+    use mcp_cancel_registry::{Registry, RequestKey, RequestKind};
     let output = Arc::new(Mutex::new(io::stdout()));
     let stdin = io::stdin();
     let mut running = Vec::new();
-    let pending = Arc::new(Mutex::new(HashMap::<String, Arc<AtomicBool>>::new()));
-    let inflight = Arc::new(Mutex::new(std::collections::HashSet::<String>::new()));
+    // One registry and lock per stdio connection. Nothing persists across a
+    // client reconnect and no registry cancellation changes the actor epoch.
+    let registry = Arc::new(Mutex::new(Registry::new()));
     for line in stdin.lock().lines() {
         let line = line.map_err(|e| e.to_string())?;
         if line.trim().is_empty() {
@@ -2641,58 +2782,82 @@ fn mcp(socket: &Path) -> R<()> {
         let req: Value = serde_json::from_str(&line).map_err(|e| e.to_string())?;
         let Some(id) = req.get("id").cloned() else {
             if req["method"] == "notifications/cancelled" {
-                if let Some(flag) = pending
-                    .lock()
-                    .map_err(|_| "Pending calls lock poisoned")?
-                    .get(&req["params"]["requestId"].to_string())
-                {
-                    flag.store(true, Ordering::SeqCst);
+                // Missing, malformed or oversized IDs cannot alias a real ID.
+                if let Ok(key) = RequestKey::parse(&req["params"]["requestId"]) {
+                    registry
+                        .lock()
+                        .map_err(|_| "MCP request registry lock poisoned")?
+                        .cancel(key);
                 }
             }
             continue;
         };
-        let request_key = id.to_string();
-        if !inflight
-            .lock()
-            .map_err(|_| "Inflight IDs lock poisoned")?
-            .insert(request_key.clone())
-        {
-            let response = json!({"jsonrpc":"2.0","id":id,"error":{"code":-32600,"message":"Duplicate in-flight MCP request ID rejected; original call and cancellation ownership retained"}});
-            let mut stdout = output.lock().map_err(|_| "MCP output lock poisoned")?;
-            writeln!(*stdout, "{response}").map_err(|e| e.to_string())?;
-            stdout.flush().map_err(|e| e.to_string())?;
-            continue;
-        }
-        let is_act = req["method"] == "tools/call" && req["params"]["name"] == "desktop_act";
-        let cancel = Arc::new(AtomicBool::new(false));
-        if is_act {
-            pending
-                .lock()
-                .map_err(|_| "Pending calls lock poisoned")?
-                .insert(request_key.clone(), cancel.clone());
-        }
-        let pending = pending.clone();
-        let inflight = inflight.clone();
+        let request_key = match RequestKey::parse(&id) {
+            Ok(key) => key,
+            Err(refusal) => {
+                let response = json!({"jsonrpc":"2.0","id":null,"error":{"code":refusal.code(),"message":refusal.message()}});
+                let mut stdout = output.lock().map_err(|_| "MCP output lock poisoned")?;
+                writeln!(*stdout, "{response}").map_err(|e| e.to_string())?;
+                stdout.flush().map_err(|e| e.to_string())?;
+                continue;
+            }
+        };
+        let kind = RequestKind::from_request(&req);
+        let worker_id = id.clone();
+        let worker_registry = registry.clone();
+        let worker_key = request_key.clone();
         let out = output.clone();
         let path = socket.to_owned();
-        running.push(thread::spawn(move||{
-        let method=req["method"].as_str().unwrap_or("");let result=match method{
-          "initialize"=>Ok(json!({"protocolVersion":req["params"]["protocolVersion"].as_str().unwrap_or("2024-11-05"),"capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":"weasel-computer-use","version":"0.1.0"}})),
-          "ping"=>Ok(json!({})),"tools/list"=>Ok(json!({"tools":tools()})),
-          "tools/call"=>daemon_call_owned(&path,req["params"]["name"].as_str().unwrap_or(""),req["params"].get("arguments").unwrap_or(&json!({})),if is_act{Some(cancel)}else{None}),
-          _=>Err(format!("Unsupported MCP method {method}")),
-        };if is_act{if let Ok(mut calls)=pending.lock(){calls.remove(&request_key);}}
-        let response=match result{Ok(result)=>json!({"jsonrpc":"2.0","id":id,"result":result}),Err(message)=>json!({"jsonrpc":"2.0","id":id,"error":{"code":-32603,"message":message}})};if let Ok(mut stdout)=out.lock(){let _=writeln!(*stdout,"{response}");let _=stdout.flush();}if let Ok(mut ids)=inflight.lock(){ids.remove(&request_key);}
-    }));
+        let admission = registry
+            .lock()
+            .map_err(|_| "MCP request registry lock poisoned")?
+            .admit_then(request_key, kind, move |cancel| {
+                // This closure is NEVER invoked for pre-canceled, duplicate or
+                // exhausted action IDs. Refusal is before thread/daemon contact.
+                thread::spawn(move || {
+                    let method = req["method"].as_str().unwrap_or("");
+                    let result = match method {
+                        "initialize" => Ok(json!({"protocolVersion":req["params"]["protocolVersion"].as_str().unwrap_or("2024-11-05"),"capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":"weasel-computer-use","version":"0.1.0"}})),
+                        "ping" => Ok(json!({})),
+                        "tools/list" => Ok(json!({"tools":tools()})),
+                        "tools/call" => daemon_call_owned(
+                            &path,
+                            req["params"]["name"].as_str().unwrap_or(""),
+                            req["params"].get("arguments").unwrap_or(&json!({})),
+                            cancel,
+                        ),
+                        _ => Err(format!("Unsupported MCP method {method}")),
+                    };
+                    // Completion and cancellation lookup share ONE lock. Keep
+                    // the terminal ID so a late Cancel cannot poison ID reuse.
+                    if let Ok(mut calls) = worker_registry.lock() {
+                        calls.finish(&worker_key);
+                    }
+                    let response = match result {
+                        Ok(result) => json!({"jsonrpc":"2.0","id":worker_id,"result":result}),
+                        Err(message) => json!({"jsonrpc":"2.0","id":worker_id,"error":{"code":-32603,"message":message}}),
+                    };
+                    if let Ok(mut stdout) = out.lock() {
+                        let _ = writeln!(*stdout, "{response}");
+                        let _ = stdout.flush();
+                    }
+                })
+            });
+        match admission {
+            Ok(worker) => running.push(worker),
+            Err(refusal) => {
+                let response = json!({"jsonrpc":"2.0","id":id,"error":{"code":refusal.code(),"message":refusal.message()}});
+                let mut stdout = output.lock().map_err(|_| "MCP output lock poisoned")?;
+                writeln!(*stdout, "{response}").map_err(|e| e.to_string())?;
+                stdout.flush().map_err(|e| e.to_string())?;
+            }
+        }
         running.retain(|h| !h.is_finished());
     }
-    for flag in pending
+    registry
         .lock()
-        .map_err(|_| "Pending calls lock poisoned")?
-        .values()
-    {
-        flag.store(true, Ordering::SeqCst);
-    }
+        .map_err(|_| "MCP request registry lock poisoned")?
+        .cancel_owned_pending();
     for h in running {
         let _ = h.join();
     }
@@ -3262,5 +3427,188 @@ mod global_routing_regression {
         );
         assert_eq!(args["actions"][1]["key_scope"], "compositor");
         assert!(args["timeout_ms"].as_u64().unwrap() <= 1000);
+    }
+}
+
+#[cfg(test)]
+mod release_recovery_tests {
+    use super::*;
+    fn fixture(label: &str) -> (State, PathBuf) {
+        let dir = env::temp_dir().join(format!(
+            "weasel-private-release-recovery-{}-{label}",
+            std::process::id()
+        ));
+        private_dir(&dir).unwrap();
+        let session = "private-release-recovery-session";
+        let mut latch = takeover::Latch::startup(dir.join("takeover.json"), session).unwrap();
+        latch.set("explicit_desktop_takeover", session).unwrap();
+        let file = fs::OpenOptions::new()
+            .create(true)
+            .write(true)
+            .mode(0o600)
+            .open(dir.join("events.jsonl"))
+            .unwrap();
+        (
+            State {
+                started: Instant::now(),
+                session_id: session.into(),
+                epoch: AtomicU64::new(77),
+                serial: AtomicU64::new(1),
+                queued: AtomicUsize::new(0),
+                takeover: AtomicBool::new(true),
+                takeover_marker: Mutex::new(latch),
+                last_human_ms: AtomicU64::new(0),
+                human_monitor: Mutex::new(Value::Null),
+                release_confirmed: AtomicBool::new(false),
+                capture_available: AtomicBool::new(true),
+                active: Mutex::new(Value::Null),
+                last_result: Mutex::new(
+                    json!({"status":"failed","error":"original timeout preserved"}),
+                ),
+                observations: Mutex::new(HashMap::new()),
+                semantic_targets: Mutex::new(HashMap::new()),
+                actor: Mutex::new(None),
+                keyboard: Mutex::new(None),
+                global_keyboard: Mutex::new(None),
+                image_dir: dir.clone(),
+                log: Mutex::new(file),
+            },
+            dir,
+        )
+    }
+    fn obs(dir: &Path) -> Observation {
+        Observation {
+            id: "cloned-before-recovery".into(),
+            at: Instant::now(),
+            epoch: 77,
+            output: "private-fixture".into(),
+            output_geometry: Value::Null,
+            focused_window: None,
+            focus_output: None,
+            image_width: 1,
+            image_height: 1,
+            image: dir.join("never-read.png"),
+            view: Crop {
+                x: 0,
+                y: 0,
+                width: 1,
+                height: 1,
+            },
+            view_image: dir.join("never-read.png"),
+        }
+    }
+    #[test]
+    fn release_recovery_preserves_epoch_latch_cause_original_failure_and_invalidates_cloned_target()
+    {
+        let (state, dir) = fixture("preserve");
+        let o = obs(&dir);
+        state
+            .observations
+            .lock()
+            .unwrap()
+            .insert(o.id.clone(), o.clone());
+        validate_retained_observation(&state, &o).unwrap();
+        let marker_before = fs::read(dir.join("takeover.json")).unwrap();
+        let failed_before = state.last_result.lock().unwrap().clone();
+        let result = handle(&state, "desktop_recover_release", &json!({}), 77).unwrap();
+        assert_eq!(result["isError"], false);
+        assert!(state.release_confirmed.load(Ordering::SeqCst));
+        assert_eq!(state.epoch.load(Ordering::SeqCst), 77);
+        assert!(state.takeover.load(Ordering::SeqCst));
+        assert_eq!(fs::read(dir.join("takeover.json")).unwrap(), marker_before);
+        assert_eq!(*state.last_result.lock().unwrap(), failed_before);
+        assert!(!state.capture_available.load(Ordering::SeqCst));
+        assert!(state.active.lock().unwrap().is_null());
+        assert!(validate_retained_observation(&state, &o).is_err());
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn release_recovery_refuses_busy_writer_without_wait_or_state_change() {
+        let (state, dir) = fixture("busy");
+        let held = state.actor.lock().unwrap();
+        let t = Instant::now();
+        assert!(recover_release(&state, &json!({}))
+            .unwrap_err()
+            .contains("Actor busy"));
+        assert!(t.elapsed() < Duration::from_millis(100));
+        assert!(!state.release_confirmed.load(Ordering::SeqCst));
+        drop(held);
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn release_recovery_refuses_active_or_queued_before_any_release() {
+        let (state, dir) = fixture("pending");
+        *state.active.lock().unwrap() = json!({"task_id":"old active"});
+        assert!(recover_release(&state, &json!({}))
+            .unwrap_err()
+            .contains("idle and queue empty"));
+        *state.active.lock().unwrap() = Value::Null;
+        state.queued.store(1, Ordering::SeqCst);
+        assert!(recover_release(&state, &json!({}))
+            .unwrap_err()
+            .contains("idle and queue empty"));
+        assert!(!state.release_confirmed.load(Ordering::SeqCst));
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn release_recovery_strict_args_and_bounds_refuse_without_state_change() {
+        let (state, dir) = fixture("args");
+        for args in [
+            json!({"actions":[{"kind":"click"}]}),
+            json!({"timeout_ms":0}),
+            json!({"timeout_ms":199}),
+            json!({"timeout_ms":2001}),
+            json!({"timeout_ms":-1}),
+            json!({"timeout_ms":1.5}),
+        ] {
+            assert!(recover_release(&state, &args).is_err());
+            assert!(!state.release_confirmed.load(Ordering::SeqCst));
+            assert!(state.active.lock().unwrap().is_null());
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn release_recovery_lock_preflight_refuses_before_stage_or_active_marker() {
+        let (state, dir) = fixture("kb-busy");
+        let held = state.keyboard.lock().unwrap();
+        assert!(recover_release(&state, &json!({}))
+            .unwrap_err()
+            .contains("Keyboard busy"));
+        assert!(state.active.lock().unwrap().is_null());
+        assert!(!state.release_confirmed.load(Ordering::SeqCst));
+        drop(held);
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn release_recovery_already_confirmed_does_not_invalidate_capture_or_resume() {
+        let (state, dir) = fixture("already");
+        state.release_confirmed.store(true, Ordering::SeqCst);
+        let result = recover_release(&state, &json!({})).unwrap();
+        let data: Value =
+            serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(data["release_attempted"], false);
+        assert_eq!(data["status"], "already_confirmed");
+        assert!(state.capture_available.load(Ordering::SeqCst));
+        assert!(state.takeover.load(Ordering::SeqCst));
+        assert_eq!(state.epoch.load(Ordering::SeqCst), 77);
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn release_recovery_tool_truthfully_exposes_only_timeout_and_write_effects() {
+        let catalog = tools();
+        let tool = catalog
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["name"] == "desktop_recover_release")
+            .unwrap();
+        assert_eq!(tool["annotations"]["readOnlyHint"], false);
+        assert_eq!(tool["annotations"]["destructiveHint"], true);
+        assert_eq!(tool["annotations"]["openWorldHint"], true);
+        assert_eq!(tool["inputSchema"]["additionalProperties"], false);
+        assert_eq!(
+            tool["inputSchema"]["properties"].as_object().unwrap().len(),
+            1
+        );
     }
 }

@@ -123,7 +123,7 @@ gebaut, aktiviert und tatsächlich beobachtet.
 T3 folgt dem gewählten regulären Nightly-Kanal; Maintainer-Previews und stille
 Downgrades sind ausgeschlossen. Der Discovery-Vertrag bleibt Version 1 mit
 `lane`, `channel`, `current`, `candidate`, `evidence`, `checked_at`, `status`
-und `source_files`. Quell-Pins enthalten exakt `version`, versionierte `url`
+und `source_files`. Quell-Pins für T3 und ChatGPT enthalten exakt `version`, versionierte `url`
 und SHA-256-SRI-`hash`.
 
 - T3 prüft offizielle Releases und Asset-Digests. Nightly-`SHA256SUMS` enthält
@@ -131,8 +131,18 @@ und SHA-256-SRI-`hash`.
   Version, AppImage-Datei, Größe und SHA-512. Neue Kandidatenbytes müssen die
   veröffentlichten Desktop-Hashes erfüllen. Drafts und Kanalabweichungen stoppen
   die Discovery; dieselbe Version mit verändertem Hash ist ein Fehler.
-- Codex prüft offizielles npm-`latest`, die zugehörige `-linux-x64`-Version,
-  Tarball-URL und npm-SHA-512-Integrity. Der SHA-256-Pin stammt aus denselben Bytes.
+- Codex verwendet einen typisierten pinned-source-Pin mit Version, Commit,
+  exakter Codeload-URL und rekursivem Fetchzip-NAR-Hash. Sein Bundle enthält
+  default.nix, toolchain.nix, beide Scoped-Cancel-Patches und README.md.
+  Die Registry erfasst zusätzlich Cargo-Hash, das gepaarte V8-Archiv/Binding und
+  den außerhalb von flake.lock eingefrorenen Nixpkgs/Rust-1.95-Pin. Offizielles
+  npm-latest ist allein ein Versionshinweis: Discovery gibt held-local-patch,
+  candidate: null und den nächsten Review am Folgetag zurück. Source-/Patch-
+  Änderungen benötigen einen geprüften Source-Adapter und einen Patch-Rebase;
+  npm-Downloads ersetzen den Source-Build nicht. Andere Batchupdates bleiben
+  möglich, wenn Bundle und tatsächliche Codex/ACP-Profilbindung geprüft bestehen.
+  Der nächste datierte Rebase-Review ist am 10.10.2026 fällig. Historische
+  npm-Proben bleiben ausdrücklich historische Belege.
 - ChatGPT prüft den begrenzten RPM-Header des offiziellen `latest`-Endpunkts,
   dann die konkrete versionierte RPM-Identität und den vollständig berechneten
   Hash. Payload und RPM-Scriptlets werden dabei nicht ausgeführt.

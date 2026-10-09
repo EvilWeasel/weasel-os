@@ -8,7 +8,7 @@
 }:
 let
   p = pkgsUnstable;
-  codexPackage = pkgs.callPackage ../packages/codex-bin.nix { };
+  codexPackage = pkgsUnstable.callPackage ../packages/codex-source { };
   codexAcp = p.callPackage ../packages/codex-acp.nix { inherit codexPackage; };
   serena = inputs.serena.packages.${pkgs.stdenv.hostPlatform.system}.default;
   languagePackages = with p; [

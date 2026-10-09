@@ -90,11 +90,25 @@ not confirm release. Already completed effects remain. Do not retry interrupted 
 operations without checking what already happened. Never restart T3 or the
 compositor to recover this backend.
 
+If `actor_release_confirmed` is false after the actor and queue are idle,
+`desktop_recover_release` offers one explicit release-only retry with a shared
+200–2000 ms budget (default 1500 ms). It refuses busy writers and never presses,
+moves, creates an actuator or replays completed work. Check the returned stages
+and fresh status. Success retains the original failure and any takeover cause;
+it clears old captures/handles, so obtain a new observation. It does not return
+control after a human takeover. Continued failure requires inspection and a
+deliberate reconnect of only this owned backend with the latch preserved.
+
 Physical input latches takeover when its evdev monitor is available. After a
 takeover, stop and wait for the user to request continuation. Only then call
 `desktop_resume` and obtain a new observation. The emergency key is
 **Ctrl+Alt+Escape**. Normal T3/Codex tool cancellation is forwarded to the actor;
-verify that it has released input. German shortcuts use a persistent canonical
+this requires the installed scoped-cancel Codex build in the actual client
+process. A local Stop acknowledgement alone does not prove actor release.
+Use priority desktop cancel/takeover and check release if it remains active.
+The owned MCP entry enables parallel calls so priority control is not queued
+behind a long client-side tool wait; the daemon still serializes physical input.
+After changing that entry, use a fresh client connection. German shortcuts use a persistent canonical
 Wayland keyboard for app shortcuts. For a Niri shortcut, send
 `{"kind":"key","keys":[...],"key_scope":"compositor"}`. App shortcuts use
 `key_scope:"app"` by default; Super/meta/logo always use the compositor route.

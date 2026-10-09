@@ -239,9 +239,9 @@ class SourceTransitions(unittest.TestCase):
     def test_nix_pins_allow_only_version_and_hash_value_changes(self):
         old = b'{\n  version = "0.1.0";\n    hash = "sha256-' + b'A' * 43 + b'=";\n  safe = true;\n}\n'
         new = old.replace(b'0.1.0', b'0.2.0').replace(b'A' * 43, b'B' * 43)
-        self.assertEqual(gates._validate_source_changes({"packages/codex-bin.nix": (old, new)}, {"codex"})["packages/codex-bin.nix"], (old, new))
+        self.assertEqual(gates._validate_source_changes({"packages/chatgpt/default.nix": (old, new)}, {"chatgpt"})["packages/chatgpt/default.nix"], (old, new))
         with self.assertRaisesRegex(gates.GateError, "packaging code"):
-            gates._validate_source_changes({"packages/codex-bin.nix": (old, new.replace(b'true', b'false'))}, {"codex"})
+            gates._validate_source_changes({"packages/chatgpt/default.nix": (old, new.replace(b'true', b'false'))}, {"chatgpt"})
 
     def test_unknown_source_paths_and_incomplete_transitions_refused(self):
         for changes in ({"flake.lock": (b"old", b"new")}, ["packages/t3code/source.json"], {}):
