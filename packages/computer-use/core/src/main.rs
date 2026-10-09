@@ -74,6 +74,7 @@ struct Observation {
     output: String,
     output_geometry: Value,
     focused_window: Option<Value>,
+    windows: Value,
     focus_output: Option<String>,
     image_width: u32,
     image_height: u32,
@@ -1148,6 +1149,7 @@ fn observe_inner(state: &State, args: &Value, actor_held: bool) -> R<Value> {
         output: name,
         output_geometry: geometry,
         focused_window: focus,
+        windows: windows.clone(),
         focus_output,
         image_width: width,
         image_height: height,
@@ -1276,6 +1278,62 @@ fn validate(
         }
     }
     Ok(())
+}
+
+fn validate_focus_state(state: &State, obs: &Observation) -> R<()> {
+    if !state.capture_available.load(Ordering::SeqCst) {
+        return Err(
+            "Capture unavailable; focus requires a successful fresh desktop_observe".into(),
+        );
+    }
+    check_epoch(state, Some(obs.epoch))?;
+    state.input_policy.check(obs.input_generation)?;
+    if state.takeover.load(Ordering::SeqCst) {
+        return Err("Desktop takeover is latched; focus refused".into());
+    }
+    if obs.at.elapsed() > MAX_AGE {
+        return Err(
+            "Observation is older than 60 seconds; focus requires desktop_observe again".into(),
+        );
+    }
+    Ok(())
+}
+fn validate_focus_inventory(obs: &Observation, window_id: u64, current: &Value) -> R<()> {
+    let exact = |windows: &Value| -> R<Value> {
+        let matches = windows
+            .as_array()
+            .ok_or("Window inventory unavailable; observe again before focus")?
+            .iter()
+            .filter(|window| window["id"].as_u64() == Some(window_id))
+            .collect::<Vec<_>>();
+        if matches.len() != 1 {
+            return Err("Focus target is missing or ambiguous in observed/current window inventory; observe again".into());
+        }
+        let window = matches[0];
+        if window["pid"].as_u64().filter(|pid| *pid > 0).is_none()
+            || window["app_id"]
+                .as_str()
+                .filter(|app| !app.is_empty())
+                .is_none()
+        {
+            return Err(
+                "Focus target lacks PID/app identity; no instance identity can be asserted".into(),
+            );
+        }
+        Ok(identity(window))
+    };
+    if exact(&obs.windows)? != exact(current)? {
+        return Err(
+            "Focus target identity, workspace or layout changed; observe again before focus".into(),
+        );
+    }
+    Ok(())
+}
+fn validate_focus_target(state: &State, obs: &Observation, window_id: u64) -> R<()> {
+    validate_focus_state(state, obs)?;
+    let current = niri_epoch(state, "windows", Some(obs.epoch))?;
+    validate_focus_inventory(obs, window_id, &current)?;
+    validate_focus_state(state, obs)
 }
 
 fn delay(state: &State, epoch: u64, ms: u64) -> R<()> {
@@ -1971,6 +2029,9 @@ fn act_inner(state: &State, args: &Value, epoch: u64) -> R<Value> {
             }
             if start.elapsed() > timeout {
                 return Err("Action batch timed out".into());
+            }
+            if let Action::Focus { window_id } = action {
+                validate_focus_target(state, &obs, *window_id)?;
             }
             if !matches!(action, Action::Focus { .. } | Action::Wait { .. }) {
                 validate(state, &obs, parsed.window_id, action.pointer())?;
@@ -3299,6 +3360,7 @@ mod regression {
             output: "none".into(),
             output_geometry: Value::Null,
             focused_window: None,
+            windows: json!([]),
             focus_output: None,
             image_width: 100,
             image_height: 100,
@@ -3713,6 +3775,7 @@ mod release_recovery_tests {
             output: "private-fixture".into(),
             output_geometry: Value::Null,
             focused_window: None,
+            windows: json!([]),
             focus_output: None,
             image_width: 1,
             image_height: 1,
@@ -3757,6 +3820,157 @@ mod release_recovery_tests {
                 thread::sleep(Duration::from_millis(1));
             }
         })
+    }
+
+    #[test]
+    fn independent_focus_inventory_requires_same_exact_instance_not_shared_title() {
+        let (state, dir) = cooperative_fixture("independent-focus-identity");
+        let mut captured = obs(&dir);
+        let target = json!({"id":77,"pid":42,"app_id":"original-app","workspace_id":1,"layout":{"tile_size":[400,300]},"title":"same title"});
+        let other =
+            json!({"id":78,"pid":43,"app_id":"original-app","workspace_id":1,"title":"same title"});
+        captured.windows = json!([target.clone(), other]);
+        assert!(validate_focus_inventory(&captured, 77, &json!([target.clone()])).is_ok());
+        for (field, value) in [
+            ("pid", json!(999)),
+            ("app_id", json!("replacement-app")),
+            ("workspace_id", json!(2)),
+            ("layout", json!({"tile_size":[500,400]})),
+        ] {
+            let mut changed = target.clone();
+            changed[field] = value;
+            assert!(
+                validate_focus_inventory(&captured, 77, &json!([changed])).is_err(),
+                "field {field}"
+            );
+        }
+        assert!(validate_focus_inventory(&captured, 77, &json!([])).is_err());
+        assert!(
+            validate_focus_inventory(&captured, 77, &json!([target.clone(), target.clone()]))
+                .is_err()
+        );
+        assert!(validate_focus_inventory(&captured, 999, &captured.windows).is_err());
+        let mut unknown = target.clone();
+        unknown["pid"] = Value::Null;
+        assert!(validate_focus_inventory(&captured, 77, &json!([unknown])).is_err());
+        let mut renamed = target;
+        renamed["title"] = json!("new document title");
+        assert!(
+            validate_focus_inventory(&captured, 77, &json!([renamed])).is_ok(),
+            "title may change in same exact instance"
+        );
+        assert!(state.release_confirmed.load(Ordering::SeqCst));
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn independent_focus_state_refuses_old_generation_held_cancel_and_escape() {
+        let (state, dir) = cooperative_fixture("independent-focus-state");
+        let mut captured = obs(&dir);
+        assert!(validate_focus_state(&state, &captured).is_ok());
+        captured.at = Instant::now() - Duration::from_secs(61);
+        assert!(validate_focus_state(&state, &captured)
+            .unwrap_err()
+            .contains("older than 60"));
+        captured.at = Instant::now();
+        state.input_policy.update_holds(1, true);
+        captured.input_generation = state.input_policy.generation();
+        assert!(validate_focus_state(&state, &captured).is_err());
+        assert!(!state.takeover.load(Ordering::SeqCst));
+        state.input_policy.update_holds(0, true);
+        assert!(
+            validate_focus_state(&state, &captured).is_err(),
+            "release must not validate old generation"
+        );
+        captured.input_generation = state.input_policy.generation();
+        assert!(validate_focus_state(&state, &captured).is_ok());
+        let flag = Arc::new(AtomicBool::new(true));
+        CURRENT_CANCEL_FLAG.with(|f| *f.borrow_mut() = Some(flag));
+        assert!(validate_focus_state(&state, &captured)
+            .unwrap_err()
+            .contains("client request was canceled"));
+        CURRENT_CANCEL_FLAG.with(|f| *f.borrow_mut() = None);
+        assert!(validate_focus_state(&state, &captured).is_ok());
+        physical_activity(&state, true, false);
+        assert!(validate_focus_state(&state, &captured).is_err());
+        assert!(state.takeover.load(Ordering::SeqCst));
+        let marker =
+            takeover::Latch::startup(dir.join("takeover.json"), "new-review-session").unwrap();
+        assert_eq!(marker.reason.source, "physical_escape");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn independent_focus_age_and_reused_id_refuse_before_dispatch_with_command_shim() {
+        // Only a filtered child test process mutates PATH for the command shim.
+        // Default parallel tests in the parent retain their original environment.
+        const CHILD_SENTINEL: &str = "WEASEL_CU_PRIVATE_FOCUS_PROBE_CHILD";
+        const TEST_NAME: &str = "release_recovery_tests::independent_focus_age_and_reused_id_refuse_before_dispatch_with_command_shim";
+        if env::var(CHILD_SENTINEL).as_deref() != Ok("1") {
+            let child = Command::new(env::current_exe().unwrap())
+                .args(["--exact", TEST_NAME, "--test-threads=1"])
+                .env(CHILD_SENTINEL, "1")
+                .output()
+                .unwrap();
+            assert!(
+                child.status.success(),
+                "isolated focus probe failed: stdout={} stderr={}",
+                String::from_utf8_lossy(&child.stdout),
+                String::from_utf8_lossy(&child.stderr)
+            );
+            assert!(
+                String::from_utf8_lossy(&child.stdout).contains("1 passed; 0 failed"),
+                "isolated focus probe did not execute exactly one test"
+            );
+            return;
+        }
+        // Command shim and Focus only. No real Niri/Wayland/actuator.
+        let (state, dir) = cooperative_fixture("independent-focus-dispatch");
+        let shimdir = dir.join("fake-bin");
+        private_dir(&shimdir).unwrap();
+        let shim = shimdir.join("niri");
+        fs::write(&shim, b"#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$WEASEL_PRIVATE_FOCUS_CALLS\"\ncase \"$*\" in\n 'msg -j windows') printf '%s\\n' '[{\"id\":77,\"pid\":999,\"app_id\":\"replacement-app\",\"workspace_id\":1,\"is_focused\":true}]' ;;\n *) printf '%s\\n' '{}' ;;\nesac\n").unwrap();
+        fs::set_permissions(&shim, fs::Permissions::from_mode(0o700)).unwrap();
+        let calls = dir.join("fake-calls.txt");
+        let previous_path = env::var_os("PATH");
+        env::set_var("PATH", &shimdir);
+        env::set_var("WEASEL_PRIVATE_FOCUS_CALLS", &calls);
+        let args = json!({"observation_id":"cloned-before-recovery","window_id":77,"actions":[{"kind":"focus","window_id":77}],"observe_after":false});
+        let mut saved = obs(&dir);
+        saved.at = Instant::now() - Duration::from_secs(61);
+        saved.windows =
+            json!([{"id":77,"pid":42,"app_id":"original-app","workspace_id":1,"is_focused":true}]);
+        state
+            .observations
+            .lock()
+            .unwrap()
+            .insert(saved.id.clone(), saved.clone());
+        let old = act(&state, &args, 77).unwrap();
+        saved.at = Instant::now();
+        state
+            .observations
+            .lock()
+            .unwrap()
+            .insert(saved.id.clone(), saved);
+        let changed = act(&state, &args, 77).unwrap();
+        if let Some(path) = previous_path {
+            env::set_var("PATH", path);
+        } else {
+            env::remove_var("PATH");
+        }
+        env::remove_var("WEASEL_PRIVATE_FOCUS_CALLS");
+        for result in [old, changed] {
+            let data = result_data(&result);
+            assert_eq!(data["status"], "failed");
+            assert_eq!(data["completed_actions"], 0);
+            assert_eq!(data["effects"][0]["dispatch_started"], false);
+            assert_eq!(data["effects"][0]["may_have_partial_effects"], false);
+            assert_eq!(data["actor_release_confirmed"], true);
+        }
+        // Old age performs no command; fresh-but-changed identity only reads.
+        assert_eq!(fs::read_to_string(&calls).unwrap(), "msg -j windows\n");
+        assert!(state.active.lock().unwrap().is_null());
+        assert_eq!(state.queued.load(Ordering::SeqCst), 0);
+        fs::remove_dir_all(dir).unwrap();
     }
     #[test]
     fn cooperative_idle_activity_preserves_epoch_and_refuses_stale_batch_without_input() {

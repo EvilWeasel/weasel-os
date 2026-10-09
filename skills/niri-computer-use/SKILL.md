@@ -102,6 +102,9 @@ text ranges because Gecko's bulk action names and oversized ranges were faulty.
 Do not repeat an uncertain setter; inspect the actual result and change route.
 
 Focus the identified window with a separate action, then observe again.
+Focus requires an observation younger than 60 seconds and a fresh matching
+Niri inventory identity (ID, PID, app, workspace and layout). A changed or
+unknown target refuses before dispatch; observe again instead of guessing.
 Send `desktop_act` with the observation ID and intended window ID. Keep batches
 small and limited to actions whose targets survive the preceding steps. The
 response normally includes a fresh `after_observation` and image. Reuse that
