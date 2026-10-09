@@ -40,6 +40,8 @@ in
     ../../programs/hephaestus-recovery-console.nix
     ../../programs/coding-tools.nix
     ../../programs/t3code-client.nix
+    ../../programs/computer-use.nix
+    ../../programs/ui-decisions.nix
     ../../programs/vps-ssh.nix
     ../../programs/proton-infra-ssh.nix
   ];
@@ -52,6 +54,11 @@ in
   ];
 
   home.sessionVariables.PROTON_PASS_LINUX_KEYRING = "dbus";
+  weasel.uiDecisions = {
+    enable = true;
+    manageMcp = true;
+    imageRoots = [ "/run/user/1000/weasel-computer-use/images" ];
+  };
   home.file.".codex/skills/cartesia-audio".source = ../../skills/cartesia-audio;
   home.file.".codex/skills/proton-pass-cli".source = ../../skills/proton-pass-cli;
 

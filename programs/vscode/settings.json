@@ -59,6 +59,7 @@
   "pieces.OS.launchOnStartup": "Yes",
   "pieces.toShowUpdateExtensionNotification": false,
   "keyboard.layout": "00000407",
+  "keyboard.dispatch": "keyCode",
   "workbench.colorTheme": "Alt Catppuccin Frappé",
   "terminal.integrated.fontSize": 20,
   "markdown.preview.fontSize": 22,

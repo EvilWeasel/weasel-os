@@ -122,10 +122,31 @@
               --prefix PATH : ${pkgs.lib.makeBinPath [ pkgs.xdg-utils ]} \
               --prefix LD_LIBRARY_PATH : ${
                 pkgs.lib.makeLibraryPath [
+                  # T3 downloads its own headless Chrome outside the patched payload.
+                  # Its child process inherits this search path.
+                  pkgs.alsa-lib
+                  pkgs.at-spi2-core
+                  pkgs.dbus
+                  pkgs.expat
+                  pkgs.glib
+                  pkgs.libgbm
                   pkgs.libglvnd
                   pkgs.libsecret
+                  pkgs.libx11
+                  pkgs.libxcomposite
+                  pkgs.libxdamage
+                  pkgs.libxext
+                  pkgs.libxfixes
+                  pkgs.libxrandr
+                  pkgs.libxcb
+                  pkgs.libxkbcommon
+                  pkgs.nspr
+                  pkgs.nss
+                  pkgs.systemd
                 ]
               } \
+              --unset NO_AT_BRIDGE \
+              --add-flags "--force-renderer-accessibility" \
               --set T3CODE_DISABLE_AUTO_UPDATE true \
               --set WEASEL_T3_CLIENT 1
           '';

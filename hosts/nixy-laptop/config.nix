@@ -35,6 +35,29 @@
 
   weasel.wispr-flow.enable = true;
 
+  # T3's pinned headless Chrome is downloaded after package fixup. Existing
+  # T3 sessions already use this stable nix-ld library path, so activation
+  # repairs future preview launches without restarting the desktop app.
+  programs.nix-ld.libraries = with pkgs; [
+    alsa-lib
+    at-spi2-core
+    dbus
+    expat
+    glib
+    libgbm
+    libx11
+    libxcomposite
+    libxdamage
+    libxext
+    libxfixes
+    libxrandr
+    libxcb
+    libxkbcommon
+    nspr
+    nss
+    systemd
+  ];
+
   services.netbird = {
     package = pkgs.callPackage ../../packages/netbird-bin.nix { };
     ui.package = pkgs.callPackage ../../packages/netbird-ui-bin.nix {

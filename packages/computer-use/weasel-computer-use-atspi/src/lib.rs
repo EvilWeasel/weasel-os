@@ -1,0 +1,1176 @@
+//! Direct AT-SPI object identity prototype, compile-only until live acceptance.
+//! Protocol: GNOME at-spi2-core XML Accessible/Action/EditableText interfaces.
+//! There is no coordinate, index-token, input, or insertion fallback.
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use std::{
+    collections::HashSet,
+    time::{Duration, Instant},
+};
+use zbus::{
+    blocking::{connection::Builder, Connection},
+    zvariant::{OwnedObjectPath, OwnedValue},
+};
+type R<T> = Result<T, String>;
+const ACCESSIBLE: &str = "org.a11y.atspi.Accessible";
+
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq, Hash)]
+pub struct Object {
+    pub bus: String,
+    pub path: String,
+}
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct Node {
+    pub object: Object,
+    pub parent: Option<Object>,
+    pub depth: usize,
+    pub name: String,
+    #[serde(default)]
+    pub description: String,
+    pub role: String,
+    pub role_id: u32,
+    pub interfaces: Vec<String>,
+    pub states: Vec<u32>,
+    pub protected: bool,
+    pub action_names: Vec<String>,
+    pub text_excerpt: Option<String>,
+}
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct Snapshot {
+    pub pid: u32,
+    pub requested_title: String,
+    pub application: Object,
+    pub window: Object,
+    pub nodes: Vec<Node>,
+    pub complete: bool,
+    pub visible_modals: Vec<Object>,
+    pub semantic_scope: String,
+    pub sole_window_fallback_allowed: bool,
+    pub bus_guid: String,
+    #[serde(default = "default_max_nodes")]
+    pub max_nodes: usize,
+    #[serde(default = "default_max_depth")]
+    pub max_depth: usize,
+    #[serde(default)]
+    pub visibility_traversal: VisibilityTraversal,
+}
+const VISIBLE_TRAVERSAL: &str = "selected-window-showing-ancestor-chain-v1";
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct VisibilityTraversal {
+    /// An empty value denotes the older all-descendants snapshot protocol.
+    pub definition: String,
+    pub selected_root_showing: bool,
+    pub pruned_not_showing_branches: usize,
+    pub pruned_protected_branches: usize,
+    pub immediate_child_visibility_probes: usize,
+    pub visibility_probe_errors: usize,
+    pub showing_child_under_hidden_parent: usize,
+    /// Pruning deliberately does not enumerate or estimate omitted descendants.
+    pub omitted_descendant_count: Option<usize>,
+}
+fn default_max_nodes() -> usize {
+    1000
+}
+fn default_max_depth() -> usize {
+    40
+}
+
+fn connection() -> R<Connection> {
+    let session = Builder::session()
+        .map_err(|e| e.to_string())?
+        .method_timeout(Duration::from_millis(250))
+        .build()
+        .map_err(|e| e.to_string())?;
+    let msg = session
+        .call_method(
+            Some("org.a11y.Bus"),
+            "/org/a11y/bus",
+            Some("org.a11y.Bus"),
+            "GetAddress",
+            &(),
+        )
+        .map_err(|e| format!("AT-SPI bus unavailable: {e}"))?;
+    let address: String = msg.body().deserialize().map_err(|e| e.to_string())?;
+    Builder::address(address.as_str())
+        .map_err(|e| e.to_string())?
+        .method_timeout(Duration::from_millis(200))
+        .build()
+        .map_err(|e| e.to_string())
+}
+fn property(conn: &Connection, obj: &Object, name: &str) -> R<OwnedValue> {
+    // Explicit Get avoids GetAll/property-cache crashes in legacy Qt bridges.
+    conn.call_method(
+        Some(obj.bus.as_str()),
+        obj.path.as_str(),
+        Some("org.freedesktop.DBus.Properties"),
+        "Get",
+        &(ACCESSIBLE, name),
+    )
+    .map_err(|e| e.to_string())?
+    .body()
+    .deserialize()
+    .map_err(|e| e.to_string())
+}
+fn string_call(conn: &Connection, obj: &Object, interface: &str, method: &str) -> R<String> {
+    conn.call_method(
+        Some(obj.bus.as_str()),
+        obj.path.as_str(),
+        Some(interface),
+        method,
+        &(),
+    )
+    .map_err(|e| e.to_string())?
+    .body()
+    .deserialize()
+    .map_err(|e| e.to_string())
+}
+fn owner_pid(conn: &Connection, bus: &str) -> R<u32> {
+    conn.call_method(
+        Some("org.freedesktop.DBus"),
+        "/org/freedesktop/DBus",
+        Some("org.freedesktop.DBus"),
+        "GetConnectionUnixProcessID",
+        &(bus,),
+    )
+    .map_err(|e| e.to_string())?
+    .body()
+    .deserialize()
+    .map_err(|e| e.to_string())
+}
+fn unique_owner(conn: &Connection, bus: &str) -> R<String> {
+    if bus.starts_with(':') {
+        return Ok(bus.into());
+    }
+    conn.call_method(
+        Some("org.freedesktop.DBus"),
+        "/org/freedesktop/DBus",
+        Some("org.freedesktop.DBus"),
+        "GetNameOwner",
+        &(bus,),
+    )
+    .map_err(|e| e.to_string())?
+    .body()
+    .deserialize()
+    .map_err(|e| e.to_string())
+}
+fn children(conn: &Connection, obj: &Object) -> R<Vec<Object>> {
+    let refs: Vec<(String, OwnedObjectPath)> = conn
+        .call_method(
+            Some(obj.bus.as_str()),
+            obj.path.as_str(),
+            Some(ACCESSIBLE),
+            "GetChildren",
+            &(),
+        )
+        .map_err(|e| e.to_string())?
+        .body()
+        .deserialize()
+        .map_err(|e| e.to_string())?;
+    refs.into_iter()
+        .filter(|(bus, path)| !bus.is_empty() && path.as_str() != "/org/a11y/atspi/null")
+        .map(|(bus, path)| {
+            unique_owner(conn, &bus).map(|bus| Object {
+                bus,
+                path: path.to_string(),
+            })
+        })
+        .collect()
+}
+fn state(states: &[u32], bit: usize) -> bool {
+    states
+        .get(bit / 32)
+        .is_some_and(|v| v & (1 << (bit % 32)) != 0)
+}
+fn node_states(conn: &Connection, object: &Object) -> R<Vec<u32>> {
+    let states: Vec<u32> = conn
+        .call_method(
+            Some(object.bus.as_str()),
+            object.path.as_str(),
+            Some(ACCESSIBLE),
+            "GetState",
+            &(),
+        )
+        .map_err(|e| e.to_string())?
+        .body()
+        .deserialize()
+        .map_err(|e| e.to_string())?;
+    if states.is_empty() {
+        return Err("AT-SPI GetState returned no state words; visibility unknown".into());
+    }
+    Ok(states)
+}
+const TEXT: &str = "org.a11y.atspi.Text";
+const ACTION: &str = "org.a11y.atspi.Action";
+const MAX_ACTIONS: i32 = 64;
+const MAX_TEXT_BYTES: usize = 65536;
+fn interface_int_property(
+    conn: &Connection,
+    object: &Object,
+    interface: &str,
+    name: &str,
+) -> R<i32> {
+    let value: OwnedValue = conn
+        .call_method(
+            Some(object.bus.as_str()),
+            object.path.as_str(),
+            Some("org.freedesktop.DBus.Properties"),
+            "Get",
+            &(interface, name),
+        )
+        .map_err(|e| e.to_string())?
+        .body()
+        .deserialize()
+        .map_err(|e| e.to_string())?;
+    i32::try_from(value).map_err(|e| e.to_string())
+}
+// Gecko returns all three GetActions fields through one borrowed string buffer;
+// keybindings such as ";;" overwrite the bulk name/description. GetName provides
+// machine-readable names and is also the authority at dispatch, never an index
+// chosen by a model or a translated bulk label.
+fn read_action_names(
+    mut count: impl FnMut() -> R<i32>,
+    mut name: impl FnMut(i32) -> R<String>,
+) -> R<Vec<String>> {
+    let before = count()?;
+    if !(0..=MAX_ACTIONS).contains(&before) {
+        return Err("AT-SPI action count exceeds supported 0..64 bound".into());
+    }
+    let mut names = Vec::new();
+    for index in 0..before {
+        let value = name(index)?;
+        if value.trim().is_empty() || value.len() > 128 {
+            return Err(
+                "AT-SPI named action is empty or exceeds supported bound; no invented action"
+                    .into(),
+            );
+        }
+        names.push(value);
+    }
+    if count()? != before {
+        return Err("AT-SPI action count changed during named enumeration; observe again".into());
+    }
+    Ok(names)
+}
+fn action_names(conn: &Connection, object: &Object) -> R<Vec<String>> {
+    read_action_names(
+        || interface_int_property(conn, object, ACTION, "NActions"),
+        |index| {
+            conn.call_method(
+                Some(object.bus.as_str()),
+                object.path.as_str(),
+                Some(ACTION),
+                "GetName",
+                &(index,),
+            )
+            .map_err(|e| e.to_string())?
+            .body()
+            .deserialize()
+            .map_err(|e| e.to_string())
+        },
+    )
+}
+fn named_action_index(names: &[String], requested: &str) -> R<i32> {
+    let matching: Vec<usize> = names
+        .iter()
+        .enumerate()
+        .filter(|(_, n)| n.as_str() == requested)
+        .map(|(i, _)| i)
+        .collect();
+    if matching.len() != 1 {
+        return Err("Requested named semantic action is missing or ambiguous; no fallback".into());
+    }
+    Ok(matching[0] as i32)
+}
+// AT-SPI offsets count Unicode characters. Gecko returns an empty string when
+// an end offset exceeds CharacterCount; this must not masquerade as empty text.
+// No unbounded GetText(0,-1), and missing/inconsistent bridge reads fail closed.
+fn read_text_bounded(
+    mut count: impl FnMut() -> R<i32>,
+    mut get: impl FnMut(i32) -> R<String>,
+    maximum_characters: usize,
+    complete: bool,
+) -> R<String> {
+    let before = count()?;
+    if before < 0 || (complete && before as usize > maximum_characters) {
+        return Err("AT-SPI complete text exceeds supported character bound".into());
+    }
+    let end = (before as usize).min(maximum_characters) as i32;
+    let text = get(end)?;
+    if text.len() > MAX_TEXT_BYTES || text.chars().count() != end as usize {
+        return Err(
+            "AT-SPI text range is incomplete or uses unsupported character offsets; observe again"
+                .into(),
+        );
+    }
+    if count()? != before {
+        return Err("AT-SPI character count changed during text read; observe again".into());
+    }
+    Ok(text)
+}
+fn read_text(
+    conn: &Connection,
+    object: &Object,
+    maximum_characters: usize,
+    complete: bool,
+) -> R<String> {
+    read_text_bounded(
+        || interface_int_property(conn, object, TEXT, "CharacterCount"),
+        |end| {
+            conn.call_method(
+                Some(object.bus.as_str()),
+                object.path.as_str(),
+                Some(TEXT),
+                "GetText",
+                &(0i32, end),
+            )
+            .map_err(|e| e.to_string())?
+            .body()
+            .deserialize()
+            .map_err(|e| e.to_string())
+        },
+        maximum_characters,
+        complete,
+    )
+}
+fn read_full_text(conn: &Connection, object: &Object) -> R<String> {
+    read_text(conn, object, MAX_TEXT_BYTES, true)
+}
+fn read_node(conn: &Connection, object: Object, parent: Option<Object>, depth: usize) -> R<Node> {
+    let role_id: u32 = conn
+        .call_method(
+            Some(object.bus.as_str()),
+            object.path.as_str(),
+            Some(ACCESSIBLE),
+            "GetRole",
+            &(),
+        )
+        .map_err(|e| e.to_string())?
+        .body()
+        .deserialize()
+        .map_err(|e| e.to_string())?;
+    let role = string_call(conn, &object, ACCESSIBLE, "GetRoleName")?;
+    let protected = role_id == 40 || role.to_lowercase().contains("password");
+    let name = if protected {
+        "[protected field]".into()
+    } else {
+        String::try_from(property(conn, &object, "Name")?).map_err(|e| e.to_string())?
+    };
+    // GTK icon-only toolbar buttons often keep Name empty and expose the
+    // human-facing tooltip through Description. Protected fields stay redacted.
+    let description = if protected {
+        "[protected field]".into()
+    } else {
+        property(conn, &object, "Description")
+            .ok()
+            .and_then(|value| String::try_from(value).ok())
+            .unwrap_or_default()
+    };
+    let interfaces: Vec<String> = conn
+        .call_method(
+            Some(object.bus.as_str()),
+            object.path.as_str(),
+            Some(ACCESSIBLE),
+            "GetInterfaces",
+            &(),
+        )
+        .map_err(|e| e.to_string())?
+        .body()
+        .deserialize()
+        .map_err(|e| e.to_string())?;
+    let states = node_states(conn, &object)?;
+    let action_names = if !protected && interfaces.iter().any(|s| s == ACTION) {
+        action_names(conn, &object)?
+    } else {
+        Vec::new()
+    };
+    let text_excerpt = if !protected && interfaces.iter().any(|s| s == TEXT) {
+        Some(read_text(conn, &object, 512, false)?)
+    } else {
+        None
+    };
+    Ok(Node {
+        object,
+        parent,
+        depth,
+        name,
+        description,
+        role,
+        role_id,
+        interfaces,
+        states,
+        protected,
+        action_names,
+        text_excerpt,
+    })
+}
+fn is_window(node: &Node) -> bool {
+    matches!(
+        node.role.to_lowercase().as_str(),
+        "frame" | "window" | "dialog"
+    )
+}
+struct VisibleWalk {
+    nodes: Vec<Node>,
+    complete: bool,
+    statistics: VisibilityTraversal,
+}
+/// Capture only the selected root and SHOWING paths below it. Hidden branches
+/// are deliberately outside this scope, not a claim about the whole application.
+/// A direct child contradicting its hidden parent's SHOWING state invalidates
+/// the capture. Deeper omitted descendants are not enumerated or attested.
+fn walk_visible_window(
+    window: Object,
+    application: Object,
+    max_nodes: usize,
+    max_depth: usize,
+    mut read: impl FnMut(Object, Option<Object>, usize) -> R<Node>,
+    mut get_children: impl FnMut(&Object) -> R<Vec<Object>>,
+    mut get_states: impl FnMut(&Object) -> R<Vec<u32>>,
+    mut expired: impl FnMut() -> bool,
+) -> VisibleWalk {
+    let mut stack = vec![(window.clone(), Some(application), 0usize)];
+    let mut visited = HashSet::new();
+    let mut result = VisibleWalk {
+        nodes: Vec::new(),
+        complete: true,
+        statistics: VisibilityTraversal {
+            definition: VISIBLE_TRAVERSAL.into(),
+            ..VisibilityTraversal::default()
+        },
+    };
+    while let Some((obj, parent, depth)) = stack.pop() {
+        if expired() {
+            result.complete = false;
+            break;
+        }
+        if !visited.insert(obj.clone()) {
+            result.complete = false;
+            continue;
+        }
+        let node = match read(obj.clone(), parent, depth) {
+            Ok(node) if !node.states.is_empty() => node,
+            _ => {
+                result.complete = false;
+                result.statistics.visibility_probe_errors += 1;
+                continue;
+            }
+        };
+        let root = obj == window;
+        let showing = state(&node.states, 25);
+        if root {
+            result.statistics.selected_root_showing = showing;
+        }
+        if !showing && !root {
+            result.statistics.pruned_not_showing_branches += 1;
+            if node.protected {
+                // Protected descendants remain uninspected, exactly as before.
+                result.statistics.pruned_protected_branches += 1;
+                continue;
+            }
+            match get_children(&obj) {
+                Ok(children) => {
+                    for child in children {
+                        if expired() {
+                            result.complete = false;
+                            break;
+                        }
+                        result.statistics.immediate_child_visibility_probes += 1;
+                        match get_states(&child) {
+                            Ok(states) if !states.is_empty() => {
+                                if state(&states, 25) {
+                                    result.complete = false;
+                                    result.statistics.showing_child_under_hidden_parent += 1;
+                                }
+                            }
+                            _ => {
+                                result.complete = false;
+                                result.statistics.visibility_probe_errors += 1;
+                            }
+                        }
+                    }
+                }
+                Err(_) => {
+                    result.complete = false;
+                    result.statistics.visibility_probe_errors += 1;
+                }
+            }
+            continue;
+        }
+        if result.nodes.len() >= max_nodes {
+            result.complete = false;
+            break;
+        }
+        let protected = node.protected;
+        result.nodes.push(node);
+        if !showing {
+            // Keep the requested root for diagnosis, but never issue mutation
+            // handles when the selected window's bridge denies visibility.
+            result.complete = false;
+            continue;
+        }
+        if protected {
+            result.statistics.pruned_protected_branches += 1;
+            continue;
+        }
+        match get_children(&obj) {
+            Ok(children) => {
+                if depth >= max_depth {
+                    if !children.is_empty() {
+                        result.complete = false;
+                    }
+                    continue;
+                }
+                for child in children.into_iter().rev() {
+                    stack.push((child, Some(obj.clone()), depth + 1));
+                }
+            }
+            Err(_) => result.complete = false,
+        }
+    }
+    result
+}
+fn observe(
+    conn: &Connection,
+    pid: u32,
+    title: &str,
+    single_window: bool,
+    max_nodes: usize,
+    max_depth: usize,
+) -> R<Snapshot> {
+    let started = Instant::now();
+    let registry = Object {
+        bus: "org.a11y.atspi.Registry".into(),
+        path: "/org/a11y/atspi/accessible/root".into(),
+    };
+    let mut apps = Vec::new();
+    for application in children(conn, &registry)? {
+        if owner_pid(conn, &application.bus).ok() == Some(pid) {
+            apps.push(application);
+        }
+    }
+    if apps.len() != 1 {
+        return Err(format!(
+            "AT-SPI requires exactly one application bus owned by requested PID; found {}",
+            apps.len()
+        ));
+    }
+    let application = apps.remove(0);
+    let mut windows = Vec::new();
+    let mut discovery_complete = true;
+    for obj in children(conn, &application)? {
+        if started.elapsed() > Duration::from_secs(3) {
+            discovery_complete = false;
+            break;
+        }
+        match read_node(conn, obj, Some(application.clone()), 0) {
+            Ok(node) => {
+                if is_window(&node) {
+                    windows.push(node);
+                }
+            }
+            Err(_) => discovery_complete = false,
+        }
+    }
+    let matches: Vec<&Node> = windows.iter().filter(|node| node.name == title).collect();
+    let window = if matches.len() == 1 {
+        matches[0].object.clone()
+    } else if matches.is_empty() && single_window && windows.len() == 1 {
+        windows[0].object.clone()
+    } else {
+        return Err(format!("Exact AT-SPI window mapping is ambiguous (title matches {}, windows {}); no application-wide mutation allowed",matches.len(),windows.len()));
+    };
+    let walked = walk_visible_window(
+        window.clone(),
+        application.clone(),
+        max_nodes,
+        max_depth,
+        |object, parent, depth| read_node(conn, object, parent, depth),
+        |object| children(conn, object),
+        |object| node_states(conn, object),
+        || started.elapsed() > Duration::from_secs(3),
+    );
+    let nodes = walked.nodes;
+    let complete = discovery_complete && walked.complete;
+    // A modal can be a sibling application top-level, outside the selected
+    // window subtree. Include these too so background AX cannot bypass it.
+    let mut visible_modals: Vec<Object> = windows
+        .iter()
+        .chain(nodes.iter())
+        .filter(|n| {
+            state(&n.states, 25) && (state(&n.states, 16) || n.role.to_lowercase() == "dialog")
+        })
+        .map(|n| n.object.clone())
+        .collect();
+    visible_modals.sort_by(|a, b| (&a.bus, &a.path).cmp(&(&b.bus, &b.path)));
+    visible_modals.dedup();
+    Ok(Snapshot{pid,requested_title:title.into(),application,window,nodes,complete,visible_modals,semantic_scope:"exact selected AT-SPI window root plus SHOWING descendants under SHOWING ancestors; non-SHOWING and protected branches excluded. Completeness covers only this defined visible scope, not omitted descendants, hidden tabs or the whole application. Correct bridge SHOWING ancestry is required; immediate contradictions fail closed. Sibling top-level showing modal guards remain. Targets use unique-owner D-Bus object references, never integer indices".into(),sole_window_fallback_allowed:single_window,bus_guid:conn.server_guid().into(),max_nodes,max_depth,visibility_traversal:walked.statistics})
+}
+fn revalidate(
+    conn: &Connection,
+    snapshot: &Snapshot,
+    object: &Object,
+    target_edit_text_precondition: bool,
+) -> R<Node> {
+    if snapshot.visibility_traversal.definition != VISIBLE_TRAVERSAL {
+        return Err(
+            "Semantic traversal definition changed; obtain a fresh visible-scope snapshot".into(),
+        );
+    }
+    if !snapshot.complete {
+        return Err("Observed semantic traversal was incomplete; mutation refused because modal coverage is uncertain".into());
+    }
+    if conn.server_guid() != snapshot.bus_guid {
+        return Err("AT-SPI bus generation changed; old object handles invalidated".into());
+    }
+    if !object.bus.starts_with(':') || !snapshot.application.bus.starts_with(':') {
+        return Err("Semantic target requires immutable unique D-Bus owner names".into());
+    }
+    owner_pid(conn, &object.bus)?;
+    if owner_pid(conn, &snapshot.application.bus)? != snapshot.pid {
+        return Err("Application D-Bus owner PID changed".into());
+    }
+    let prior = snapshot
+        .nodes
+        .iter()
+        .find(|n| &n.object == object)
+        .ok_or("Handle is not in the stored window subtree")?;
+    if prior.protected {
+        return Err("Protected fields are not editable by this adapter".into());
+    }
+    let mut current = read_node(conn, object.clone(), prior.parent.clone(), prior.depth)?;
+    if current.protected {
+        return Err("Current target is a protected field; mutation refused".into());
+    }
+    if (
+        current.role_id,
+        &current.name,
+        &current.description,
+        &current.interfaces,
+    ) != (
+        prior.role_id,
+        &prior.name,
+        &prior.description,
+        &prior.interfaces,
+    ) {
+        return Err(
+            "Semantic object role/name/description/interfaces changed; observe again".into(),
+        );
+    }
+    if state(&current.states, 3)
+        || state(&current.states, 6)
+        || !state(&current.states, 8)
+        || !state(&current.states, 24)
+        || !state(&current.states, 25)
+    {
+        return Err("Semantic target is busy/defunct or not enabled, sensitive and showing".into());
+    }
+    let mut chain = prior;
+    let mut ancestors = HashSet::from([prior.object.clone()]);
+    while let Some(parent) = &chain.parent {
+        if parent == &snapshot.application {
+            break;
+        }
+        if !children(conn, parent)?.contains(&chain.object) {
+            return Err("Object is no longer a child of its observed window ancestry".into());
+        }
+        chain = snapshot
+            .nodes
+            .iter()
+            .find(|n| &n.object == parent)
+            .ok_or("Observed parent identity unavailable")?;
+        ancestors.insert(chain.object.clone());
+        let fresh_parent = read_node(conn, parent.clone(), chain.parent.clone(), chain.depth)?;
+        if (
+            fresh_parent.role_id,
+            &fresh_parent.name,
+            &fresh_parent.description,
+        ) != (chain.role_id, &chain.name, &chain.description)
+        {
+            return Err("Semantic ancestor context changed; observe again".into());
+        }
+    }
+    if snapshot
+        .visible_modals
+        .iter()
+        .any(|modal| !ancestors.contains(modal))
+    {
+        return Err("Target lies outside a showing modal's subtree; direct accessibility cannot bypass modality".into());
+    }
+    // Rewalk only for modal and target-window identity; mutation still uses the
+    // original object path, never a newly allocated integer index.
+    let fresh = observe(
+        conn,
+        snapshot.pid,
+        &snapshot.requested_title,
+        snapshot.sole_window_fallback_allowed,
+        snapshot.max_nodes.clamp(1, 1000),
+        snapshot.max_depth.clamp(1, 40),
+    )?;
+    if !fresh.complete {
+        return Err("Fresh semantic traversal was incomplete; mutation refused because modal coverage is uncertain".into());
+    }
+    if fresh.visibility_traversal.definition != snapshot.visibility_traversal.definition {
+        return Err("Fresh semantic traversal definition differs; mutation refused".into());
+    }
+    if fresh.window != snapshot.window || fresh.visible_modals != snapshot.visible_modals {
+        return Err("Target window or visible modal set changed; observe again".into());
+    }
+    let context = |nodes: &[Node]| {
+        let mut fields:Vec<Value>=nodes.iter().filter(|n|state(&n.states,25)).map(|n|json!({"object":n.object,"role_id":n.role_id,"name":n.name,"description":n.description,"interfaces":n.interfaces,"visible_text":if target_edit_text_precondition&&n.object==*object{None}else{n.text_excerpt.as_ref()}})).collect();
+        fields.sort_by_key(|v| v["object"].to_string());
+        fields
+    };
+    if context(&fresh.nodes) != context(&snapshot.nodes) {
+        return Err(
+            "Visible semantic window context changed; no mutation sent. Observe again.".into(),
+        );
+    }
+    current.parent = prior.parent.clone();
+    Ok(current)
+}
+pub fn run(request: Value) -> R<Value> {
+    let started = Instant::now();
+    let conn = connection()?;
+    match request["operation"].as_str().unwrap_or("") {
+        "observe" => {
+            let pid = request["pid"]
+                .as_u64()
+                .filter(|n| *n <= u32::MAX as u64)
+                .ok_or("PID required")? as u32;
+            let title = request["title"].as_str().ok_or("Title required")?;
+            let snapshot = observe(
+                &conn,
+                pid,
+                title,
+                request["single_window"].as_bool() == Some(true),
+                request["max_nodes"].as_u64().unwrap_or(1000).clamp(1, 1000) as usize,
+                request["max_depth"].as_u64().unwrap_or(40).clamp(1, 40) as usize,
+            )?;
+            Ok(
+                json!({"status":"observed","snapshot":snapshot,"latency_ms":started.elapsed().as_secs_f64()*1000.0}),
+            )
+        }
+        "set_value" | "click" => {
+            let snapshot: Snapshot =
+                serde_json::from_value(request["snapshot"].clone()).map_err(|e| e.to_string())?;
+            let object: Object =
+                serde_json::from_value(request["object"].clone()).map_err(|e| e.to_string())?;
+            let node = revalidate(
+                &conn,
+                &snapshot,
+                &object,
+                request["operation"] == "set_value",
+            )?;
+            if request["operation"] == "set_value" {
+                if !node
+                    .interfaces
+                    .iter()
+                    .any(|s| s == "org.a11y.atspi.EditableText")
+                    || !state(&node.states, 7)
+                {
+                    return Err("Target has no editable AT-SPI text capability".into());
+                }
+                let text = request["text"].as_str().ok_or("Text required")?;
+                if text.len() > 65536 {
+                    return Err("Text exceeds 64KiB".into());
+                }
+                let prior = snapshot
+                    .nodes
+                    .iter()
+                    .find(|n| n.object == object)
+                    .ok_or("Target absent from stored snapshot")?;
+                let expected = request["expected_text"]
+                    .as_str()
+                    .or(prior.text_excerpt.as_deref())
+                    .ok_or("Expected complete editable text is required")?;
+                let current_text = read_full_text(&conn, &object)?;
+                if current_text != expected {
+                    return Err("Current editable buffer differs from expected complete text; no mutation sent. Observe again or pass an explicit expected_text.".into());
+                }
+                let accepted: bool = conn
+                    .call_method(
+                        Some(object.bus.as_str()),
+                        object.path.as_str(),
+                        Some("org.a11y.atspi.EditableText"),
+                        "SetTextContents",
+                        &(text,),
+                    )
+                    .map_err(|e| e.to_string())?
+                    .body()
+                    .deserialize()
+                    .map_err(|e| e.to_string())?;
+                if !accepted {
+                    return Err("AT-SPI SetTextContents refused; no insertion or keyboard fallback attempted".into());
+                }
+                let fresh_text = match read_full_text(&conn, &object) {
+                    Ok(text) => text,
+                    Err(error) => {
+                        return Ok(
+                            json!({"status":"uncertain","route":"direct_atspi_object","accepted":true,"exact_buffer_bytes_match":false,"saved_artifact_verified":false,"readback_error":error,"latency_ms":started.elapsed().as_secs_f64()*1000.0}),
+                        )
+                    }
+                };
+                Ok(
+                    json!({"status":if fresh_text==text{"buffer_verified"}else{"uncertain"},"route":"direct_atspi_object","accepted":true,"exact_buffer_bytes_match":fresh_text.as_bytes()==text.as_bytes(),"saved_artifact_verified":false,"latency_ms":started.elapsed().as_secs_f64()*1000.0}),
+                )
+            } else {
+                if !node.interfaces.iter().any(|s| s == "org.a11y.atspi.Action") {
+                    return Err(
+                        "Target has no AT-SPI Action capability; no pointer fallback".into(),
+                    );
+                }
+                let action = request["action_name"].as_str().unwrap_or("click");
+                let actions = action_names(&conn, &object)?;
+                let index = named_action_index(&actions, action)?;
+                let accepted: bool = conn
+                    .call_method(
+                        Some(object.bus.as_str()),
+                        object.path.as_str(),
+                        Some("org.a11y.atspi.Action"),
+                        "DoAction",
+                        &(index,),
+                    )
+                    .map_err(|e| e.to_string())?
+                    .body()
+                    .deserialize()
+                    .map_err(|e| e.to_string())?;
+                Ok(
+                    json!({"status":if accepted{"dispatched"}else{"failed"},"route":"direct_atspi_object","accepted":accepted,"ui_result_verified":false,"latency_ms":started.elapsed().as_secs_f64()*1000.0}),
+                )
+            }
+        }
+        _ => Err("Supported operations: observe, set_value, click".into()),
+    }
+}
+
+#[cfg(test)]
+mod visible_scope_tests {
+    use super::*;
+    use std::{cell::RefCell, collections::HashMap};
+
+    fn object(id: &str) -> Object {
+        Object {
+            bus: ":1.123".into(),
+            path: format!("/test/{id}"),
+        }
+    }
+    fn node(id: &str, showing: bool, protected: bool) -> Node {
+        Node {
+            object: object(id),
+            parent: None,
+            depth: 0,
+            name: if protected {
+                "[protected field]".into()
+            } else {
+                id.into()
+            },
+            description: String::new(),
+            role: "panel".into(),
+            role_id: 39,
+            interfaces: Vec::new(),
+            states: vec![if showing { 1 << 25 } else { 0 }],
+            protected,
+            action_names: Vec::new(),
+            text_excerpt: None,
+        }
+    }
+    fn walk(
+        nodes: Vec<Node>,
+        edges: &[(&str, &[&str])],
+        max_nodes: usize,
+        max_depth: usize,
+        state_error: Option<&str>,
+        expired: bool,
+    ) -> (VisibleWalk, Vec<String>, Vec<String>) {
+        let by: HashMap<Object, Node> = nodes.into_iter().map(|n| (n.object.clone(), n)).collect();
+        let children: HashMap<Object, Vec<Object>> = edges
+            .iter()
+            .map(|(p, c)| (object(p), c.iter().map(|id| object(id)).collect()))
+            .collect();
+        let reads = RefCell::new(Vec::new());
+        let children_calls = RefCell::new(Vec::new());
+        let result = walk_visible_window(
+            object("root"),
+            object("application"),
+            max_nodes,
+            max_depth,
+            |obj, parent, depth| {
+                reads.borrow_mut().push(obj.path.clone());
+                let mut n = by.get(&obj).cloned().ok_or("node absent")?;
+                n.parent = parent;
+                n.depth = depth;
+                Ok(n)
+            },
+            |obj| {
+                children_calls.borrow_mut().push(obj.path.clone());
+                Ok(children.get(obj).cloned().unwrap_or_default())
+            },
+            |obj| {
+                if state_error.is_some_and(|id| object(id) == *obj) {
+                    return Err("bridge state query failed".into());
+                }
+                Ok(by.get(obj).ok_or("state absent")?.states.clone())
+            },
+            || expired,
+        );
+        (result, reads.into_inner(), children_calls.into_inner())
+    }
+    #[test]
+    fn hidden_tab_descendants_are_not_traversed_or_counted_as_visible_nodes() {
+        let (r, reads, _) = walk(
+            vec![
+                node("root", true, false),
+                node("hidden_tab", false, false),
+                node("hidden_document", false, false),
+                node("visible", true, false),
+            ],
+            &[
+                ("root", &["hidden_tab", "visible"]),
+                ("hidden_tab", &["hidden_document"]),
+                ("hidden_document", &["omitted_descendant"]),
+            ],
+            2,
+            40,
+            None,
+            false,
+        );
+        assert!(r.complete);
+        assert_eq!(
+            r.nodes.iter().map(|n| &n.name).collect::<Vec<_>>(),
+            vec!["root", "visible"]
+        );
+        assert!(!reads.iter().any(|p| p.ends_with("hidden_document")));
+        assert_eq!(r.statistics.pruned_not_showing_branches, 1);
+        assert_eq!(r.statistics.immediate_child_visibility_probes, 1);
+        assert_eq!(r.statistics.omitted_descendant_count, None);
+    }
+    #[test]
+    fn contradictory_showing_child_under_hidden_parent_fails_closed() {
+        let (r, _, _) = walk(
+            vec![
+                node("root", true, false),
+                node("hidden", false, false),
+                node("showing_dialog", true, false),
+            ],
+            &[("root", &["hidden"]), ("hidden", &["showing_dialog"])],
+            100,
+            40,
+            None,
+            false,
+        );
+        assert!(!r.complete);
+        assert_eq!(r.statistics.showing_child_under_hidden_parent, 1);
+        assert_eq!(r.nodes.len(), 1);
+    }
+    #[test]
+    fn protected_branches_keep_redacted_root_but_never_open_descendants() {
+        for showing in [true, false] {
+            let (r, reads, children) = walk(
+                vec![
+                    node("root", true, false),
+                    node("secret", showing, true),
+                    node("secret_child", true, false),
+                ],
+                &[("root", &["secret"]), ("secret", &["secret_child"])],
+                100,
+                40,
+                None,
+                false,
+            );
+            assert!(r.complete);
+            assert!(!reads.iter().any(|p| p.ends_with("secret_child")));
+            assert!(!children.iter().any(|p| p.ends_with("secret")));
+            assert_eq!(r.statistics.pruned_protected_branches, 1);
+            assert!(r
+                .nodes
+                .iter()
+                .filter(|n| n.protected)
+                .all(|n| n.name == "[protected field]"));
+        }
+    }
+    #[test]
+    fn selected_root_is_retained_but_false_showing_prevents_mutation_handles() {
+        let (r, reads, _) = walk(
+            vec![node("root", false, false), node("visible", true, false)],
+            &[("root", &["visible"])],
+            100,
+            40,
+            None,
+            false,
+        );
+        assert!(!r.complete);
+        assert_eq!(r.nodes.len(), 1);
+        assert!(!r.statistics.selected_root_showing);
+        assert_eq!(reads, vec!["/test/root"]);
+    }
+    #[test]
+    fn visibility_probe_failure_is_not_interpreted_as_hidden_or_complete() {
+        let (r, _, _) = walk(
+            vec![
+                node("root", true, false),
+                node("hidden", false, false),
+                node("child", false, false),
+            ],
+            &[("root", &["hidden"]), ("hidden", &["child"])],
+            100,
+            40,
+            Some("child"),
+            false,
+        );
+        assert!(!r.complete);
+        assert_eq!(r.statistics.visibility_probe_errors, 1);
+    }
+    #[test]
+    fn empty_state_words_are_unknown_visibility_not_a_pruning_success() {
+        let mut unknown = node("unknown", false, false);
+        unknown.states.clear();
+        let (r, _, _) = walk(
+            vec![node("root", true, false), unknown],
+            &[("root", &["unknown"])],
+            100,
+            40,
+            None,
+            false,
+        );
+        assert!(!r.complete);
+        assert_eq!(r.statistics.visibility_probe_errors, 1);
+    }
+    #[test]
+    fn visible_node_limit_depth_limit_and_deadline_are_incomplete() {
+        for (budget, depth, expired) in [(1, 40, false), (100, 0, false), (100, 40, true)] {
+            let (r, _, _) = walk(
+                vec![node("root", true, false), node("visible", true, false)],
+                &[("root", &["visible"])],
+                budget,
+                depth,
+                None,
+                expired,
+            );
+            assert!(!r.complete);
+        }
+    }
+    #[test]
+    fn duplicate_object_ancestry_cannot_claim_a_complete_tree() {
+        let (r, _, _) = walk(
+            vec![node("root", true, false), node("visible", true, false)],
+            &[("root", &["visible", "visible"])],
+            100,
+            40,
+            None,
+            false,
+        );
+        assert!(!r.complete);
+    }
+    #[test]
+    fn fresh_traversal_removes_a_target_that_becomes_hidden() {
+        let (before, _, _) = walk(
+            vec![node("root", true, false), node("target", true, false)],
+            &[("root", &["target"])],
+            100,
+            40,
+            None,
+            false,
+        );
+        let (after, _, _) = walk(
+            vec![node("root", true, false), node("target", false, false)],
+            &[("root", &["target"])],
+            100,
+            40,
+            None,
+            false,
+        );
+        assert!(before.complete && after.complete);
+        assert!(before.nodes.iter().any(|n| n.object == object("target")));
+        assert!(!after.nodes.iter().any(|n| n.object == object("target")));
+        assert_eq!(before.statistics.definition, after.statistics.definition);
+        assert_eq!(before.statistics.definition, VISIBLE_TRAVERSAL);
+    }
+}
+
+#[cfg(test)]
+mod bounded_bridge_read_tests {
+    use super::*;
+    #[test]
+    fn individual_machine_action_names_are_authoritative() {
+        let names =
+            read_action_names(|| Ok(2), |i| Ok(["activate", "press"][i as usize].into())).unwrap();
+        assert_eq!(names, vec!["activate", "press"]);
+        assert_eq!(named_action_index(&names, "press").unwrap(), 1);
+        assert!(named_action_index(&names, "click").is_err());
+    }
+    #[test]
+    fn missing_empty_oversized_or_changing_actions_fail_closed() {
+        assert!(read_action_names(|| Ok(65), |_| panic!("not called")).is_err());
+        assert!(read_action_names(|| Ok(-1), |_| panic!("not called")).is_err());
+        assert!(read_action_names(|| Ok(1), |_| Ok(String::new())).is_err());
+        assert!(read_action_names(|| Ok(1), |_| Err("name unavailable".into())).is_err());
+        let mut counts = [1, 2].into_iter();
+        assert!(read_action_names(|| Ok(counts.next().unwrap()), |_| Ok("press".into())).is_err());
+        assert!(named_action_index(&["press".into(), "press".into()], "press").is_err());
+    }
+    #[test]
+    fn short_gecko_ranges_never_exceed_character_count() {
+        let text = read_text_bounded(
+            || Ok(3),
+            |end| {
+                assert_eq!(end, 3);
+                Ok("ä🦦ß".into())
+            },
+            512,
+            false,
+        )
+        .unwrap();
+        assert_eq!(text, "ä🦦ß");
+        assert_eq!(
+            read_text_bounded(
+                || Ok(0),
+                |end| {
+                    assert_eq!(end, 0);
+                    Ok(String::new())
+                },
+                512,
+                false
+            )
+            .unwrap(),
+            ""
+        );
+    }
+    #[test]
+    fn excerpt_and_complete_read_have_distinct_bounds() {
+        assert_eq!(
+            read_text_bounded(
+                || Ok(600),
+                |end| {
+                    assert_eq!(end, 512);
+                    Ok("a".repeat(512))
+                },
+                512,
+                false
+            )
+            .unwrap()
+            .len(),
+            512
+        );
+        assert!(read_text_bounded(
+            || Ok(65537),
+            |_| panic!("no unbounded request"),
+            65536,
+            true
+        )
+        .is_err());
+        assert!(read_text_bounded(|| Ok(16385), |_| Ok("🦦".repeat(16385)), 65536, true).is_err());
+    }
+    #[test]
+    fn empty_truncated_utf16_or_racing_text_is_not_complete() {
+        assert!(read_text_bounded(|| Ok(3), |_| Ok(String::new()), 512, false).is_err());
+        assert!(read_text_bounded(|| Ok(2), |_| Ok("🦦".into()), 512, false).is_err());
+        let mut counts = [3, 4].into_iter();
+        assert!(read_text_bounded(
+            || Ok(counts.next().unwrap()),
+            |_| Ok("abc".into()),
+            512,
+            false
+        )
+        .is_err());
+    }
+}

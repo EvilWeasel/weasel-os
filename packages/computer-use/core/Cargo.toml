@@ -1,0 +1,16 @@
+[package]
+name = "weasel-computer-use-core"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[dependencies]
+serde = { version = "=1.0.228", features = ["derive"] }
+serde_json = "=1.0.151"
+base64 = "=0.22.1"
+libc = "=0.2.190"
+png = "=0.18.0"
+pointer = { package = "weasel-computer-use-pointer", path = "../weasel-computer-use-pointer" }
+keyboard = { package = "weasel-computer-use-keyboard", path = "../weasel-computer-use-keyboard" }
+atspi = { package = "weasel-computer-use-atspi", path = "../weasel-computer-use-atspi" }
+clipboard = { package = "weasel-computer-use-clipboard", path = "../clipboard" }
