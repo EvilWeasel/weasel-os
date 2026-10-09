@@ -7,6 +7,15 @@ share the existing Codex home and the same single physical writer. Existing
 clients need their supported MCP reconnect or a fresh agent session after config
 changes. Source and service installation alone are not live acceptance.
 
+The managed `mcp_servers.weasel_desktop` entry uses
+`default_tools_approval_mode = "approve"` for the explicitly authorized desktop
+control. This is a policy for this owned server only; global Codex approval and
+sandbox settings and other MCP servers retain their existing configuration.
+Tool annotations identify observation tools as read-only, actions as potentially
+destructive writes, and cancel/takeover/resume as local control mutations. Use
+these tools within the user's requested task. After activation, verify the
+connection in a fresh ordinary agent session and complete an authorized workflow.
+
 ## Operations and boundaries
 
 Protocol schema 1 exposes status, real window/output/workspace inventory,
@@ -17,7 +26,20 @@ Niri identity, fractional output geometry and capabilities. Coordinates are loca
 to the returned screenshot or crop. Cua bounds are not screenshot coordinates.
 
 Input uses output-bound wlr virtual pointers and a canonical German Wayland
-keyboard. Every chord refreshes and acknowledges the keymap. Focus is a separate
+keyboard for app shortcuts. Every app chord refreshes and acknowledges the keymap.
+`key` accepts `key_scope: "app" | "compositor"`, defaulting to `app`.
+Super/meta/logo automatically select the compositor route. Niri's current
+Wayland virtual-keyboard handler sends chords directly to the focused app and
+does not run the compositor shortcut filter, so global shortcuts use an owned
+persistent uinput keyboard. Preparation verifies the authenticated Niri process
+has opened that exact device, then rechecks layout, observation, focus and stop
+state before input. Device readiness is not evidence that a shortcut worked;
+verify the resulting UI. A new proxy rejects a global batch against an older
+backend before any action, requiring `global_keyboard.routing_revision = 2`
+and the same session, epoch and observation. Capability failure has no blind
+Wayland fallback. Release cleanup tracks possible partial writes and destroys
+the owned device if necessary; unconfirmed release blocks further input.
+Focus is a separate
 action and requires fresh observation. The actor revalidates focus, window
 identity, geometry, workspace/output binding and pointer target pixels. It does
 not invent Niri window bounds or prove a coordinate belongs to a named control:

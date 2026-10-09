@@ -1,15 +1,20 @@
-# Optionaler UI-Evaluator: gebauter Vorschlag, tatsächlicher Prototype-Benchmark
+# Optionaler UI-Evaluator und gemessene API-Proben
 
 Der Python-Stdlib-Evaluator ergänzt eine schmale paid API für Predicate/Choice.
 Er besitzt keine Desktop-Eingabe, keine Capture-Funktion, keine Shell und keine
 freie Aktionsplanung. Die lokale Prototypausführung wurde am 9. Oktober 2026
 real gegen OpenAI geprüft. Das deklarative Paket und die Systemd-/MCP-Anbindung
-sind vorbereitet und gebaut, aber deren Aktivierung und ordinary-client
-Live-Nachweis stehen noch aus. Dieser Unterschied bleibt auch nach Kopieren
-der Dateien in den Repository-Quellstand bestehen.
+wurden aktiviert. Gewöhnliche Codex-Sitzungen haben die Tools entdeckt und
+Text- sowie begrenzte Bildfragen erfolgreich gestellt. Die private Abnahme
+nennt den tatsächlich verwendeten Storestand; neuere Source-Reparaturen sind
+erst nach eigenem Build, Aktivierung und Live-Prüfung als aktiv zu behandeln.
 
 `decisiond.py` hält eine persistente Unix-Verbindung und HTTP-Keepalive sowie
-ein SQLite-Kostenledger. `mcp.py` bietet `desktop_decide` und den kostenlosen
+ein SQLite-Kostenledger. Eine abgeschlossene HTTP-Verbindung wird nach mindestens
+30 Sekunden Leerlauf vor einem neuen POST geschlossen. Das ist eine defensive
+Client-Regel, keine zugesagte Providergrenze. Noch laufende Worker verhindern
+einen neuen Dispatch; Timeout oder Verbindungsfehler werden nicht wiederholt.
+`mcp.py` bietet `desktop_decide` und den kostenlosen
 `desktop_decision_status`; bei ausgeschaltetem Dienst folgt schnell ein klarer
 Capability-Fehler, danach verwendet der Agent den normalen Desktopweg.
 `benchmark.py` kann einen explizit gestarteten gepaarten Vergleich ausführen;
@@ -21,6 +26,14 @@ Decisions warm Median 250,78 ms, Responses 1.952,00 ms; mediane paarweise Ratio
 6,8269. Es gab neun warme Samples je Endpoint und je einen ersten Lauf, keinen
 p95 und keinen Bild-/Gesamtworkflow-Vergleich. Der Beleg liegt privat in
 `~/.local/state/weasel-os/computer-use/2026-10-09/decisions/paired-form-text-10.json`.
+
+Ein separater Vergleich desselben tatsächlichen 410×80-Desktop-Crops lieferte
+zehn korrekte Choice-Paare: warm n9 je Endpoint, Median236,84ms Decisions und
+1505,29ms Responses; mediane paarweise Ratio7,2701. Kein p95 bei dieser
+Stichprobe und keine Gesamtaufgaben-Beschleunigung. Der erste relative Lauf
+ist kein kalter Dienststart. Beleg: private `decisions/native-image-benchmark-r3.json`.
+Eine zuvor getrennte Bildanfrage endete mit Verbindungsabbruch und unklarer
+Abrechnung; sie wurde nicht wiederholt und bleibt im Ledger reserviert.
 
 Das bestehende Ledger bleibt unverändert:
 
@@ -34,9 +47,13 @@ budgetUsd = 10
 
 Zehn Decisions-Aufrufe nutzten 2.480 Inputtokens/0 Outputtokens, zehn Responses-
 Aufrufe 1.560/454. Der Benchmark ergibt nach dokumentierten Standardpreisen
-0,0006310 USD; zwei frühere Proben zusätzlich 0,0000227 USD. Insgesamt 22 Calls,
-geschätzt 0,0006537 USD, tatsächliche Rechnung unbekannt. Konservativ bleiben
-1,10 USD reserviert und 178 Versuche verfügbar. Reservierungen werden auch
+0,0006310 USD; zwei frühere Proben zusätzlich 0,0000227 USD. Dieser frühere
+Text-Benchmarkstand hatte22 Calls und geschätzt0,0006537USD. Nach den getrennten
+Bildproben und dem Bildvergleich sind47Calls konservativ mit2,35USD reserviert;
+bekannte Nutzung einschließlich der zwei älteren Proben ergibt geschätzt
+0,0013787USD. Eine zusätzliche Anfrage hat keine Nutzungsdaten und unklare
+Abrechnung; die tatsächliche Rechnung bleibt unbekannt. Diese Zahlen sind ein
+datierter Prüfstand, kein Live-Zähler. Reservierungen werden auch
 nach Fehlern, Neustart oder unbekannter Billing-Antwort nicht zurückgegeben;
 Job/State-Verzeichnis niemals zum Umgehen der Grenze ersetzen.
 

@@ -7,6 +7,12 @@ Use the `weasel_desktop` MCP tools for the real desktop. The daemon is shared
 by T3 and ordinary Codex sessions and serializes physical input. Prefer T3's
 preview tools for work explicitly targeting its managed preview browser.
 
+The owned `weasel_desktop` MCP entry preapproves this desktop transport. Tool
+annotations describe effects; they do not expand the user's task authorization.
+After a managed configuration change, prove the connection in a fresh ordinary
+agent session. If a tool is blocked by client approval policy, preserve global
+Codex settings and report/reconnect the specific integration.
+
 Start with `desktop_status`. Every backend start initially latches input, and a
 restart preserves any prior takeover cause. Inspect
 `takeover_persistence.reason.source`: for `backend_startup`, a current user
@@ -89,7 +95,16 @@ takeover, stop and wait for the user to request continuation. Only then call
 `desktop_resume` and obtain a new observation. The emergency key is
 **Ctrl+Alt+Escape**. Normal T3/Codex tool cancellation is forwarded to the actor;
 verify that it has released input. German shortcuts use a persistent canonical
-evdev keyboard. `type` defaults to automatic text routing: tested Electron app
+Wayland keyboard for app shortcuts. For a Niri shortcut, send
+`{"kind":"key","keys":[...],"key_scope":"compositor"}`. App shortcuts use
+`key_scope:"app"` by default; Super/meta/logo always use the compositor route.
+Inspect `global_keyboard.routing_revision = 2` in fresh status before relying
+on global shortcuts. The owned uinput device is prepared before any batch input;
+the proxy refuses an old backend or changed binding. Verify the visible result
+and reobserve after a workspace or fullscreen change. Never repeat a failed
+global chord as an app chord: that can type into the wrong field. Failure or
+cancel must confirm key release before continuing.
+`type` defaults to automatic text routing: tested Electron app
 IDs and long text use clipboard insertion, other apps use wtype. Do not force
 keyboard text into Electron: arbitrary physical keycodes and supplementary
 Unicode keysyms have proven unreliable there. `text_method: "clipboard"` is

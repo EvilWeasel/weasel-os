@@ -1,3 +1,4 @@
+mod global_keyboard;
 mod takeover;
 use base64::{engine::general_purpose::STANDARD, Engine};
 use keyboard::Keyboard;
@@ -110,6 +111,7 @@ struct State {
     semantic_targets: Mutex<HashMap<String, SemanticTarget>>,
     actor: Mutex<Option<Pointer>>,
     keyboard: Mutex<Option<Keyboard>>,
+    global_keyboard: Mutex<Option<global_keyboard::GlobalKeyboard>>,
     image_dir: PathBuf,
     log: Mutex<fs::File>,
 }
@@ -123,6 +125,13 @@ enum TextMethod {
 }
 fn default_text_method() -> TextMethod {
     TextMethod::Auto
+}
+#[derive(Debug, Deserialize, Default, Clone, Copy, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+enum KeyScope {
+    #[default]
+    App,
+    Compositor,
 }
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
@@ -170,6 +179,8 @@ enum Action {
     },
     Key {
         keys: Vec<String>,
+        #[serde(default)]
+        key_scope: KeyScope,
     },
     SemanticSetValue {
         handle_id: String,
@@ -213,6 +224,16 @@ impl Action {
     }
 }
 
+const GLOBAL_ROUTING_REVISION: u32 = 2;
+fn global_keyboard_capability() -> Value {
+    json!({"routing_revision":GLOBAL_ROUTING_REVISION,"key_scope":["app","compositor"],"super_implies_compositor":true,"transport":"owned_uinput","device_creation":"only during guarded action preparation","readiness":"authenticated Niri peer has own exact event node open; not proof of configured/UI acceptance","ui_success_requires_verification":true,"fallback":false})
+}
+#[derive(Deserialize)]
+struct GlobalBackendGuard {
+    routing_revision: u32,
+    session_id: String,
+    epoch: u64,
+}
 #[derive(Deserialize)]
 struct ActArgs {
     observation_id: String,
@@ -221,6 +242,10 @@ struct ActArgs {
     #[serde(default)]
     task_id: Option<String>,
     actions: Vec<Action>,
+    // Added by new proxies after a fresh capability check. An old proxy can
+    // still send Super safely: this core always routes it to owned uinput.
+    #[serde(default)]
+    expected_global_backend: Option<GlobalBackendGuard>,
     #[serde(default)]
     timeout_ms: Option<u64>,
     #[serde(default = "default_observe_after")]
@@ -698,7 +723,7 @@ fn preflight(obs: &Observation, action: &Action) -> R<()> {
         Action::Click{button:b,count,..}=>{button(b)?;if count.is_some_and(|n|n==0||n>3){return Err("Click count must be 1..3; no input sent".into());}},
         Action::Scroll{dx,dy,..} if (*dx==0&&*dy==0)||dx.unsigned_abs()>100||dy.unsigned_abs()>100=>return Err("Scroll needs a nonzero dx/dy within -100..100 wheel steps; no input sent".into()),
         Action::Drag{duration_ms:Some(ms),..} if !(50..=3000).contains(ms)=>return Err("Drag duration_ms must be 50..3000; no input sent".into()),
-        Action::Key{keys}=>preflight_keys(keys)?,
+        Action::Key{keys,key_scope}=>preflight_keys(keys,*key_scope)?,
         Action::SemanticSetValue{handle_id,text,expected_text}=>{if handle_id.is_empty()||handle_id.len()>128||text.len()>65536||expected_text.as_ref().is_some_and(|t|t.len()>65536){return Err("Semantic handle/text exceeds bounded schema; no input sent".into());}},
         Action::SemanticClick{handle_id,action_name}=>{if handle_id.is_empty()||handle_id.len()>128||action_name.is_empty()||action_name.len()>128{return Err("Semantic handle/action name invalid; no input sent".into());}},
         Action::Type{text,..}|Action::Paste{text,..} if text.len()>65536=>return Err("Text exceeds 64 KiB; no input sent".into()),
@@ -955,7 +980,7 @@ fn observe_inner(state: &State, args: &Value, actor_held: bool) -> R<Value> {
     } else {
         image.clone()
     };
-    let data = json!({"schema":1,"observation_id":id,"epoch":epoch,"observed_unix_ms":SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis(),"monotonic_ms":state.started.elapsed().as_secs_f64()*1000.0,"monotonic_system_ms":system_monotonic_ms(),"expires_after_ms":60000,"desktop":"niri-wayland","focused_window":focus,"windows":windows,"workspaces":workspaces,"outputs":outputs,"capture":{"output":name,"path":image,"mime_type":"image/png","image_width":width,"image_height":height,"scale":1,"coordinate_frame":"output-local screenshot pixels; origin top-left; dimensions are actual PNG dimensions and may differ by rounding from Niri logical size","output_logical":geometry},"capabilities":{"capture":true,"window_focus":true,"pointer":"wlr_virtual_pointer_v2","keyboard":{"shortcuts":"persistent canonical German evdev Wayland keyboard; keymap refreshed before every chord","unicode_text":{"auto":"plain clipboard for known Electron app IDs or >1000characters; wtype for shorter text in other apps","keyboard_limit_characters":1000,"max_text_utf8_bytes":65536,"electron_keyboard":"known unreliable due physical DomCode and supplementary Unicode; explicit override requires app-specific proof"}},"clipboard":{"backend":"Rust wlr-data-control helper with an owned user scope","plain_text_restore":"best effort; source ownership checked, no atomic selection CAS; skipped after cancel/takeover","rich_or_nontext_restore":"supported bounded MIME payloads including HTML, COMPOUND_TEXT and original Chromium metadata; no portal handles/password hints","rich_preserve_request":"snapshot same offer before replacement; unknown/oversized/sensitive formats refuse","ignored_transport_mimes":["SAVE_TARGETS"],"holder_lifetime":"separate user scope; source replacement or graphical session shutdown","potential_change_reported_on_failure":true},"semantic_tree":"desktop_semantic: read-only Cua application/PID tree; unique window inventory mapping does not attest node window scope; Cua bounds are not screenshot coordinates","takeover":"explicit or physical-input latch; desktop_resume then fresh observe required"},"timing_ms":{"capture":capture_start.elapsed().as_secs_f64()*1000.0,"observe_total":start.elapsed().as_secs_f64()*1000.0}});
+    let data = json!({"schema":1,"observation_id":id,"epoch":epoch,"global_keyboard":global_keyboard_capability(),"observed_unix_ms":SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis(),"monotonic_ms":state.started.elapsed().as_secs_f64()*1000.0,"monotonic_system_ms":system_monotonic_ms(),"expires_after_ms":60000,"desktop":"niri-wayland","focused_window":focus,"windows":windows,"workspaces":workspaces,"outputs":outputs,"capture":{"output":name,"path":image,"mime_type":"image/png","image_width":width,"image_height":height,"scale":1,"coordinate_frame":"output-local screenshot pixels; origin top-left; dimensions are actual PNG dimensions and may differ by rounding from Niri logical size","output_logical":geometry},"capabilities":{"capture":true,"window_focus":true,"pointer":"wlr_virtual_pointer_v2","keyboard":{"shortcuts":"app shortcuts: persistent canonical German evdev Wayland keyboard; keymap refreshed before every chord. key_scope=compositor or chords containing Super/meta/logo use an owned Linux uinput device so Niri compositor bindings can process them; permission/monitor/device-open failures refuse before any batch input. Device creation is a capability side effect; open/write acknowledgement is not UI success","unicode_text":{"auto":"plain clipboard for known Electron app IDs or >1000characters; wtype for shorter text in other apps","keyboard_limit_characters":1000,"max_text_utf8_bytes":65536,"electron_keyboard":"known unreliable due physical DomCode and supplementary Unicode; explicit override requires app-specific proof"}},"clipboard":{"backend":"Rust wlr-data-control helper with an owned user scope","plain_text_restore":"best effort; source ownership checked, no atomic selection CAS; skipped after cancel/takeover","rich_or_nontext_restore":"supported bounded MIME payloads including HTML, COMPOUND_TEXT and original Chromium metadata; no portal handles/password hints","rich_preserve_request":"snapshot same offer before replacement; unknown/oversized/sensitive formats refuse","ignored_transport_mimes":["SAVE_TARGETS"],"holder_lifetime":"separate user scope; source replacement or graphical session shutdown","potential_change_reported_on_failure":true},"semantic_tree":"desktop_semantic: read-only Cua application/PID tree; unique window inventory mapping does not attest node window scope; Cua bounds are not screenshot coordinates","takeover":"explicit or physical-input latch; desktop_resume then fresh observe required"},"timing_ms":{"capture":capture_start.elapsed().as_secs_f64()*1000.0,"observe_total":start.elapsed().as_secs_f64()*1000.0}});
     check_epoch(state, Some(epoch))?;
     if focused(&niri_epoch(state, "windows", Some(epoch))?)
         .as_ref()
@@ -1107,8 +1132,31 @@ fn delay(state: &State, epoch: u64, ms: u64) -> R<()> {
     check_epoch(state, Some(epoch))
 }
 
-fn canonical_keys(state: &State, obs: &Observation, epoch: u64, keys: &[String]) -> R<()> {
-    canonical_keys_with_pre_dispatch(state, obs, epoch, keys, || Ok(()))
+fn uses_global_keyboard(keys: &[String], scope: KeyScope) -> R<bool> {
+    let codes = keys
+        .iter()
+        .map(|key| keyboard::named_evdev(key).map_err(|e| e.to_string()))
+        .collect::<R<Vec<_>>>()?;
+    Ok(scope == KeyScope::Compositor || global_keyboard::requires_global(&codes))
+}
+fn validate_german_layout(state: &State, epoch: u64) -> R<()> {
+    let layouts = niri_epoch(state, "keyboard-layouts", Some(epoch))?;
+    let idx = layouts["current_idx"]
+        .as_u64()
+        .ok_or("Keyboard layout identity unavailable")? as usize;
+    if layouts["names"][idx].as_str() != Some("German") {
+        return Err("Canonical shortcut backend is calibrated for default German layout; current layout differs. No key input sent.".into());
+    }
+    Ok(())
+}
+fn canonical_keys(
+    state: &State,
+    obs: &Observation,
+    epoch: u64,
+    keys: &[String],
+    scope: KeyScope,
+) -> R<()> {
+    canonical_keys_with_pre_dispatch(state, obs, epoch, keys, scope, || Ok(()))
 }
 
 fn canonical_keys_with_pre_dispatch(
@@ -1116,16 +1164,69 @@ fn canonical_keys_with_pre_dispatch(
     obs: &Observation,
     epoch: u64,
     keys: &[String],
+    scope: KeyScope,
     mut pre_dispatch: impl FnMut() -> R<()>,
 ) -> R<()> {
-    preflight_keys(keys)?;
+    preflight_keys(keys, scope)?;
     check_epoch(state, Some(epoch))?;
-    let layouts = niri_epoch(state, "keyboard-layouts", Some(epoch))?;
-    let idx = layouts["current_idx"]
-        .as_u64()
-        .ok_or("Keyboard layout identity unavailable")? as usize;
-    if layouts["names"][idx].as_str() != Some("German") {
-        return Err("Canonical shortcut backend is calibrated for default German layout; current layout differs. No key input sent.".into());
+    validate_german_layout(state, epoch)?;
+    let codes: Vec<u32> = keys
+        .iter()
+        .map(|key| keyboard::named_evdev(key).map_err(|e| e.to_string()))
+        .collect::<R<_>>()?;
+    if uses_global_keyboard(keys, scope)? {
+        let mut saved = state
+            .global_keyboard
+            .lock()
+            .map_err(|_| "Global keyboard lock poisoned")?;
+        let kb = saved
+            .as_mut()
+            .ok_or("Global keyboard was not prepared before batch; no fallback/input sent")?;
+        let opened_deadline = Instant::now() + remaining_timeout(Duration::from_secs(3));
+        kb.ensure_opened(opened_deadline, || check_epoch(state, Some(epoch)))?;
+        // Readiness can wait. The earlier layout read is not sufficient.
+        validate_german_layout(state, epoch)?;
+        let monitor = state
+            .human_monitor
+            .lock()
+            .map_err(|_| "Human monitor status poisoned")?;
+        if monitor["available"].as_bool() != Some(true)
+            || monitor["watched_devices"].as_u64().unwrap_or(0) == 0
+            || monitor["status"].as_str() == Some("starting")
+        {
+            return Err(
+                "Physical takeover monitor unavailable before global shortcut; no key sent".into(),
+            );
+        }
+        drop(monitor);
+        check_epoch(state, Some(epoch))?;
+        validate(state, obs, None, false)?;
+        pre_dispatch()?;
+        let result = (|| {
+            for code in &codes {
+                check_epoch(state, Some(epoch))?;
+                kb.key(
+                    *code,
+                    true,
+                    Instant::now() + remaining_timeout(Duration::from_millis(100)),
+                    || check_epoch(state, Some(epoch)),
+                )?;
+                delay(state, epoch, 8)?;
+            }
+            delay(state, epoch, 20)?;
+            for code in codes.iter().rev() {
+                check_epoch(state, Some(epoch))?;
+                kb.key(
+                    *code,
+                    false,
+                    Instant::now() + remaining_timeout(Duration::from_millis(100)),
+                    || check_epoch(state, Some(epoch)),
+                )?;
+            }
+            check_epoch(state, Some(epoch))
+        })();
+        let release = kb.release_all();
+        return result.and(release);
     }
     let mut saved = state
         .keyboard
@@ -1166,7 +1267,7 @@ fn canonical_keys_with_pre_dispatch(
     let release = kb.release_all().map_err(|e| e.to_string());
     result.and(release)
 }
-fn preflight_keys(keys: &[String]) -> R<()> {
+fn preflight_keys(keys: &[String], scope: KeyScope) -> R<()> {
     if keys.is_empty() || keys.len() > 6 {
         return Err("Key needs 1..6 key names, modifiers first".into());
     }
@@ -1182,6 +1283,9 @@ fn preflight_keys(keys: &[String]) -> R<()> {
         if !seen.insert(code) {
             return Err("Duplicate key/modifier in chord; no input sent".into());
         }
+    }
+    if uses_global_keyboard(keys, scope)? {
+        global_keyboard::permission_available()?;
     }
     Ok(())
 }
@@ -1413,6 +1517,7 @@ fn execute(
                     obs,
                     epoch,
                     &["ctrl".into(), "v".into()],
+                    KeyScope::App,
                     || {
                         if !lease
                             .check_owned(remaining_timeout(Duration::from_millis(300)), cancelled)?
@@ -1454,8 +1559,18 @@ fn execute(
             }
             operation?;
         }
-        Action::Key { keys } => {
-            canonical_keys(state, obs, epoch, keys)?;
+        Action::Key { keys, key_scope } => {
+            details["key_scope"] = json!(if uses_global_keyboard(keys, *key_scope)? {
+                "compositor"
+            } else {
+                "app"
+            });
+            details["key_transport"] = json!(if uses_global_keyboard(keys, *key_scope)? {
+                "owned_uinput"
+            } else {
+                "wayland_virtual_keyboard"
+            });
+            canonical_keys(state, obs, epoch, keys, *key_scope)?;
         }
         Action::SemanticSetValue {
             handle_id,
@@ -1523,6 +1638,9 @@ fn act(state: &State, args: &Value, epoch: u64) -> R<Value> {
     }
     let parsed: ActArgs = serde_json::from_value(args.clone())
         .map_err(|e| format!("Invalid action arguments: {e}"))?;
+    if let Some(guard) = &parsed.expected_global_backend {
+        validate_global_backend_guard(guard, &state.session_id, epoch, &parsed.observation_id)?;
+    }
     let timeout = Duration::from_millis(parsed.timeout_ms.unwrap_or(30000).clamp(100, 120000));
     let _deadline = DeadlineGuard::set(Some(start + timeout));
     if parsed.settle_ms > 1000 {
@@ -1597,12 +1715,64 @@ fn act(state: &State, args: &Value, epoch: u64) -> R<Value> {
     *state
         .active
         .lock()
-        .map_err(|_| "Active task lock poisoned")? = json!({"task_id":task,"completed_actions":0,"total_actions":parsed.actions.len(),"epoch":epoch});
+        .map_err(|_| "Active task lock poisoned")? = json!({"task_id":task,"completed_actions":0,"total_actions":parsed.actions.len(),"epoch":epoch,"phase":"preparing_global_keyboard"});
     state.release_confirmed.store(false, Ordering::SeqCst);
     let mut completed = 0usize;
     let mut effects = Vec::new();
-    let mut failure = None;
+    // Prepare a required global device before ANY earlier batch input. Creation
+    // is a documented capability side effect, never an observation side effect.
+    // Own event-node open is only a readiness gate, not proof of a UI result.
+    let needs_global = parsed.actions.iter().any(|action| match action {
+        Action::Key { keys, key_scope } => uses_global_keyboard(keys, *key_scope).unwrap_or(false),
+        _ => false,
+    });
+    let preparation = (|| -> R<()> {
+        if needs_global {
+            let monitor = state
+                .human_monitor
+                .lock()
+                .map_err(|_| "Human monitor status poisoned")?;
+            if monitor["available"].as_bool() != Some(true)
+                || monitor["watched_devices"].as_u64().unwrap_or(0) == 0
+                || monitor["status"].as_str() == Some("starting")
+            {
+                return Err(
+                "Global keyboard requires an available physical takeover monitor; no input sent"
+                    .into(),
+            );
+            }
+            drop(monitor);
+            validate(state, &obs, parsed.window_id, false)?;
+            let mut saved = state
+                .global_keyboard
+                .lock()
+                .map_err(|_| "Global keyboard lock poisoned")?;
+            let deadline = Instant::now() + remaining_timeout(Duration::from_secs(3));
+            if saved.is_none() {
+                *saved = Some(global_keyboard::GlobalKeyboard::prepare(deadline, || {
+                    check_epoch(state, Some(epoch))
+                })?);
+            }
+            saved
+                .as_mut()
+                .unwrap()
+                .ensure_opened(deadline, || check_epoch(state, Some(epoch)))?;
+            check_epoch(state, Some(epoch))?;
+            validate(state, &obs, parsed.window_id, false)?;
+        }
+        Ok(())
+    })();
+    let mut failure = preparation.err();
+    if failure.is_none() {
+        *state
+            .active
+            .lock()
+            .map_err(|_| "Active task lock poisoned")? = json!({"task_id":task,"completed_actions":0,"total_actions":parsed.actions.len(),"epoch":epoch,"phase":"executing"});
+    }
     for action in &parsed.actions {
+        if failure.is_some() {
+            break;
+        }
         let step = Instant::now();
         let mut dispatched = false;
         let mut guard = Value::Null;
@@ -1669,6 +1839,18 @@ fn act(state: &State, args: &Value, epoch: u64) -> R<Value> {
                 cleanup_ok = false;
                 if failure.is_none() {
                     failure = Some(format!("Keyboard release/receipt failed: {e}"));
+                }
+            }
+        }
+    } else {
+        cleanup_ok = false;
+    }
+    if let Ok(mut keyboard) = state.global_keyboard.lock() {
+        if let Some(keyboard) = keyboard.as_mut() {
+            if let Err(error) = keyboard.release_all() {
+                cleanup_ok = false;
+                if failure.is_none() {
+                    failure = Some(format!("Global keyboard release failed: {error}"));
                 }
             }
         }
@@ -1944,7 +2126,7 @@ fn semantic_direct(state: &State, args: &Value) -> R<Value> {
 fn handle(state: &State, tool: &str, args: &Value, epoch: u64) -> R<Value> {
     match tool {
         "desktop_status" => Ok(text_result(
-            json!({"schema":1,"version":"0.1.0","session_id":state.session_id,"desktop":"niri-wayland","epoch":state.epoch.load(Ordering::SeqCst),"queued_batches":state.queued.load(Ordering::SeqCst),"active":*state.active.lock().map_err(|_|"Active state poisoned")?,"last_result":*state.last_result.lock().map_err(|_|"Last result state poisoned")?,"actor_release_confirmed":state.release_confirmed.load(Ordering::SeqCst),"capture_available":state.capture_available.load(Ordering::SeqCst),"fresh_observation_required_after_capture_failure":true,"uptime_ms":state.started.elapsed().as_millis(),"takeover_latched":state.takeover.load(Ordering::SeqCst),"takeover_persistence":state.takeover_marker.lock().map_err(|_|"Takeover marker state poisoned")?.status(),"human_input_monitor":*state.human_monitor.lock().map_err(|_|"Human input monitor state poisoned")?}),
+            json!({"schema":1,"version":"0.1.0","session_id":state.session_id,"interface_revision":GLOBAL_ROUTING_REVISION,"global_keyboard":global_keyboard_capability(),"desktop":"niri-wayland","epoch":state.epoch.load(Ordering::SeqCst),"queued_batches":state.queued.load(Ordering::SeqCst),"active":*state.active.lock().map_err(|_|"Active state poisoned")?,"last_result":*state.last_result.lock().map_err(|_|"Last result state poisoned")?,"actor_release_confirmed":state.release_confirmed.load(Ordering::SeqCst),"capture_available":state.capture_available.load(Ordering::SeqCst),"fresh_observation_required_after_capture_failure":true,"uptime_ms":state.started.elapsed().as_millis(),"takeover_latched":state.takeover.load(Ordering::SeqCst),"takeover_persistence":state.takeover_marker.lock().map_err(|_|"Takeover marker state poisoned")?.status(),"human_input_monitor":*state.human_monitor.lock().map_err(|_|"Human input monitor state poisoned")?}),
         )),
         "desktop_windows" => Ok(text_result(
             json!({"schema":1,"windows":niri(state,"windows")?,"outputs":niri(state,"outputs")?,"workspaces":niri(state,"workspaces")?}),
@@ -2064,19 +2246,45 @@ fn handle(state: &State, tool: &str, args: &Value, epoch: u64) -> R<Value> {
 }
 
 fn tools() -> Value {
-    let action = json!({"type":"object","properties":{"kind":{"type":"string","enum":["focus","move","click","scroll","drag","type","paste","key","semantic_set_value","semantic_click","wait"]},"window_id":{"type":"integer"},"x":{"type":"number"},"y":{"type":"number"},"to_x":{"type":"number"},"to_y":{"type":"number"},"button":{"type":"string","enum":["left","right","middle"]},"count":{"type":"integer"},"dx":{"type":"integer","minimum":-100,"maximum":100,"description":"Discrete wheel steps, not pixels. Positive moves right."},"dy":{"type":"integer","minimum":-100,"maximum":100,"description":"Discrete wheel steps, not pixels. Positive moves down."},"text":{"type":"string"},"handle_id":{"type":"string"},"action_name":{"type":"string"},"expected_text":{"type":"string"},"text_method":{"type":"string","enum":["auto","keyboard","clipboard"],"default":"auto"},"keys":{"type":"array","items":{"type":"string"}},"ms":{"type":"integer"},"duration_ms":{"type":"integer"},"restore_clipboard":{"type":"boolean"}},"required":["kind"]});
+    let action = json!({"type":"object","properties":{"kind":{"type":"string","enum":["focus","move","click","scroll","drag","type","paste","key","semantic_set_value","semantic_click","wait"]},"window_id":{"type":"integer"},"x":{"type":"number"},"y":{"type":"number"},"to_x":{"type":"number"},"to_y":{"type":"number"},"button":{"type":"string","enum":["left","right","middle"]},"count":{"type":"integer"},"dx":{"type":"integer","minimum":-100,"maximum":100,"description":"Discrete wheel steps, not pixels. Positive moves right."},"dy":{"type":"integer","minimum":-100,"maximum":100,"description":"Discrete wheel steps, not pixels. Positive moves down."},"text":{"type":"string"},"handle_id":{"type":"string"},"action_name":{"type":"string"},"expected_text":{"type":"string"},"text_method":{"type":"string","enum":["auto","keyboard","clipboard"],"default":"auto"},"keys":{"type":"array","items":{"type":"string"}},"key_scope":{"type":"string","enum":["app","compositor"],"default":"app","description":"app uses Wayland; compositor explicitly uses owned uinput. Super/meta/logo always imply compositor. Does not translate or guess Niri bindings."},"ms":{"type":"integer"},"duration_ms":{"type":"integer"},"restore_clipboard":{"type":"boolean"}},"required":["kind"]});
     let crop = json!({"type":"object","properties":{"x":{"type":"integer","minimum":0},"y":{"type":"integer","minimum":0},"width":{"type":"integer","minimum":1},"height":{"type":"integer","minimum":1}},"required":["x","y","width","height"]});
-    json!([
-      {"name":"desktop_status","description":"Persistent Niri desktop actor status, active task, queued batches and cancel epoch. Does not capture or act.","inputSchema":{"type":"object","properties":{}}},
+    let mut catalog = json!([
+      {"name":"desktop_status","description":"Persistent Niri desktop actor status, active/preparing task, queued batches and cancel epoch. Advertises global_keyboard routing_revision=2 only when this software implements scoped owned-uinput routing; this is not a live device/UI-success attestation. Does not capture or act.","inputSchema":{"type":"object","properties":{}}},
       {"name":"desktop_windows","description":"Read actual Niri windows, outputs and workspaces. Window layout may lack global app bounds; never invent bounds.","inputSchema":{"type":"object","properties":{}}},
       {"name":"desktop_observe","description":"Capture one actual laptop output via grim at scale1, plus Niri identities. Optional crop uses full-output screenshot pixels x/y/width/height; action x/y then use local pixels of the displayed crop. Core translates crop origin; NEVER add compositor output origin. Actual PNG size can differ from Niri logical size by rounding. Observation expires in60seconds; identity/geometry and fresh target-region guards still run. Observe after focus/workspace/layout changes. include_image=false returns private PNG reference only.","inputSchema":{"type":"object","properties":{"output":{"type":"string"},"include_image":{"type":"boolean"},"crop":crop}}},
       {"name":"desktop_semantic","description":"Read fresh Cua AT-SPI elements for a Niri window. Maps only unique actual PID+title; synthetic Cua IDs are never guessed. Query filters returned elements. Accessibility bounds are app-local and NOT screenshot coordinates; do not directly click them without calibrated mapping. Limited/root-only trees require visual fallback.","inputSchema":{"type":"object","properties":{"window_id":{"type":"integer"},"query":{"type":"string"},"max_elements":{"type":"integer"},"max_depth":{"type":"integer"}},"required":["window_id"]}},
       {"name":"desktop_semantic_direct","description":"Read exact-window AT-SPI subtree with immutable direct object handles. Supplies role/label/description/parent/text excerpt/action_names. Only daemon-owned handles from complete snapshots may be used with desktop_act semantic_set_value or semantic_click. No raw object/index/Cua tokens and no pixel fallback. Native GTK candidates need live acceptance; missing/incomplete bridges use visual typed actions.","inputSchema":{"type":"object","properties":{"window_id":{"type":"integer"},"query":{"type":"string"},"max_elements":{"type":"integer"},"max_depth":{"type":"integer"}},"required":["window_id"]}},
-      {"name":"desktop_act","description":"Single-writer typed desktop actions against fresh observation. Rejects changed focus/geometry/scaling or changed pixels near pointer targets. x/y are local to displayed screenshot/crop. Focus must be standalone. By default observe_after=true returns a new after_observation ID and image in this same response after dispatch/release and a bounded80ms defaultsettle wait; settle_ms=0..1000 can adjust. Use it for the next act and inspect expected result. A slow/unchanged frame needs another observation/semantic check, not repetition of toggle input. include_image=false omits its image. Acknowledgement is not UI success. Type text_method=auto uses clipboard for known Electron IDs (code/T3) and >1000-character text, keyboard for shorter text in other apps; explicit keyboard/clipboard are available. Electron wtype Unicode is unreliable on this laptop. Clipboard preserves supported text/rich app payloads and original Chromium provenance in bounded RAM from one offer, normalizes duplicate MIME names, omits SAVE_TARGETS transport marker, and keeps a separate source holder across actor restarts. Unsupported/sensitive/oversized formats refuse before replacement. Own-source check runs after layout/keymap/window validation and before the first paste modifier press; ownership can still change between reply and input because Wayland has no atomic selection-check-and-paste. No restore after takeover/cancel/ownership loss. Scroll dx/dy are discrete wheel steps (integer -100..100), not pixels; positive dx moves right and positive dy moves down. Smooth-scroll animation needs another fresh observation/settle check before reusing visual targets. Keys are modifiers first e.g.[ctrl,l],[Return]. Direct semantic_set_value(handle_id,text,expected_text optional) replaces exact editable contents; semantic_click(handle_id,action_name from direct tree) invokes only AT-SPI named action. Both freshly revalidate context and have no input fallback. Batch stable edits/shortcuts when intermediate states cannot invalidate later targets; changed-target actions need fresh observation.","inputSchema":{"type":"object","properties":{"observation_id":{"type":"string"},"window_id":{"type":"integer"},"task_id":{"type":"string"},"timeout_ms":{"type":"integer","minimum":100,"maximum":120000,"description":"Whole batch budget including queue, validation, capture, input and post-observe. Bounded release cleanup follows even after timeout."},"observe_after":{"type":"boolean","default":true},"include_image":{"type":"boolean","default":true},"settle_ms":{"type":"integer","default":80,"minimum":0,"maximum":1000,"description":"Bounded post-action settle wait before capture; not a proof of repaint. Slow conditions require fresh observations, never repeated blind input."},"actions":{"type":"array","items":action,"minItems":1,"maxItems":32}},"required":["observation_id","actions"]}},
+      {"name":"desktop_act","description":"Single-writer typed desktop actions against fresh observation. Rejects changed focus/geometry/scaling or changed pixels near pointer targets. x/y are local to displayed screenshot/crop. Focus must be standalone. By default observe_after=true returns a new after_observation ID and image in this same response after dispatch/release and a bounded80ms defaultsettle wait; settle_ms=0..1000 can adjust. Use it for the next act and inspect expected result. A slow/unchanged frame needs another observation/semantic check, not repetition of toggle input. include_image=false omits its image. Acknowledgement is not UI success. Type text_method=auto uses clipboard for known Electron IDs (code/T3) and >1000-character text, keyboard for shorter text in other apps; explicit keyboard/clipboard are available. Electron wtype Unicode is unreliable on this laptop. Clipboard preserves supported text/rich app payloads and original Chromium provenance in bounded RAM from one offer, normalizes duplicate MIME names, omits SAVE_TARGETS transport marker, and keeps a separate source holder across actor restarts. Unsupported/sensitive/oversized formats refuse before replacement. Own-source check runs after layout/keymap/window validation and before the first paste modifier press; ownership can still change between reply and input because Wayland has no atomic selection-check-and-paste. No restore after takeover/cancel/ownership loss. Scroll dx/dy are discrete wheel steps (integer -100..100), not pixels; positive dx moves right and positive dy moves down. Smooth-scroll animation needs another fresh observation/settle check before reusing visual targets. Keys are modifiers first e.g.[ctrl,l],[Return]. Explicit key_scope=compositor and Super/meta/logo chords use an owned persistent direct-uinput device because this Niri25.11 Wayland virtual keyboard bypasses compositor bindings; Ctrl/app chords retain the Wayland transport. A fresh proxy check requires backend routing_revision=2 and binds session/epoch/observation before forwarding a global batch; an older backend is refused. Missing permission/takeover monitor/compositor device-open evidence refuses the complete batch before input. Creating the own device is a capability side effect. A kernel input acknowledgement does not verify Niri/UI acceptance; inspect the fresh result. No automatic input fallback. Direct semantic_set_value(handle_id,text,expected_text optional) replaces exact editable contents; semantic_click(handle_id,action_name from direct tree) invokes only AT-SPI named action. Both freshly revalidate context and have no input fallback. Batch stable edits/shortcuts when intermediate states cannot invalidate later targets; changed-target actions need fresh observation.","inputSchema":{"type":"object","properties":{"observation_id":{"type":"string"},"window_id":{"type":"integer"},"task_id":{"type":"string"},"timeout_ms":{"type":"integer","minimum":100,"maximum":120000,"description":"Whole batch budget including queue, validation, capture, input and post-observe. Bounded release cleanup follows even after timeout."},"observe_after":{"type":"boolean","default":true},"include_image":{"type":"boolean","default":true},"settle_ms":{"type":"integer","default":80,"minimum":0,"maximum":1000,"description":"Bounded post-action settle wait before capture; not a proof of repaint. Slow conditions require fresh observations, never repeated blind input."},"actions":{"type":"array","items":action,"minItems":1,"maxItems":32}},"required":["observation_id","actions"]}},
       {"name":"desktop_cancel","description":"Priority epoch cancellation independent of actor lock. Pending batches stop; held buttons release. Already-dispatched effects remain. Wait for desktop_status active=null and actor_release_confirmed=true for full release.","inputSchema":{"type":"object","properties":{}}},
       {"name":"desktop_takeover","description":"Explicit human desktop takeover, persists its cause across backend restarts and latches refusal of future actions and cancels queued/active automation. Physical evdev input does this automatically when accessible. Wait active=null and actor_release_confirmed=true for full release. desktop_resume then fresh observation is required.","inputSchema":{"type":"object","properties":{}}},
       {"name":"desktop_resume","description":"Backend startup is always latched and preserves any prior human/explicit cause. Explicitly release takeover latch only after the user returns control, actor stopped and physical input idle. Do not automatically undo human takeover. Invalidates older observations. Call desktop_observe again before acting.","inputSchema":{"type":"object","properties":{}}}
-    ])
+    ]);
+    // These hints describe desktop/app effects; private read caches do not
+    // grant input. The managed client policy authorizes only this server.
+    for tool in catalog
+        .as_array_mut()
+        .expect("Static MCP tool catalog is an array")
+    {
+        let (read_only, destructive, open_world) = match tool["name"].as_str() {
+            Some("desktop_status") => (true, false, false),
+            Some(
+                "desktop_windows"
+                | "desktop_observe"
+                | "desktop_semantic"
+                | "desktop_semantic_direct",
+            ) => (true, false, true),
+            Some("desktop_cancel" | "desktop_takeover" | "desktop_resume") => (false, false, false),
+            _ => (false, true, true),
+        };
+        tool["annotations"] = json!({
+            "readOnlyHint": read_only,
+            "destructiveHint": destructive,
+            // Every control mutation advances the epoch, even if already idle.
+            "idempotentHint": read_only,
+            "openWorldHint": open_world,
+        });
+    }
+    catalog
 }
 
 fn socket_path() -> PathBuf {
@@ -2094,24 +2302,142 @@ fn daemon_call(socket: &Path, tool: &str, args: &Value) -> R<Value> {
     daemon_call_owned(socket, tool, args, None)
 }
 
+fn proxy_needs_global_guard(tool: &str, args: &Value) -> R<bool> {
+    if tool != "desktop_act" {
+        return Ok(false);
+    }
+    let actions = args["actions"]
+        .as_array()
+        .ok_or("desktop_act actions must be an array")?;
+    let mut global = false;
+    for item in actions {
+        if item["kind"] == "key" {
+            let action: Action = serde_json::from_value(item.clone())
+                .map_err(|e| format!("Invalid scoped key action before proxy dispatch: {e}"))?;
+            if let Action::Key { keys, key_scope } = action {
+                global |= uses_global_keyboard(&keys, key_scope)?;
+            }
+        }
+    }
+    Ok(global)
+}
+fn validate_global_backend_guard(
+    guard: &GlobalBackendGuard,
+    session: &str,
+    epoch: u64,
+    observation_id: &str,
+) -> R<()> {
+    if guard.routing_revision != GLOBAL_ROUTING_REVISION
+        || guard.session_id != session
+        || guard.epoch != epoch
+        || !observation_id.starts_with(&format!("obs-{session}-"))
+    {
+        return Err("Global keyboard backend changed or observation is from another session/epoch; no batch input sent. Reconnect and obtain a fresh observation.".into());
+    }
+    Ok(())
+}
+fn guarded_global_arguments(args: &Value, status_response: &Value) -> R<Value> {
+    if status_response["isError"] == true {
+        return Err(
+            "Global keyboard capability query failed; complete batch refused before dispatch"
+                .into(),
+        );
+    }
+    let status: Value = serde_json::from_str(
+        status_response["content"][0]["text"]
+            .as_str()
+            .ok_or("Global keyboard status response has no JSON metadata")?,
+    )
+    .map_err(|_| "Global keyboard status metadata invalid")?;
+    if status["interface_revision"].as_u64() != Some(GLOBAL_ROUTING_REVISION as u64)
+        || status["global_keyboard"]["routing_revision"].as_u64()
+            != Some(GLOBAL_ROUTING_REVISION as u64)
+        || status["global_keyboard"]["transport"] != "owned_uinput"
+        || status["global_keyboard"]["super_implies_compositor"] != true
+    {
+        return Err("Backend does not advertise global keyboard routing revision2. Complete batch refused; restart/reconnect the declared backend before compositor shortcuts. No Wayland fallback.".into());
+    }
+    let guard = GlobalBackendGuard {
+        routing_revision: GLOBAL_ROUTING_REVISION,
+        session_id: status["session_id"]
+            .as_str()
+            .ok_or("Global keyboard status session missing")?
+            .into(),
+        epoch: status["epoch"]
+            .as_u64()
+            .ok_or("Global keyboard status epoch missing")?,
+    };
+    let observation_id = args["observation_id"]
+        .as_str()
+        .ok_or("Global action observation ID missing")?;
+    validate_global_backend_guard(&guard, &guard.session_id, guard.epoch, observation_id)?;
+    let mut guarded = args.clone();
+    guarded.as_object_mut().ok_or("Global action arguments must be an object")?.insert("expected_global_backend".into(), json!({"routing_revision":guard.routing_revision,"session_id":guard.session_id,"epoch":guard.epoch}));
+    Ok(guarded)
+}
 fn daemon_call_owned(
     socket: &Path,
     tool: &str,
     args: &Value,
     cancel: Option<Arc<AtomicBool>>,
 ) -> R<Value> {
+    if proxy_needs_global_guard(tool, args)? {
+        let started = Instant::now();
+        let budget = Duration::from_millis(
+            args["timeout_ms"]
+                .as_u64()
+                .unwrap_or(30000)
+                .clamp(100, 120000),
+        );
+        let status = daemon_call_transport(
+            socket,
+            "desktop_status",
+            &json!({}),
+            cancel.clone(),
+            budget.min(Duration::from_secs(2)),
+        )?;
+        let mut guarded = guarded_global_arguments(args, &status)?;
+        let remaining = budget.saturating_sub(started.elapsed());
+        if remaining < Duration::from_millis(100) {
+            return Err(
+                "Global capability preflight consumed the batch deadline; no action request sent"
+                    .into(),
+            );
+        }
+        guarded["timeout_ms"] = json!(remaining.as_millis() as u64);
+        return daemon_call_transport(
+            socket,
+            tool,
+            &guarded,
+            cancel,
+            remaining + Duration::from_secs(15),
+        );
+    }
+    daemon_call_transport(
+        socket,
+        tool,
+        args,
+        cancel,
+        if matches!(tool, "desktop_cancel" | "desktop_takeover") {
+            Duration::from_secs(2)
+        } else {
+            Duration::from_secs(135)
+        },
+    )
+}
+fn daemon_call_transport(
+    socket: &Path,
+    tool: &str,
+    args: &Value,
+    cancel: Option<Arc<AtomicBool>>,
+    read_timeout: Duration,
+) -> R<Value> {
     if cancel.as_ref().is_some_and(|c| c.load(Ordering::SeqCst)) {
         return Err("MCP request canceled before dispatch".into());
     }
     let mut stream=UnixStream::connect(socket).map_err(|e|format!("Desktop daemon unavailable at {}: {e}. Start serve once; do not fall back to blind actions.",socket.display()))?;
     stream
-        .set_read_timeout(Some(Duration::from_secs(
-            if matches!(tool, "desktop_cancel" | "desktop_takeover") {
-                2
-            } else {
-                135
-            },
-        )))
+        .set_read_timeout(Some(read_timeout))
         .map_err(|e| e.to_string())?;
     let done = Arc::new(AtomicBool::new(false));
     let monitor = if let Some(cancel) = cancel {
@@ -2222,6 +2548,7 @@ fn serve(socket: &Path) -> R<()> {
         semantic_targets: Mutex::new(HashMap::new()),
         actor: Mutex::new(None),
         keyboard: Mutex::new(None),
+        global_keyboard: Mutex::new(None),
         image_dir: images,
         log: Mutex::new(file),
     });
@@ -2445,6 +2772,7 @@ mod regression {
             semantic_targets: Mutex::new(HashMap::new()),
             actor: Mutex::new(None),
             keyboard: Mutex::new(None),
+            global_keyboard: Mutex::new(None),
             image_dir: dir.clone(),
             log: Mutex::new(file),
         };
@@ -2532,6 +2860,7 @@ mod regression {
             semantic_targets: Mutex::new(HashMap::new()),
             actor: Mutex::new(None),
             keyboard: Mutex::new(None),
+            global_keyboard: Mutex::new(None),
             image_dir: dir.clone(),
             log: Mutex::new(log),
         });
@@ -2614,7 +2943,8 @@ mod regression {
         assert!(preflight(
             &obs,
             &Action::Key {
-                keys: vec!["ctrl".into(), "invalid-key".into()]
+                keys: vec!["ctrl".into(), "invalid-key".into()],
+                key_scope: KeyScope::App
             }
         )
         .is_err());
@@ -2711,5 +3041,192 @@ mod regression {
         assert_eq!(waited["isError"], false);
         env::set_var("PATH", &old_path);
         let _ = fs::remove_dir_all(dir);
+    }
+}
+
+#[cfg(test)]
+mod global_routing_regression {
+    use super::*;
+    fn keys(names: &[&str]) -> Vec<String> {
+        names.iter().map(|n| n.to_string()).collect()
+    }
+    fn global_args(action: Value) -> Value {
+        json!({"observation_id":"obs-offline-session-1","timeout_ms":1000,"actions":[{"kind":"type","text":"owned fixture"},action]})
+    }
+    #[test]
+    fn scoped_route_defaults_and_aliases_are_typed() {
+        for alias in ["super", "meta", "logo"] {
+            assert!(uses_global_keyboard(&keys(&[alias, "f"]), KeyScope::App).unwrap());
+        }
+        assert!(!uses_global_keyboard(&keys(&["ctrl", "alt", "Escape"]), KeyScope::App).unwrap());
+        assert!(
+            uses_global_keyboard(&keys(&["ctrl", "alt", "Escape"]), KeyScope::Compositor).unwrap()
+        );
+        assert!(!uses_global_keyboard(&keys(&["ctrl", "s"]), KeyScope::App).unwrap());
+        let action: Action =
+            serde_json::from_value(json!({"kind":"key","keys":["ctrl","s"]})).unwrap();
+        assert!(matches!(
+            action,
+            Action::Key {
+                key_scope: KeyScope::App,
+                ..
+            }
+        ));
+        assert!(serde_json::from_value::<Action>(
+            json!({"kind":"key","keys":["ctrl","s"],"key_scope":"global-guess"})
+        )
+        .is_err());
+        assert!(proxy_needs_global_guard(
+            "desktop_act",
+            &global_args(json!({"kind":"key","keys":["super","shift","f"]}))
+        )
+        .unwrap());
+        assert!(proxy_needs_global_guard(
+            "desktop_act",
+            &global_args(
+                json!({"kind":"key","keys":["ctrl","alt","Escape"],"key_scope":"compositor"})
+            )
+        )
+        .unwrap());
+    }
+    #[test]
+    fn backend_guard_rejects_wrong_session_epoch_and_revision() {
+        let guard = GlobalBackendGuard {
+            routing_revision: GLOBAL_ROUTING_REVISION,
+            session_id: "offline-session".into(),
+            epoch: 7,
+        };
+        assert!(validate_global_backend_guard(
+            &guard,
+            "offline-session",
+            7,
+            "obs-offline-session-1"
+        )
+        .is_ok());
+        assert!(
+            validate_global_backend_guard(&guard, "other-session", 7, "obs-offline-session-1")
+                .is_err()
+        );
+        assert!(validate_global_backend_guard(
+            &guard,
+            "offline-session",
+            8,
+            "obs-offline-session-1"
+        )
+        .is_err());
+        assert!(
+            validate_global_backend_guard(&guard, "offline-session", 7, "obs-other-session-1")
+                .is_err()
+        );
+        let old = GlobalBackendGuard {
+            routing_revision: 1,
+            ..guard
+        };
+        assert!(
+            validate_global_backend_guard(&old, "offline-session", 7, "obs-offline-session-1")
+                .is_err()
+        );
+    }
+    fn fake_backend(status: Value, expects_act: bool) -> (PathBuf, thread::JoinHandle<Vec<Value>>) {
+        static SERIAL: AtomicU64 = AtomicU64::new(1);
+        let dir = env::temp_dir().join(format!(
+            "weasel-global-proxy-test-{}-{}",
+            std::process::id(),
+            SERIAL.fetch_add(1, Ordering::SeqCst)
+        ));
+        fs::create_dir(&dir).unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+        let socket = dir.join("fixture.sock");
+        let listener = std::os::unix::net::UnixListener::bind(&socket).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        let cleanup_socket = socket.clone();
+        let handle = thread::spawn(move || {
+            let mut requests = Vec::new();
+            let mut last = Instant::now();
+            loop {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        stream
+                            .set_read_timeout(Some(Duration::from_millis(200)))
+                            .unwrap();
+                        let mut line = String::new();
+                        BufReader::new(stream.try_clone().unwrap())
+                            .read_line(&mut line)
+                            .unwrap();
+                        let req: Value = serde_json::from_str(&line).unwrap();
+                        let response = if req["tool"] == "desktop_status" {
+                            text_result(status.clone())
+                        } else {
+                            text_result(json!({"status":"offline_fixture_ack"}))
+                        };
+                        requests.push(req);
+                        writeln!(stream, "{response}").unwrap();
+                        last = Instant::now();
+                        if expects_act && requests.len() == 2 {
+                            break;
+                        }
+                    }
+                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                        if (!requests.is_empty()
+                            && !expects_act
+                            && last.elapsed() > Duration::from_millis(120))
+                            || last.elapsed() > Duration::from_secs(2)
+                        {
+                            break;
+                        }
+                        thread::sleep(Duration::from_millis(2));
+                    }
+                    Err(e) => panic!("private fixture socket: {e}"),
+                }
+            }
+            fs::remove_file(&cleanup_socket).unwrap();
+            fs::remove_dir(&dir).unwrap();
+            requests
+        });
+        (socket, handle)
+    }
+    #[test]
+    fn new_proxy_old_actor_refuses_entire_batch_before_any_act_request() {
+        for action in [
+            json!({"kind":"key","keys":["super","shift","f"]}),
+            json!({"kind":"key","keys":["ctrl","alt","Escape"],"key_scope":"compositor"}),
+        ] {
+            let (socket, server) = fake_backend(
+                json!({"schema":1,"version":"0.1.0","session_id":"offline-session","epoch":7}),
+                false,
+            );
+            let error =
+                daemon_call_owned(&socket, "desktop_act", &global_args(action), None).unwrap_err();
+            assert!(error.contains("routing revision2"));
+            let requests = server.join().unwrap();
+            assert_eq!(requests.len(), 1);
+            assert_eq!(requests[0]["tool"], "desktop_status");
+        }
+    }
+    #[test]
+    fn new_proxy_new_actor_binds_guard_and_preserves_scoped_chord() {
+        let (socket, server) = fake_backend(
+            json!({"interface_revision":2,"global_keyboard":global_keyboard_capability(),"session_id":"offline-session","epoch":7}),
+            true,
+        );
+        daemon_call_owned(
+            &socket,
+            "desktop_act",
+            &global_args(
+                json!({"kind":"key","keys":["ctrl","alt","Escape"],"key_scope":"compositor"}),
+            ),
+            None,
+        )
+        .unwrap();
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[1]["tool"], "desktop_act");
+        let args = &requests[1]["arguments"];
+        assert_eq!(
+            args["expected_global_backend"],
+            json!({"routing_revision":2,"session_id":"offline-session","epoch":7})
+        );
+        assert_eq!(args["actions"][1]["key_scope"], "compositor");
+        assert!(args["timeout_ms"].as_u64().unwrap() <= 1000);
     }
 }

@@ -35,6 +35,8 @@ command = {json.dumps(command)}
 args = ["mcp"]
 startup_timeout_sec = 10
 tool_timeout_sec = 135
+# Explicitly authorized desktop control, scoped to this owned server.
+default_tools_approval_mode = "approve"
 {END}'''
     if starts:
         updated = original[:start] + block + original[end + len(END):]

@@ -32,6 +32,7 @@ MAX_INSTRUCTIONS_BYTES=2048
 MAX_IMAGE_BYTES=2_000_000
 MAX_IMAGE_PIXELS=1_150_000
 MAX_RESPONSE_BYTES=65536
+KEEPALIVE_MAX_IDLE_SECONDS=30  # Defensive client TTL, not an asserted provider limit.
 PRICE_SOURCE='https://developers.openai.com/api/docs/guides/decisions'
 GENERAL_PRICE_SOURCE='https://developers.openai.com/api/docs/pricing'
 NAME=re.compile(r'^[A-Za-z0-9_.:-]{1,128}$')
@@ -232,10 +233,15 @@ class Ledger:
 class HTTPSKeepalive:
     def __init__(self,key):
         if not isinstance(key,str) or not key or any(ord(c)<33 or ord(c)>126 for c in key):raise Refusal('api_key_missing_or_invalid_environment')
-        self.key=key;self.connection=None;self.worker=None
+        self.key=key;self.connection=None;self.worker=None;self.completed_at=None
 
     def post(self,endpoint,body,timeout):
         if self.worker is not None and self.worker.is_alive():raise Refusal('previous_transport_pending_no_new_dispatch')
+        # Close an idle completed connection BEFORE a new POST, never replay one.
+        # Pending/expired DNS workers are checked first and must not be replaced.
+        if self.connection is not None and self.completed_at is not None and time.monotonic()-self.completed_at>=KEEPALIVE_MAX_IDLE_SECONDS:
+            idle=self.connection;self.connection=None;self.completed_at=None
+            idle.close()
         if self.connection is None:self.connection=http.client.HTTPSConnection(HOST,timeout=timeout,context=ssl.create_default_context())
         connection=self.connection;connection.timeout=timeout
         if connection.sock:connection.sock.settimeout(timeout)
@@ -263,12 +269,13 @@ class HTTPSKeepalive:
                     if not isinstance(value,dict):raise Refusal('invalid_provider_json_billing_uncertain')
                     outcome.append((status,value))
             except Exception as error:
-                connection.close();self.connection=None;outcome.append(error)
+                connection.close();self.connection=None;self.completed_at=None;outcome.append(error)
             finally:finished.set()
         self.worker=threading.Thread(target=run,daemon=True);self.worker.start()
         if not finished.wait(timeout):
-            abort();self.connection=None;raise Refusal('provider_request_timeout_billing_uncertain')
+            abort();self.connection=None;self.completed_at=None;raise Refusal('provider_request_timeout_billing_uncertain')
         if isinstance(outcome[0],Exception):raise outcome[0]
+        self.completed_at=time.monotonic()
         return outcome[0]
 
 
