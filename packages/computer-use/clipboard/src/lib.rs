@@ -36,7 +36,7 @@ const MAX_TEXT: usize = 65536;
 const MAX_CONTROL_LINE: usize = 2 * MAX_TEXT + 1024;
 const MAX_TRANSFERS: usize = 16;
 const TICK: Duration = Duration::from_millis(5);
-const SCOPE: &str = "bounded RAM-only payload MIME snapshot from one Wayland offer; SAVE_TARGETS control marker omitted; original Chromium provenance restored only with original payload; own source cancellation checked; best effort, no atomic selection CAS";
+const SCOPE: &str = "bounded RAM-only payload MIME snapshot from one Wayland offer; SAVE_TARGETS and SAME_APP GTK_TEXT_BUFFER_CONTENTS markers omitted without reading; serialized GTK rich text preserved verbatim; original Chromium provenance restored only with original payload; own source cancellation checked; best effort, no atomic selection CAS";
 
 type Result<T> = std::result::Result<T, String>;
 type Data = BTreeMap<String, Arc<[u8]>>;
@@ -103,6 +103,8 @@ fn supported_mime(mime: &str) -> bool {
                 | "text"
                 | "compound_text"
                 | "save_targets"
+                | "gtk_text_buffer_contents"
+                | "application/x-gtk-text-buffer-rich-text"
                 | "chromium/x-web-custom-data"
                 | "chromium/x-internal-source-rfh-token"
                 | "chromium/x-source-url"
@@ -121,6 +123,14 @@ fn supported_mime(mime: &str) -> bool {
                 | "image/webp"
                 | "image/bmp"
         )
+}
+
+// GTK3's SAME_APP optimization contains a GtkTextBuffer* address, not portable
+// bytes. GTK itself excludes this target from clipboard-manager persistence.
+// Match exactly, never request/reoffer pointer bytes or accept a GTK wildcard.
+fn ignored_transport_mime(mime: &str) -> bool {
+    mime.eq_ignore_ascii_case("SAVE_TARGETS")
+        || mime.eq_ignore_ascii_case("GTK_TEXT_BUFFER_CONTENTS")
 }
 
 fn validate_mimes(mimes: &[String]) -> Result<()> {
@@ -516,16 +526,16 @@ impl Backend {
             .ok_or("clipboard offer was lost")?
             .clone();
         validate_mimes(&mimes)?;
-        // SAVE_TARGETS requests X11 clipboard-manager handoff; it is not an
-        // application payload representation. Never read or replay the request.
+        // Neither X11 handoff nor GTK's SAME_APP pointer is a portable payload.
+        // Omit before receive(), while retaining actual serialized rich text.
         self.snapshot_ignored = mimes
             .iter()
-            .filter(|mime| mime.eq_ignore_ascii_case("SAVE_TARGETS"))
+            .filter(|mime| ignored_transport_mime(mime))
             .cloned()
             .collect();
         let mimes: Vec<_> = mimes
             .into_iter()
-            .filter(|mime| !mime.eq_ignore_ascii_case("SAVE_TARGETS"))
+            .filter(|mime| !ignored_transport_mime(mime))
             .collect();
         if mimes.is_empty() {
             return Err("clipboard has only transport markers; no payload preserved".into());
@@ -1247,6 +1257,31 @@ exec sleep 30
         ] {
             assert!(validate_mimes(&["text/plain".into(), forbidden.into()]).is_err());
         }
+    }
+    #[test]
+    fn gtk_pointer_is_transport_and_serialized_rich_text_is_payload() {
+        let types = [
+            "GTK_TEXT_BUFFER_CONTENTS",
+            "application/x-gtk-text-buffer-rich-text",
+            "text/plain;charset=utf-8",
+            "SAVE_TARGETS",
+        ]
+        .map(str::to_string);
+        validate_mimes(&types).unwrap();
+        let payloads: Vec<_> = types
+            .iter()
+            .filter(|mime| !ignored_transport_mime(mime))
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            payloads,
+            [
+                "application/x-gtk-text-buffer-rich-text",
+                "text/plain;charset=utf-8"
+            ]
+        );
+        assert!(!supported_mime("GTK_TEXT_BUFFER_CONTENTS_OTHER"));
+        assert!(!supported_mime("application/x-gtk-private-pointer"));
     }
     #[test]
     fn count_duplicate_and_malformed_mime_guards() {

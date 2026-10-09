@@ -52,6 +52,9 @@ release cleanup retains its own bounded budget. Default post-action settle is
 `after_observation` and image may feed the next action directly. Changed or slow
 UI needs a bounded fresh result check rather than replaying toggle input.
 Effects, partial effects, release status and failures remain explicit.
+Fields must match the selected action kind. An unknown or misplaced field
+rejects the complete batch before input. In particular, `restore_clipboard`
+belongs to `paste`; `type` always requests preservation of the prior selection.
 
 Auto text uses plain clipboard for verified Electron IDs and text over 1000
 characters; other shorter input uses wtype. Electron keyboard text is known to
@@ -60,8 +63,13 @@ preservation uses a bounded RAM-only snapshot from one data-control offer and
 fresh source identity checks. Supported text/rich payloads and original Chromium
 custom data/provenance are restored together; the temporary agent text never
 carries original Chromium source tags. Duplicate MIME names are normalized.
-`SAVE_TARGETS` is an X11 clipboard-manager marker and is intentionally omitted,
-with that omission reported. Unknown, sensitive, portal-handle or oversized
+`SAVE_TARGETS` and `GTK_TEXT_BUFFER_CONTENTS` are intentionally omitted without
+reading, with each omission reported. The latter is GTK's SAME_APP pointer
+optimization; replaying that address from another process would be invalid.
+The exact `application/x-gtk-text-buffer-rich-text` representation is preserved
+as bounded opaque bytes together with the text formats. This follows
+[GTK3's own clipboard persistence rules](https://github.com/GNOME/gtk/blob/3.24.51/gtk/gtktextbuffer.c#L3809-L3812).
+Unknown, sensitive, portal-handle or oversized
 formats refuse before replacement. Restoration remains best effort because
 Wayland provides no atomic selection CAS, and is skipped after cancellation,
 takeover or ownership loss. A separate owned user scope holds the restored
@@ -132,6 +140,27 @@ the actor or priority stop operations.
 The optional Python UI Decisions evaluator has its own service, API credentials
 and persistent authorized budget ledger. The Rust actor has no model credentials
 or API access. See the evaluator README for explicit start and cost boundaries.
+
+## GUI application lifetime
+
+A background command owned by a Codex `exec_command` session can be finalized
+when that agent run ends. This happened to our three isolated Calc test profiles,
+after their verified files were already saved. For an app that should remain
+open, launch its own transient user service with `systemd-run --user --collect
+--unit=weasel-cu-app-<unique-task> --service-type=exec --property=ExitType=cgroup
+<absolute-app-command> <explicit-own-profile-and-files>`. Keep its unit, profile,
+process and window identities together. An existing shared application may
+forward to its earlier process; the launcher unit alone does not establish
+window ownership. Use a supported per-app profile/new-instance option where
+needed, and verify the actual result after the agent exits. Do not stop shared
+user apps or their services to clean up a launcher.
+
+Meld's GtkSource buffer omits an implicit final LF while loading, then restores
+it on Save. Native Select-All/Copy therefore may omit that file byte. For an
+exact file-transfer task, compare the genuinely pasted/saved result before
+normalizing it: only when the sole difference is one required final LF, move
+to the destination's end, insert one Return and Save through the UI. Report
+that normalization; other differences require investigation.
 
 ## Verification status
 

@@ -112,10 +112,21 @@ available for additional verified apps. Clipboard preservation takes a bounded
 RAM-only snapshot from one offer, including supported rich formats and original
 Chromium provenance. It never attaches that provenance to temporary agent text.
 Unknown/sensitive/portal formats refuse before replacement. `SAVE_TARGETS` is
-an omitted transport marker. Restoration is best effort without atomic ownership
+an omitted transport marker. `GTK_TEXT_BUFFER_CONTENTS` is likewise omitted
+without reading its process-local pointer; serialized GTK rich text is preserved
+as bounded opaque bytes. Restoration is best effort without atomic ownership
 guarantees and is skipped after cancel/takeover/another copy. The restored source
 has its own user scope and survives actor restart until the next copy/session end.
 Keep explicit clipboard replacement intentional; inspect partial effects on failure.
+Use `restore_clipboard:false` only on `kind:paste` for an explicitly intended
+replacement. `kind:type` always preserves the existing selection. Unknown or
+misplaced action fields reject the whole batch before input; do not reuse a
+field from another action kind.
+For actual cross-app Copy/Paste, do not inject the source text with `type` or
+`paste(text)`. Prepare destination tabs before copying, then use real Ctrl+C/V.
+Meld's implicit final LF is absent from its selected buffer; for an exact-file
+workflow, verify the pasted saved bytes and add one GUI Return only if that
+is the sole required difference. Preserve and report the original discrepancy.
 CapsLock/NumLock state is not supported. VS Code's isolated accepted profile
 uses `keyboard.dispatch: "keyCode"`; verify unfamiliar profiles rather than
 assuming their cached layout matches. A crop's action coordinates are local
@@ -123,3 +134,11 @@ to the displayed crop; the actor adds the crop origin itself.
 
 The driver contains no model credentials. Optional OpenAI Decisions routing is
 separate from desktop execution and ordinary Codex authentication.
+
+A new GUI process started in a yielded `exec_command` may be cleaned up when
+that Codex run ends. To retain a task-owned app across client exits, use a
+separate transient user service (`systemd-run --user --collect`, a unique owned
+unit and `--property=ExitType=cgroup`) with absolute executable and explicit
+private profile/files. Verify actual PID/profile/window binding: single-instance
+apps may forward to an existing process. Do not stop shared apps or unrelated
+units. Prove continued GUI use from the next ordinary client session.
