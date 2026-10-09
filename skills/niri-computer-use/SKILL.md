@@ -54,6 +54,11 @@ not grant that return. Never automatically clear `physical_escape` or
 preserved across upgrade and need one current user-authorized explicit resume;
 ordinary input under the new policy does not create them. Controlled evdev
 simulation is test evidence only.
+Use the current `takeover_latched` and `takeover_persistence.marker_active`
+booleans to decide whether a stop is active. Historical `last_reason` or an
+older backend's retained `reason` with both booleans false is not a live stop.
+Do not request another resume for an already resumed actor; ordinary recent
+input only requires fresh grounding and release, not permission or resume.
 A resume refusal requires bounded status checks or capability repair, and a
 successful resume always requires a fresh observation before input.
 
@@ -139,6 +144,15 @@ wait until `held_state_known=true` and `held_controls=0`, obtain a fresh
 observation and continue the remaining task after input is quiet. Held physical
 modifiers/buttons refuse input temporarily; releasing them permits fresh
 continuation without `desktop_resume`.
+Ordinary input may leave a captured image non-actionable: inspect `input_ready`
+and `fresh_observation_required_for_input`; do not use an old image's generation
+for input. A read-only image can still support planning. Two quick collisions
+are not sustained contention and must not end the whole task. Give the user a
+brief progress update, keep the task indicator alive, and wait with bounded
+status checks for a short release/quiet interval before observing again. Use a
+reasonable time budget (up to 30 seconds for one contention episode) rather
+than escalating clicks or counting two failed frames as an abort. True Esc,
+explicit cancellation and actual capability loss still stop promptly.
 Never replay an uncertain edit, copy, move or submission without checking its
 actual state. Keep recovery bounded and report sustained contention instead of
 fighting for focus. Physical Esc or an explicit takeover stops the task and

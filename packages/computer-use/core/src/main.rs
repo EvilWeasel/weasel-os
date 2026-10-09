@@ -1037,6 +1037,19 @@ fn error_result(message: String) -> Value {
 fn observe(state: &State, args: &Value) -> R<Value> {
     observe_inner(state, args, false)
 }
+fn observation_input_readiness(state: &State, input_generation: u64) -> Value {
+    // An ordinary-input collision does not make a captured image unavailable.
+    // Readiness is advisory; the saved observation retains its capture-start
+    // generation and every action still rechecks generation/focus/input state.
+    let ready_at_check = state.input_policy.check(input_generation).is_ok();
+    let current_generation = state.input_policy.generation();
+    let input_ready = ready_at_check
+        && current_generation == input_generation
+        && state.input_policy.controls_released();
+    let takeover = state.takeover.load(Ordering::SeqCst);
+    let action_ready = input_ready && !takeover && state.release_confirmed.load(Ordering::SeqCst);
+    json!({"input_ready":input_ready,"action_ready":action_ready,"current_input_generation":current_generation,"input_activity_during_capture":current_generation!=input_generation,"fresh_observation_required_for_input":!action_ready,"takeover_latched":takeover,"note":"Image remains available for reasoning during ordinary activity or held controls. Input readiness is a snapshot, not input permission; desktop_act always freshly revalidates the original generation, released controls, focus and target."})
+}
 fn observe_inner(state: &State, args: &Value, actor_held: bool) -> R<Value> {
     let start = Instant::now();
     let epoch = state.epoch.load(Ordering::SeqCst);
@@ -1127,7 +1140,6 @@ fn observe_inner(state: &State, args: &Value, actor_held: bool) -> R<Value> {
         })
         .and_then(|w| w["output"].as_str())
         .map(str::to_owned);
-    state.input_policy.check(input_generation)?;
     let obs = Observation {
         id: id.clone(),
         at: capture_at,
@@ -1165,6 +1177,21 @@ fn observe_inner(state: &State, args: &Value, actor_held: bool) -> R<Value> {
     };
     let total_ms = start.elapsed().as_secs_f64() * 1000.0;
     let mut data = data;
+    let readiness = observation_input_readiness(state, input_generation);
+    for key in [
+        "input_ready",
+        "action_ready",
+        "current_input_generation",
+        "input_activity_during_capture",
+        "fresh_observation_required_for_input",
+        "takeover_latched",
+    ] {
+        data[key] = readiness[key].clone();
+    }
+    data["input_readiness"] = readiness;
+    data["input_policy"] = state
+        .input_policy
+        .status(state.last_human_ms.load(Ordering::SeqCst));
     data["timing_ms"]["capture"] = json!(capture_ms);
     data["timing_ms"]["observe_total"] = json!(total_ms);
     data["capture"]["path"] = json!(view_image);
@@ -2018,6 +2045,10 @@ fn act_inner(state: &State, args: &Value, epoch: u64) -> R<Value> {
         cleanup_ok = false;
     }
     state.release_confirmed.store(cleanup_ok, Ordering::SeqCst);
+    // Input dispatch is over and owned controls have been released. Read-only
+    // result capture must remain usable during ordinary human activity; each
+    // new observation retains its own capture-start input generation.
+    drop(_input_guard);
     *state
         .active
         .lock()
@@ -2488,6 +2519,26 @@ fn handle(state: &State, tool: &str, args: &Value, epoch: u64) -> R<Value> {
             if !state.release_confirmed.load(Ordering::SeqCst) {
                 return Err("Previous actor release was not confirmed by compositor; call desktop_recover_release explicitly while idle; takeover remains latched".into());
             }
+            if state.queued.load(Ordering::SeqCst) != 0 {
+                return Err("Desktop resume requires an empty actor queue; wait for pending batches to finish or stop".into());
+            }
+            // Do not wait for a writer. Holding the idle writer gate prevents
+            // a new batch from entering between the checks and the transition.
+            let _actor = state
+                .actor
+                .try_lock()
+                .map_err(|_| "Actor busy/poisoned; desktop resume refused")?;
+            if state.queued.load(Ordering::SeqCst) != 0 {
+                return Err("Desktop resume requires an empty actor queue; pending batch arrived while acquiring the idle writer gate".into());
+            }
+            if !state.takeover.load(Ordering::SeqCst) {
+                // No latch transition is needed. Recent normal input is allowed
+                // in cooperative mode; existing targets still obey generation,
+                // focus and held-control guards at observation/dispatch time.
+                return Ok(text_result(
+                    json!({"schema":1,"status":"already_resumed","epoch":state.epoch.load(Ordering::SeqCst),"input_generation":state.input_policy.generation(),"takeover_latched":false,"actor_release_confirmed":true,"input_permission_changed":false,"fresh_observation_required":false,"note":"No transition or cache invalidation performed. last_reason is history. Normal physical input still invalidates stale targets; obtain a fresh observation before dispatching."}),
+                ));
+            }
             // A fresh process has not yet observed a quiet interval. Missing
             // evdev observation is a capability failure, never evidence of idle.
             if state.started.elapsed() < Duration::from_millis(300) {
@@ -2565,7 +2616,7 @@ fn tools() -> Value {
       {"name":"desktop_cancel","description":"Priority epoch cancellation independent of actor lock. Pending batches stop; held buttons release. Already-dispatched effects remain. Wait for desktop_status active=null and actor_release_confirmed=true for full release.","inputSchema":{"type":"object","properties":{}}},
       {"name":"desktop_takeover","description":"Explicit human desktop takeover, persists its cause across backend restarts and latches refusal of future actions and cancels queued/active automation. Only a physical Escape press does this automatically when accessible; ordinary input invalidates stale observations and releases a conflicting batch without latching takeover. Wait active=null and actor_release_confirmed=true for full release. desktop_resume then fresh observation is required.","inputSchema":{"type":"object","properties":{}}},
       {"name":"desktop_recover_release","description":"Explicit bounded recovery of unconfirmed release/receipt on existing owned actuators only. Refuses if writer busy, active task or queue nonempty. Sends only releases of owned held buttons/keys and receipt sync, no press/move/device creation/action replay, no epoch/latch/cause reset, no automatic resume. May finalize effects of already-held input. Default1500ms, maximum2000ms shared budget. Failure remains unconfirmed; original last_result preserved. Success invalidates old observations/semantic handles and requires fresh capture; inspect status queue and follow human return-of-control policy before resume.","inputSchema":{"type":"object","properties":{"timeout_ms":{"type":"integer","minimum":200,"maximum":2000,"default":1500}},"additionalProperties":false}},
-      {"name":"desktop_resume","description":"Backend startup is always latched and preserves any prior human/explicit cause. Explicitly release takeover latch only after the user returns control, actor stopped and physical input idle. Do not automatically undo human takeover. Invalidates older observations. Call desktop_observe again before acting.","inputSchema":{"type":"object","properties":{}}}
+      {"name":"desktop_resume","description":"Backend startup is always latched and preserves any prior human/explicit cause. Explicitly release an active takeover latch only after the user returns control, actor stopped, queue empty and physical input idle. Do not automatically undo human takeover. A true transition invalidates older observations; observe again before acting. If already unlatched with idle/released actor and empty queue, returns already_resumed without epoch/generation/cache changes or physical quiet checks. takeover_persistence.last_reason is historical; reason is null when marker_active=false.","inputSchema":{"type":"object","properties":{}}}
     ]);
     // These hints describe desktop/app effects; private read caches do not
     // grant input. The managed client policy authorizes only this server.
@@ -2588,7 +2639,7 @@ fn tools() -> Value {
         tool["annotations"] = json!({
             "readOnlyHint": read_only,
             "destructiveHint": destructive,
-            // Every control mutation advances the epoch, even if already idle.
+            // Cancel/takeover advance the epoch; resume may be an explicit no-op.
             "idempotentHint": read_only,
             "openWorldHint": open_world,
         });
@@ -3887,6 +3938,154 @@ mod release_recovery_tests {
         assert_eq!(physical_held_controls(&ordinary_file, false), Some(0));
         state.input_policy.update_holds(0, false);
         assert!(!state.input_policy.controls_released());
+        assert_eq!(state.epoch.load(Ordering::SeqCst), 77);
+        assert!(!state.takeover.load(Ordering::SeqCst));
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn resume_already_unlatched_is_idempotent_despite_recent_input_and_historical_cause() {
+        let (state, dir) = cooperative_fixture("resume-idempotent");
+        {
+            let mut latch = state.takeover_marker.lock().unwrap();
+            latch
+                .set("physical_input_activity", &state.session_id)
+                .unwrap();
+            latch.clear().unwrap();
+        }
+        physical_activity(&state, false, false);
+        let epoch = state.epoch.load(Ordering::SeqCst);
+        let generation = state.input_policy.generation();
+        let observations = state.observations.lock().unwrap().len();
+        for _ in 0..3 {
+            let result = handle(&state, "desktop_resume", &json!({}), epoch).unwrap();
+            let data = result_data(&result);
+            assert_eq!(data["status"], "already_resumed");
+            assert_eq!(data["epoch"], epoch);
+            assert_eq!(data["input_generation"], generation);
+            assert_eq!(data["input_permission_changed"], false);
+            assert_eq!(data["fresh_observation_required"], false);
+        }
+        assert_eq!(state.epoch.load(Ordering::SeqCst), epoch);
+        assert_eq!(state.input_policy.generation(), generation);
+        assert_eq!(state.observations.lock().unwrap().len(), observations);
+        assert!(state.capture_available.load(Ordering::SeqCst));
+        assert!(!dir.join("takeover.json").exists());
+        assert_eq!(
+            state.takeover_marker.lock().unwrap().status()["reason"],
+            Value::Null
+        );
+        assert_eq!(
+            state.takeover_marker.lock().unwrap().status()["last_reason"]["source"],
+            "physical_input_activity"
+        );
+        // Even a no-op resume cannot hide unconfirmed release or a busy writer.
+        state.release_confirmed.store(false, Ordering::SeqCst);
+        assert!(handle(&state, "desktop_resume", &json!({}), epoch)
+            .unwrap_err()
+            .contains("not confirmed"));
+        state.release_confirmed.store(true, Ordering::SeqCst);
+        state.queued.store(1, Ordering::SeqCst);
+        assert!(handle(&state, "desktop_resume", &json!({}), epoch)
+            .unwrap_err()
+            .contains("empty actor queue"));
+        state.queued.store(0, Ordering::SeqCst);
+        let writer = state.actor.lock().unwrap();
+        assert!(handle(&state, "desktop_resume", &json!({}), epoch)
+            .unwrap_err()
+            .contains("Actor busy"));
+        drop(writer);
+        assert_eq!(state.epoch.load(Ordering::SeqCst), epoch);
+        assert_eq!(state.input_policy.generation(), generation);
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn resume_true_latch_still_requires_released_controls_and_quiet_physical_input() {
+        let (mut state, dir) = fixture("resume-real-latch");
+        state.started = Instant::now() - Duration::from_millis(350);
+        state.release_confirmed.store(true, Ordering::SeqCst);
+        *state.human_monitor.lock().unwrap() = json!({"available":true,"watched_devices":1});
+        state.input_policy.update_holds(1, true);
+        assert!(handle(&state, "desktop_resume", &json!({}), 77)
+            .unwrap_err()
+            .contains("still held"));
+        state.input_policy.update_holds(0, true);
+        physical_activity(&state, false, false);
+        assert!(handle(&state, "desktop_resume", &json!({}), 77)
+            .unwrap_err()
+            .contains("recent"));
+        assert!(state.takeover.load(Ordering::SeqCst));
+        assert_eq!(state.epoch.load(Ordering::SeqCst), 77);
+        assert!(dir.join("takeover.json").exists());
+        state.last_human_ms.store(0, Ordering::SeqCst);
+        let result = handle(&state, "desktop_resume", &json!({}), 77).unwrap();
+        assert_eq!(result_data(&result)["status"], "resumed");
+        assert_eq!(state.epoch.load(Ordering::SeqCst), 78);
+        assert!(!state.takeover.load(Ordering::SeqCst));
+        assert!(!dir.join("takeover.json").exists());
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn observation_readiness_returns_metadata_for_ready_held_unknown_and_latched_states() {
+        let (state, dir) = cooperative_fixture("observation-readiness");
+        let ready = observation_input_readiness(&state, state.input_policy.generation());
+        assert_eq!(ready["input_ready"], true);
+        assert_eq!(ready["action_ready"], true);
+        assert_eq!(ready["input_activity_during_capture"], false);
+        assert_eq!(ready["fresh_observation_required_for_input"], false);
+        state.input_policy.update_holds(1, true);
+        let held_generation = state.input_policy.generation();
+        let held = observation_input_readiness(&state, held_generation);
+        assert_eq!(held["input_ready"], false);
+        assert_eq!(held["action_ready"], false);
+        assert_eq!(
+            held["input_activity_during_capture"], false,
+            "a held control can predate capture"
+        );
+        assert_eq!(held["fresh_observation_required_for_input"], true);
+        assert_eq!(
+            state.input_policy.generation(),
+            held_generation,
+            "readiness reads do not mutate input state"
+        );
+        state.input_policy.update_holds(0, false);
+        let unknown = observation_input_readiness(&state, state.input_policy.generation());
+        assert_eq!(unknown["input_ready"], false);
+        state.input_policy.update_holds(0, true);
+        state.takeover.store(true, Ordering::SeqCst);
+        let latched = observation_input_readiness(&state, state.input_policy.generation());
+        assert_eq!(latched["input_ready"], true);
+        assert_eq!(latched["action_ready"], false);
+        assert_eq!(latched["takeover_latched"], true);
+        assert_eq!(state.epoch.load(Ordering::SeqCst), 77);
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn observation_activity_metadata_preserves_start_generation_and_stale_input_never_dispatches() {
+        let (state, dir) = cooperative_fixture("observation-activity");
+        let captured = obs(&dir);
+        physical_activity(&state, false, false);
+        let metadata = observation_input_readiness(&state, captured.input_generation);
+        assert_eq!(metadata["input_activity_during_capture"], true);
+        assert_eq!(metadata["input_ready"], false);
+        assert_eq!(metadata["action_ready"], false);
+        assert_eq!(metadata["fresh_observation_required_for_input"], true);
+        assert_eq!(
+            captured.input_generation, 0,
+            "never silently rebind a captured frame"
+        );
+        assert_eq!(
+            metadata["current_input_generation"],
+            state.input_policy.generation()
+        );
+        let stale = act(&state, &json!({"observation_id":captured.id,"actions":[{"kind":"wait","ms":1}],"observe_after":false}), 77).unwrap();
+        let data = result_data(&stale);
+        assert_eq!(data["status"], "input_conflict");
+        assert_eq!(data["completed_actions"], 0);
+        assert_eq!(data["effects"], json!([]));
+        assert_eq!(
+            state.observations.lock().unwrap()[&captured.id].input_generation,
+            0
+        );
         assert_eq!(state.epoch.load(Ordering::SeqCst), 77);
         assert!(!state.takeover.load(Ordering::SeqCst));
         fs::remove_dir_all(dir).unwrap();

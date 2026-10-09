@@ -168,12 +168,52 @@ impl Latch {
         Ok(())
     }
     pub fn status(&self) -> Value {
-        json!({"reason":self.reason,"marker_path":self.path,"marker_active":self.marker_active,"persistence_error":self.persistence_error,"backend_restart_requires_explicit_resume":true,"resume_policy":"Startup, physical Escape, explicit takeover and legacy persisted causes require user-authorized resume with actor released and physical input quiet. Ordinary activity never creates a marker."})
+        // A cleared cause is history, not a current refusal. Keep it available
+        // for audit without inviting clients to treat it as an active latch.
+        let reason = self.marker_active.then_some(&self.reason);
+        let last_reason = (!self.marker_active).then_some(&self.reason);
+        json!({"reason":reason,"last_reason":last_reason,"marker_path":self.path,"marker_active":self.marker_active,"persistence_error":self.persistence_error,"backend_restart_requires_explicit_resume":true,"resume_policy":"Startup, physical Escape, explicit takeover and legacy persisted causes require user-authorized resume with actor released and physical input quiet. Ordinary activity never creates a marker. last_reason is historical and never authorizes or requires a transition."})
     }
 }
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn status_separates_active_cause_from_cleared_history_without_erasing_persisted_reason() {
+        let dir = env::temp_dir().join(format!(
+            "weasel-latch-status-regression-{}",
+            std::process::id()
+        ));
+        private_dir(&dir).unwrap();
+        let path = dir.join("takeover.json");
+        let mut latch = Latch::startup(path.clone(), "status-session").unwrap();
+        latch
+            .set("physical_input_activity", "status-session")
+            .unwrap();
+        let active = latch.status();
+        assert_eq!(active["marker_active"], true);
+        assert_eq!(active["reason"]["source"], "physical_input_activity");
+        assert_eq!(active["last_reason"], Value::Null);
+        let persisted: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        assert_eq!(persisted["source"], "physical_input_activity");
+        latch.clear().unwrap();
+        let inactive = latch.status();
+        assert_eq!(inactive["marker_active"], false);
+        assert_eq!(inactive["reason"], Value::Null);
+        assert_eq!(inactive["last_reason"]["source"], "physical_input_activity");
+        assert_eq!(latch.reason.source, "physical_input_activity");
+        latch.restore().unwrap();
+        assert_eq!(
+            latch.status()["reason"]["source"],
+            "physical_input_activity"
+        );
+        assert_eq!(latch.status()["last_reason"], Value::Null);
+        assert_eq!(
+            serde_json::from_slice::<Value>(&fs::read(&path).unwrap()).unwrap()["source"],
+            "physical_input_activity"
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
     #[test]
     fn marker_restart_and_owned_path_refusal() {
         let dir = env::temp_dir().join(format!("weasel-latch-regression-{}", std::process::id()));
