@@ -85,18 +85,37 @@ The helper's private control socket uses one bounded JSON line per connection:
 
 `event` is `status` or `end`; both require exact task identity and same-user
 `SO_PEERCRED`. Replies and stdout lifecycle events also carry revision 1.
+Stdout events include a monotonic timestamp; timeout events additionally report
+the owned request start/elapsed time without exporting the actor payload.
 
-The helper polls `desktop_status` on a bounded 100 ms cadence with a 300 ms socket
-deadline. It pins initial actor `session_id` and cancel `epoch`, and ends on epoch
-or backend session change, takeover latch, idle unconfirmed release, unavailable
-status, owner PID/starttime change, explicit end, stdin EOF (when requested),
-SIGTERM/SIGINT/SIGHUP, target output/layout change, or a hard maximum of 20 minutes.
-Active actions may legitimately have unconfirmed release; that transient state
-does not hide the indicator. There is no automatic reconnect, resume, replay or
-renewal beyond the hard runtime bound. Shorter bounds can be requested with
+The helper reads the actor's internal `desktop_indicator_lifecycle` contract,
+revision 1 with `complete=true`: session, cancellation epoch, takeover latch,
+active flag, queue count and confirmed release. It excludes full `last_result`,
+images, display modes and capture/input-readiness inventories. Unknown endpoint,
+revision, incomplete or malformed replies fail closed; there is no full-status
+fallback. This endpoint is internal, not another agent action tool.
+
+After a valid startup response, exactly one nonblocking probe runs through the
+helper's existing selector on a bounded 100 ms cadence. Each probe has a total
+300 ms connect/send/read deadline, including fragmented responses. One timeout
+may retry once with the same bound; a second consecutive timeout ends the frame.
+No heartbeat is renewed while the response is pending or authority is unknown.
+Only a fresh valid response for the original session/epoch and an unlatched actor
+allows renewal. Startup timeout, EOF and other capability/contract errors have
+no retry. Explicit end, stdin end/EOF, signals and parent identity checks remain
+reachable while the probe is pending; closing it cancels only this read socket.
+
+The helper ends on epoch or backend session change, takeover latch, idle
+unconfirmed release, unavailable lifecycle, owner PID/starttime change, explicit
+end, stdin EOF (when requested), SIGTERM/SIGINT/SIGHUP, target output/layout
+change, or a hard maximum of 20 minutes. Active actions may legitimately have
+unconfirmed release; that transient state does not hide the indicator. The
+renderer still expires after 4 seconds without heartbeats. There is no automatic
+resume or action replay, no replacement-backend reconnect, and no renewal beyond
+the hard runtime bound. Shorter bounds can be requested with
 `--max-runtime-seconds 1..1200`.
 
-Actor status and output queries are read-only. Raw status, window titles,
+Lifecycle and output queries are read-only. Raw status, window titles,
 environment, command arguments and credentials are never logged. The helper's
 termination and the renderer lease do not establish that the actor has released
 input: inspect fresh actor status independently after Stop/Escape.
@@ -110,7 +129,15 @@ python3 -m unittest discover -s packages/computer-use-indicator -p test_indicato
 The tests use a fake actor, Niri inventory and renderer. They cover thinking gaps,
 explicit end, cancellation epochs, takeover, backend replacement, active versus
 idle release state, refused initial latch/owner mismatch, signal cleanup, hard
-expiry and one output's competing ownership. They are helper lifecycle tests.
+expiry and one output's competing ownership. Delayed and fragmented lifecycle
+fixtures cover the single timeout recovery, second-timeout shutdown, no renewal
+while unknown, known stop responses, unknown contract rejection, and end/parent
+exit during a pending socket. These are private process/socket tests, with a fake
+renderer; they do not prove visible monitor edges or ordinary T3 task cancellation.
+The Niri geometry subprocess remains bounded by its existing 1-second timeout;
+that independent query can still delay local event processing. Core lifecycle
+reads retain the active-state mutex and may time out while release recovery holds
+it; the bounded retry does not redefine such release/capability uncertainty.
 Root must still prove the real monitor rendering, click-through and task Stop
 including a model-thinking gap from ordinary T3/Codex sessions.
 

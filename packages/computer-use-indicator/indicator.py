@@ -6,6 +6,7 @@ only draws five noninteractive layer surfaces and expires without heartbeats.
 """
 
 import argparse
+import errno
 import fcntl
 import hashlib
 import json
@@ -25,7 +26,10 @@ REVISION = 1
 MAX_RUNTIME_SECONDS = 20 * 60
 POLL_SECONDS = 0.1
 STATUS_TIMEOUT_SECONDS = 0.3
-MAX_STATUS_BYTES = 8 * 1024 * 1024
+MAX_STATUS_BYTES = 16 * 1024
+LIFECYCLE_REVISION = 1
+STATUS_FRESH_SECONDS = POLL_SECONDS + STATUS_TIMEOUT_SECONDS
+LIFECYCLE_REQUEST = b'{"tool":"desktop_indicator_lifecycle","arguments":{}}\n'
 IDENTIFIER = re.compile(r"[A-Za-z0-9_.-]{1,128}\Z")
 
 
@@ -33,8 +37,13 @@ class CapabilityError(RuntimeError):
     pass
 
 
+class LifecycleTimeout(CapabilityError):
+    """Only a deadline expiry permits one bounded lifecycle retry."""
+    pass
+
+
 def emit(event, **fields):
-    print(json.dumps({"revision": REVISION, "event": event, **fields}, ensure_ascii=False), flush=True)
+    print(json.dumps({"revision": REVISION, "event": event, "monotonic": time.monotonic(), **fields}, ensure_ascii=False), flush=True)
 
 
 def process_start_ticks(pid):
@@ -70,14 +79,14 @@ def task_paths(task_id):
     return directory / f"task-{token}.sock", directory / f"task-{token}.json"
 
 
-def read_line(stream, limit):
+def read_line(stream, limit, deadline=None):
     timeout = stream.gettimeout()
-    deadline = time.monotonic() + (timeout if timeout is not None else STATUS_TIMEOUT_SECONDS)
+    deadline = deadline if deadline is not None else time.monotonic() + (timeout if timeout is not None else STATUS_TIMEOUT_SECONDS)
     buffer = bytearray()
     while len(buffer) <= limit:
         remaining = deadline - time.monotonic()
         if remaining <= 0:
-            raise CapabilityError("response deadline elapsed")
+            raise LifecycleTimeout("response deadline elapsed")
         stream.settimeout(remaining)
         chunk = stream.recv(min(65536, limit + 1 - len(buffer)))
         if not chunk:
@@ -91,23 +100,104 @@ def read_line(stream, limit):
     raise CapabilityError("response exceeds bounded size")
 
 
-def desktop_status(actor_socket):
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as stream:
-        stream.settimeout(STATUS_TIMEOUT_SECONDS)
-        stream.connect(str(actor_socket))
-        stream.sendall(b'{"tool":"desktop_status","arguments":{}}\n')
-        result = read_line(stream, MAX_STATUS_BYTES)
-    if result.get("isError"):
-        raise CapabilityError("actor rejected status request")
-    texts = [item["text"] for item in result.get("content", []) if item.get("type") == "text"]
-    if len(texts) != 1:
-        raise CapabilityError("actor status contract unavailable")
-    status = json.loads(texts[0])
-    if status.get("schema") != 1 or not isinstance(status.get("session_id"), str):
-        raise CapabilityError("actor status contract unavailable")
-    if type(status.get("epoch")) is not int or type(status.get("takeover_latched")) is not bool:
-        raise CapabilityError("actor cancellation contract unavailable")
+def parse_lifecycle(result):
+    if not isinstance(result, dict) or result.get("isError") is not False:
+        raise CapabilityError("actor rejected lifecycle request")
+    content = result.get("content")
+    if not isinstance(content, list) or len(content) != 1 or not isinstance(content[0], dict):
+        raise CapabilityError("actor lifecycle contract unavailable")
+    item = content[0]
+    if item.get("type") != "text" or not isinstance(item.get("text"), str):
+        raise CapabilityError("actor lifecycle contract unavailable")
+    status = json.loads(item["text"])
+    if not isinstance(status, dict) or status.get("schema") != 1 or type(status.get("schema")) is not int:
+        raise CapabilityError("actor lifecycle contract unavailable")
+    if type(status.get("lifecycle_revision")) is not int or status["lifecycle_revision"] != LIFECYCLE_REVISION or status.get("complete") is not True:
+        raise CapabilityError("actor lifecycle revision/completeness unavailable")
+    if not isinstance(status.get("session_id"), str) or not status["session_id"]:
+        raise CapabilityError("actor lifecycle identity unavailable")
+    if any(type(status.get(key)) is not int or status[key] < 0 for key in ("epoch", "queued_batches")):
+        raise CapabilityError("actor lifecycle counters unavailable")
+    if any(type(status.get(key)) is not bool for key in ("takeover_latched", "actor_active", "actor_release_confirmed")):
+        raise CapabilityError("actor lifecycle cancellation/release unavailable")
     return status
+
+
+def desktop_lifecycle(actor_socket):
+    # Startup fails closed without a renderer. Total connect/send/read budget,
+    # not a fresh timeout for every chunk or phase; no full-status fallback.
+    deadline = time.monotonic() + STATUS_TIMEOUT_SECONDS
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as stream:
+        try:
+            stream.settimeout(max(0.001, deadline - time.monotonic()))
+            stream.connect(str(actor_socket))
+            stream.settimeout(max(0.001, deadline - time.monotonic()))
+            stream.sendall(LIFECYCLE_REQUEST)
+            result = read_line(stream, MAX_STATUS_BYTES, deadline)
+        except TimeoutError as error:
+            raise LifecycleTimeout("lifecycle startup deadline elapsed") from error
+    return parse_lifecycle(result)
+
+
+class LifecycleProbe:
+    """Exactly one nonblocking read; main-loop end/owner events remain reachable."""
+    def __init__(self, selector, actor_socket):
+        self.selector = selector
+        self.stream = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.stream.setblocking(False)
+        self.started = time.monotonic()
+        self.deadline = self.started + STATUS_TIMEOUT_SECONDS
+        self.sent = 0
+        self.buffer = bytearray()
+        self.closed = False
+        try:
+            result = self.stream.connect_ex(str(actor_socket))
+            if result not in (0, errno.EINPROGRESS, errno.EAGAIN, errno.EALREADY):
+                raise OSError(result, "actor lifecycle connection unavailable")
+            selector.register(self.stream, selectors.EVENT_WRITE, self)
+        except BaseException:
+            self.stream.close()
+            self.closed = True
+            raise
+
+    def advance(self, mask):
+        if time.monotonic() >= self.deadline:
+            raise LifecycleTimeout("lifecycle response deadline elapsed")
+        if mask & selectors.EVENT_WRITE:
+            error = self.stream.getsockopt(socket.SOL_SOCKET, socket.SO_ERROR)
+            if error:
+                raise OSError(error, "actor lifecycle connection unavailable")
+            try:
+                self.sent += self.stream.send(LIFECYCLE_REQUEST[self.sent:])
+            except BlockingIOError:
+                return None
+            if self.sent == len(LIFECYCLE_REQUEST):
+                self.selector.modify(self.stream, selectors.EVENT_READ, self)
+        if mask & selectors.EVENT_READ:
+            try:
+                chunk = self.stream.recv(min(4096, MAX_STATUS_BYTES + 1 - len(self.buffer)))
+            except BlockingIOError:
+                return None
+            if not chunk:
+                raise CapabilityError("connection closed before lifecycle response")
+            self.buffer.extend(chunk)
+            if len(self.buffer) > MAX_STATUS_BYTES:
+                raise CapabilityError("lifecycle response exceeds bounded size")
+            if b"\n" in self.buffer:
+                line, _, remainder = self.buffer.partition(b"\n")
+                if remainder:
+                    raise CapabilityError("unexpected extra lifecycle response data")
+                return parse_lifecycle(json.loads(line))
+        return None
+
+    def close(self):
+        if not self.closed:
+            self.closed = True
+            try:
+                self.selector.unregister(self.stream)
+            except KeyError:
+                pass
+            self.stream.close()
 
 
 def selected_geometry(output):
@@ -132,7 +222,7 @@ def status_stop_reason(status, initial):
         return "actor_cancel_epoch_changed"
     if status["takeover_latched"]:
         return "actor_takeover_latched"
-    if status.get("active") is None and status.get("actor_release_confirmed") is not True:
+    if not status["actor_active"] and not status["actor_release_confirmed"]:
         return "idle_release_unconfirmed"
     return None
 
@@ -155,8 +245,8 @@ def run(args):
     owner_ticks = args.owner_start_ticks if args.owner_start_ticks is not None else process_start_ticks(owner_pid)
     if process_start_ticks(owner_pid) != owner_ticks:
         raise CapabilityError("owner process identity changed before begin")
-    initial = desktop_status(actor_socket)
-    if initial["takeover_latched"] or initial.get("active") is not None or initial.get("queued_batches") != 0:
+    initial = desktop_lifecycle(actor_socket)
+    if initial["takeover_latched"] or initial["actor_active"] or initial["queued_batches"] != 0:
         raise CapabilityError("actor must be resumed and idle before indicator begin")
     if initial.get("actor_release_confirmed") is not True:
         raise CapabilityError("actor release is unconfirmed")
@@ -179,6 +269,7 @@ def run(args):
     owned_socket_identity = None
     owned_lease_identity = None
     old_signals = {}
+    probe = None
     stop_signal = [None]
     metadata = {
         "revision": REVISION, "task_id": args.task_id, "output": args.output,
@@ -221,6 +312,8 @@ def run(args):
         next_poll = next_heartbeat = started
         next_geometry = started + 1
         ready = False
+        last_valid_at = time.monotonic()
+        timeout_retry = 0
         stdin_pending = bytearray()
         while True:
             now = time.monotonic()
@@ -243,23 +336,16 @@ def run(args):
             except (FileNotFoundError, ProcessLookupError):
                 reason = "owner_process_exited"
                 break
-            if now >= next_poll:
-                status = desktop_status(actor_socket)
-                reason = status_stop_reason(status, initial)
-                if reason:
-                    break
-                next_poll = time.monotonic() + POLL_SECONDS
-            if now >= next_geometry:
-                new_geometry, new_logical = selected_geometry(args.output)
-                if new_geometry != geometry or new_logical != logical:
-                    reason = "output_geometry_changed"
-                    break
-                next_geometry = time.monotonic() + 1
-            if now >= next_heartbeat:
-                renderer.stdin.write("v1 heartbeat\n")
-                renderer.stdin.flush()
-                next_heartbeat = now + 1
-            for key, _mask in selector.select(timeout=min(POLL_SECONDS, max(0, deadline - time.monotonic()))):
+            # Socket I/O is part of this selector, not a synchronous full-status
+            # call. Local end/stdin events are processed before lifecycle data.
+            timeout = min(POLL_SECONDS, max(0, deadline - time.monotonic()))
+            if probe is not None:
+                timeout = min(timeout, max(0, probe.deadline - time.monotonic()))
+            probe_error = None
+            fresh_status = None
+            events = selector.select(timeout=timeout)
+            events.sort(key=lambda item: 0 if item[0].data in ("control", "stdin") else 1)
+            for key, _mask in events:
                 if key.data == "control":
                     with server.accept()[0] as client:
                         client.settimeout(0.05)
@@ -275,6 +361,13 @@ def run(args):
                                 stop_signal[0] = 0
                         except (OSError, ValueError, CapabilityError):
                             pass  # Invalid local control does not renew the renderer lease.
+                elif isinstance(key.data, LifecycleProbe):
+                    if stop_signal[0] == 0:
+                        continue
+                    try:
+                        fresh_status = key.data.advance(_mask)
+                    except (OSError, ValueError, CapabilityError) as error:
+                        probe_error = error
                 elif key.data == "renderer":
                     line = renderer.stdout.readline()
                     if not line or len(line) > 4096:
@@ -307,6 +400,61 @@ def run(args):
                             stop_signal[0] = 0
             if stop_signal[0] == 0:
                 break
+            # Recheck owner/signal before renewing any lease, even if a lifecycle
+            # response and an owner stop arrived in the same selector iteration.
+            if stop_signal[0] is not None:
+                reason = "owner_signal"
+                break
+            try:
+                if process_start_ticks(owner_pid) != owner_ticks:
+                    reason = "owner_process_changed"
+                    break
+            except (FileNotFoundError, ProcessLookupError):
+                reason = "owner_process_exited"
+                break
+            now = time.monotonic()
+            if probe is not None and probe_error is None and fresh_status is None and now >= probe.deadline:
+                probe_error = LifecycleTimeout("lifecycle response deadline elapsed")
+            if probe_error is not None:
+                request_started = probe.started
+                probe.close()
+                probe = None
+                last_valid_at = None
+                if isinstance(probe_error, LifecycleTimeout) and timeout_retry == 0:
+                    timeout_retry = 1
+                    next_poll = now
+                    emit("lifecycle_timeout", retry=1, heartbeat_renewed=False, request_started_monotonic=request_started, request_elapsed_ms=round((now - request_started) * 1000, 2))
+                else:
+                    raise probe_error
+            elif fresh_status is not None:
+                probe.close()
+                probe = None
+                reason = status_stop_reason(fresh_status, initial)
+                if reason:
+                    break
+                last_valid_at = now
+                timeout_retry = 0
+                next_poll = now + POLL_SECONDS
+            if probe is None and now >= next_poll:
+                probe = LifecycleProbe(selector, actor_socket)
+                last_valid_at = None  # no renewal while authority is unknown
+            if probe is None and now >= next_geometry:
+                new_geometry, new_logical = selected_geometry(args.output)
+                if new_geometry != geometry or new_logical != logical:
+                    reason = "output_geometry_changed"
+                    break
+                next_geometry = time.monotonic() + 1
+                # Geometry remains an independently bounded subprocess. Re-enter
+                # owner/control checks before any renewal after that wait.
+                continue
+            now = time.monotonic()
+            if now >= deadline:
+                reason = "maximum_runtime_expired"
+                break
+            if probe is None and last_valid_at is not None and now - last_valid_at <= STATUS_FRESH_SECONDS and now >= next_heartbeat:
+                renderer.stdin.write("v1 heartbeat\n")
+                renderer.stdin.flush()
+                next_heartbeat = now + 1
         return 0 if reason in ("explicit_end", "owner_signal", "actor_cancel_epoch_changed", "actor_takeover_latched") else 1
     except (OSError, subprocess.SubprocessError, ValueError, CapabilityError) as error:
         reason = "capability_unavailable"
@@ -315,6 +463,8 @@ def run(args):
         return 1
     finally:
         cleanup_started = time.monotonic()
+        if probe is not None:
+            probe.close()
         # Closing the owned pipe hides the renderer even if writing end fails.
         if renderer:
             try:

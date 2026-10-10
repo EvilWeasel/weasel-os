@@ -2799,8 +2799,27 @@ fn validate_resume_binding(state: &State, args: &Value, request_epoch: u64) -> R
     Ok(expected)
 }
 
+// Internal read-only indicator contract. Do not copy full status, app content,
+// capture/readiness state or input device capability locks into this small reply.
+fn indicator_lifecycle(state: &State) -> R<Value> {
+    let active = state.active.lock().map_err(|_| "Active state poisoned")?;
+    let actor_active = !active.is_null();
+    let release_confirmed = state.release_confirmed.load(Ordering::SeqCst);
+    let queued = state.queued.load(Ordering::SeqCst);
+    drop(active);
+    Ok(text_result(json!({
+        "schema":1,"lifecycle_revision":1,"complete":true,
+        "session_id":state.session_id,
+        "epoch":state.epoch.load(Ordering::SeqCst),
+        "takeover_latched":state.takeover.load(Ordering::SeqCst),
+        "actor_active":actor_active,"queued_batches":queued,
+        "actor_release_confirmed":release_confirmed
+    })))
+}
+
 fn handle(state: &State, tool: &str, args: &Value, epoch: u64) -> R<Value> {
     match tool {
+        "desktop_indicator_lifecycle" => indicator_lifecycle(state),
         "desktop_status" => {
             let capture = capture_status(state)?;
             let readiness = resume_input_readiness(state)?;
@@ -4383,6 +4402,63 @@ mod global_routing_regression {
         );
         assert_eq!(args["actions"][1]["key_scope"], "compositor");
         assert!(args["timeout_ms"].as_u64().unwrap() <= 1000);
+    }
+}
+
+#[cfg(test)]
+mod indicator_lifecycle_tests {
+    use super::*;
+    fn data(result: &Value) -> Value {
+        serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap()
+    }
+    #[test]
+    fn lightweight_reply_does_not_read_heavy_status_and_is_read_only() {
+        let (state, dir) = release_recovery_tests::cooperative_fixture("lifecycle-lightweight");
+        let generation = state.input_policy.generation();
+        let serial = state.serial.load(Ordering::SeqCst);
+        let _result_lock = state.last_result.lock().unwrap();
+        let _capture_lock = state.capture_failure.lock().unwrap();
+        let _monitor_lock = state.human_monitor.lock().unwrap();
+        let _marker_lock = state.takeover_marker.lock().unwrap();
+        let _keyboard_lock = state.global_keyboard.lock().unwrap();
+        let result = data(&handle(&state, "desktop_indicator_lifecycle", &json!({}), 77).unwrap());
+        assert_eq!(
+            result,
+            json!({"schema":1,"lifecycle_revision":1,"complete":true,
+            "session_id":state.session_id,"epoch":77,"takeover_latched":false,
+            "actor_active":false,"queued_batches":0,"actor_release_confirmed":true})
+        );
+        assert_eq!(state.input_policy.generation(), generation);
+        assert_eq!(state.serial.load(Ordering::SeqCst), serial);
+        assert!(state.active.lock().unwrap().is_null());
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn lifecycle_reports_active_release_queue_and_current_stop_without_content() {
+        let (state, dir) = release_recovery_tests::cooperative_fixture("lifecycle-active-stop");
+        *state.active.lock().unwrap() =
+            json!({"task_id":"private", "phase":"wait", "private_text":"not exported"});
+        state.release_confirmed.store(false, Ordering::SeqCst);
+        state.queued.store(2, Ordering::SeqCst);
+        state.epoch.store(78, Ordering::SeqCst);
+        state.takeover.store(true, Ordering::SeqCst);
+        let result = data(&indicator_lifecycle(&state).unwrap());
+        assert_eq!(result["actor_active"], true);
+        assert_eq!(result["actor_release_confirmed"], false);
+        assert_eq!(result["queued_batches"], 2);
+        assert_eq!(result["epoch"], 78);
+        assert_eq!(result["takeover_latched"], true);
+        assert!(result.get("active").is_none());
+        assert!(result.get("last_result").is_none());
+        assert!(!result.to_string().contains("private_text"));
+        assert!(!result.to_string().contains("not exported"));
+        assert!(result.get("task_id").is_none());
+        assert!(result.get("phase").is_none());
+        *state.active.lock().unwrap() = Value::Null;
+        let idle = data(&indicator_lifecycle(&state).unwrap());
+        assert_eq!(idle["actor_active"], false);
+        assert_eq!(idle["actor_release_confirmed"], false);
+        fs::remove_dir_all(dir).unwrap();
     }
 }
 

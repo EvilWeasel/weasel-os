@@ -64,6 +64,13 @@ class IndicatorLifecycle(unittest.TestCase):
             "queued_batches": 0, "actor_release_confirmed": True,
         }
         self.actor_lock = threading.Lock()
+        self.receipt_runs = []
+        self.control_requests = []
+        self.actor_plan = {}
+        self.actor_requests = []
+        self.actor_errors = []
+        self.actor_handlers = []
+        self.renderer_log = self.runtime / "renderer-protocol.jsonl"
         self.niri_state_path = self.runtime / "outputs.json"
         self.niri_state = {"DP-6": {"logical": {"x": 1920, "y": 0, "width": 3440, "height": 1440, "scale": 1}}}
         self.niri_state_path.write_text(json.dumps(self.niri_state))
@@ -71,9 +78,10 @@ class IndicatorLifecycle(unittest.TestCase):
         self.renderer = self.runtime / "renderer.py"
         self.renderer.write_text(
             f"#!{sys.executable}\n"
-            "import json, os, pathlib, sys\n"
+            "import json, os, pathlib, sys, time\n"
             f"pathlib.Path({str(self.render_started)!r}).write_text(str(os.getpid()))\n"
             "for line in sys.stdin:\n"
+            f" with pathlib.Path({str(self.renderer_log)!r}).open('a') as log: log.write(json.dumps({{'at':time.monotonic(),'line':line.strip()}})+'\\n')\n"
             " if line == 'v1 begin\\n':\n"
             "  print(json.dumps({'revision':1,'event':'ready','task_id':sys.argv[2],'output':sys.argv[1],'surfaces':5}),flush=True)\n"
             " elif line == 'v1 end\\n': break\n"
@@ -105,17 +113,48 @@ class IndicatorLifecycle(unittest.TestCase):
                 continue
             except OSError:
                 break
-            with client:
-                client.settimeout(0.1)
-                try:
-                    request = client.recv(4096)
-                    self.assertIn(b'"desktop_status"', request)
-                    with self.actor_lock:
-                        state = copy.deepcopy(self.actor_state)
-                    response = {"content": [{"type": "text", "text": json.dumps(state)}], "isError": False}
-                    client.sendall(json.dumps(response).encode() + b"\n")
-                except OSError:
-                    pass
+            handler = threading.Thread(target=self.reply_actor, args=(client,), daemon=True)
+            self.actor_handlers.append(handler)
+            handler.start()
+
+    def reply_actor(self, client):
+        with client:
+            client.settimeout(0.2)
+            try:
+                raw = client.recv(4096)
+                if not raw:
+                    return  # own signal/end may close a connected probe before send
+                request = json.loads(raw)
+                if request["tool"] != "desktop_indicator_lifecycle":
+                    raise AssertionError("unexpected tool instead of lightweight lifecycle")
+                with self.actor_lock:
+                    index = len(self.actor_requests)
+                    record = {"index":index,"at":time.monotonic(),"tool":request["tool"]}
+                    self.actor_requests.append(record)
+                    plan = dict(self.actor_plan.get(index, {}))
+                    state = copy.deepcopy(self.actor_state)
+                if plan.get("eof"):
+                    return
+                if plan.get("delay"):
+                    self.server_stop.wait(plan["delay"])
+                state["actor_active"] = state.pop("active") is not None
+                state["lifecycle_revision"] = 1
+                state["complete"] = True
+                state.update(plan.get("status", {}))
+                response = {"content": [{"type": "text", "text": json.dumps(state)}], "isError": False}
+                response.update(plan.get("envelope", {}))
+                packet = plan.get("raw", json.dumps(response).encode() + b"\n")
+                fragments = plan.get("fragments", 1)
+                width = max(1, len(packet) // fragments)
+                for offset in range(0, len(packet), width):
+                    client.sendall(packet[offset:offset+width])
+                    if offset + width < len(packet):
+                        self.server_stop.wait(plan.get("fragment_delay", 0))
+                record["replied_at"] = time.monotonic()
+            except OSError:
+                pass  # fixture client cancellation may close an owned read
+            except Exception as error:
+                self.actor_errors.append(repr(error))
 
     def tearDown(self):
         for process in self.processes:
@@ -127,13 +166,20 @@ class IndicatorLifecycle(unittest.TestCase):
         self.server_stop.set()
         self.server.close()
         self.actor_thread.join(timeout=1)
+        for handler in self.actor_handlers:
+            handler.join(timeout=0.3)
+        self.assertEqual(self.actor_errors, [])
+        receipt_dir = os.environ.get("WEASEL_INDICATOR_TEST_RECEIPTS_DIR")
+        if receipt_dir:
+            Path(receipt_dir).mkdir(mode=0o700, parents=True, exist_ok=True)
+            (Path(receipt_dir) / (self.id().split(".")[-1] + ".json")).write_text(json.dumps({"test":self.id(), "scope":"private fake actor/Niri/renderer only; no desktop/input", "runs":self.receipt_runs, "control_requests":self.control_requests}, indent=2) + "\n")
         self.temp.cleanup()
 
     def launch(self, task="fixture-task", extra=()):
         process = subprocess.Popen(
             [sys.executable, str(SOURCE / "indicator.py"), "run", "--task-id", task,
              "--output", "DP-6", *extra],
-            env=self.env, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+            env=self.env, stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
         )
         self.processes.append(process)
         return process
@@ -155,6 +201,9 @@ class IndicatorLifecycle(unittest.TestCase):
         ended = next(item for item in reversed(events) if item.get("event") == "ended")
         self.assertEqual(stderr, "")
         self.assertFalse(list((self.actor_dir / "indicators").glob("task-*")))
+        self.last_events = events
+        self.receipt_runs.append({"observed_process_end_monotonic":time.monotonic(), "events":events, "renderer_protocol":self.protocol(), "actor_requests":copy.deepcopy(self.actor_requests), "returncode":process.returncode})
+        self.assertTrue(all(type(x.get("monotonic")) in (float, int) for x in events))
         return ended
 
     def test_thinking_gap_stays_owned_and_explicit_end_cleans(self):
@@ -253,6 +302,164 @@ class IndicatorLifecycle(unittest.TestCase):
         started = time.monotonic()
         self.assertEqual(self.ended(process)["reason"], "capability_unavailable")
         self.assertLess(time.monotonic() - started, 0.7)
+
+    def protocol(self):
+        return [json.loads(line) for line in self.renderer_log.read_text().splitlines()]
+
+    def wait_request(self, index):
+        deadline = time.monotonic() + 1
+        while time.monotonic() < deadline:
+            with self.actor_lock:
+                if len(self.actor_requests) > index:
+                    return self.actor_requests[index]
+            time.sleep(0.005)
+        self.fail("bounded fake lifecycle request was not dispatched")
+
+    def end_control(self):
+        self.control_requests.append({"at":time.monotonic(),"event":"explicit_end"})
+        return subprocess.run([sys.executable, str(SOURCE / "indicator.py"), "end", "--task-id", "fixture-task"], env=self.env, capture_output=True, text=True, timeout=1)
+
+    def test_fragmented_valid_lifecycle_keeps_frame_owned(self):
+        self.actor_plan[1] = {"fragments":4, "fragment_delay":0.035}
+        process = self.launch()
+        self.ready(process)
+        self.wait_request(2)
+        self.assertIsNone(process.poll())
+        self.assertEqual(self.end_control().returncode, 0)
+        self.assertEqual(self.ended(process)["reason"], "explicit_end")
+        self.assertFalse(any(x["event"] == "lifecycle_timeout" for x in self.last_events))
+
+    def test_one_timeout_recovers_without_renewing_unknown_lease(self):
+        self.actor_plan[1] = {"delay":0.4}
+        process = self.launch()
+        self.ready(process)
+        first = self.wait_request(1)
+        self.wait_request(2)
+        time.sleep(0.05)
+        self.assertIsNone(process.poll())
+        self.assertEqual(self.end_control().returncode, 0)
+        self.assertEqual(self.ended(process)["reason"], "explicit_end")
+        timeouts = [x for x in self.last_events if x["event"] == "lifecycle_timeout"]
+        self.assertEqual(len(timeouts), 1)
+        self.assertEqual(timeouts[0]["retry"], 1)
+        self.assertFalse(timeouts[0]["heartbeat_renewed"])
+        second = self.actor_requests[2]
+        self.assertFalse(any(x["line"] == "v1 heartbeat" and first["at"] <= x["at"] < second["at"] for x in self.protocol()))
+        self.assertTrue(all(x["tool"] == "desktop_indicator_lifecycle" for x in self.actor_requests))
+
+    def test_two_timeouts_bound_recovery_and_hide_without_renewal(self):
+        self.actor_plan.update({1:{"delay":1}, 2:{"delay":1}})
+        process = self.launch()
+        self.ready(process)
+        first = self.wait_request(1)
+        ended = self.ended(process)
+        self.assertEqual(ended["reason"], "capability_unavailable")
+        self.assertLess(time.monotonic() - first["at"], 0.9)
+        self.assertEqual(len(self.actor_requests), 3)
+        self.assertEqual(len([x for x in self.last_events if x["event"] == "lifecycle_timeout"]), 1)
+        self.assertFalse(any(x["line"] == "v1 heartbeat" and x["at"] >= first["at"] for x in self.protocol()))
+
+    def test_fragmented_slow_lifecycle_cannot_extend_total_deadline(self):
+        self.actor_plan.update({1:{"fragments":20,"fragment_delay":0.045},2:{"fragments":20,"fragment_delay":0.045}})
+        process = self.launch()
+        self.ready(process)
+        first = self.wait_request(1)
+        self.assertEqual(self.ended(process)["reason"], "capability_unavailable")
+        self.assertLess(time.monotonic() - first["at"], 0.9)
+        self.assertEqual(len(self.actor_requests), 3)
+
+    def test_known_stops_after_timeout_are_not_recovered_or_renewed(self):
+        for changes, reason in (({"takeover_latched":True}, "actor_takeover_latched"), ({"epoch":3}, "actor_cancel_epoch_changed")):
+            with self.subTest(changes=changes):
+                self.actor_plan = {1:{"delay":0.4},2:{"status":changes}}
+                self.actor_requests.clear()
+                self.renderer_log.unlink(missing_ok=True)
+                process = self.launch()
+                self.ready(process)
+                first = self.wait_request(1)
+                self.assertEqual(self.ended(process)["reason"], reason)
+                self.assertFalse(any(x["line"] == "v1 heartbeat" and x["at"] >= first["at"] for x in self.protocol()))
+                self.assertEqual(len(self.actor_requests), 3)
+                # The previous server's deliberately delayed reply is never a
+                # shared client result; each request owns and closes its socket.
+                time.sleep(0.1)
+
+    def test_explicit_end_interrupts_pending_probe_before_timeout(self):
+        self.actor_plan[1] = {"delay":1}
+        process = self.launch()
+        self.ready(process)
+        self.wait_request(1)
+        start = time.monotonic()
+        self.assertEqual(self.end_control().returncode, 0)
+        self.assertEqual(self.ended(process)["reason"], "explicit_end")
+        self.assertLess(time.monotonic() - start, 0.25)
+        self.assertEqual(len(self.actor_requests), 2)
+        self.assertFalse(any(x["event"] == "lifecycle_timeout" for x in self.last_events))
+
+    def test_stdin_end_and_eof_interrupt_pending_probe(self):
+        for payload, reason in ((b"v1 end\n", "explicit_end"), (None, "owner_stdin_closed")):
+            with self.subTest(reason=reason):
+                self.actor_plan = {1:{"delay":1}}
+                self.actor_requests.clear()
+                process = self.launch(extra=("--stdin-control",))
+                self.ready(process)
+                self.wait_request(1)
+                start = time.monotonic()
+                if payload is not None:
+                    process.stdin.write(payload.decode())
+                    process.stdin.flush()
+                else:
+                    process.stdin.close()
+                    process.stdin = None
+                self.assertEqual(self.ended(process)["reason"], reason)
+                self.assertLess(time.monotonic() - start, 0.25)
+                self.assertEqual(len(self.actor_requests), 2)
+
+    def test_signal_interrupts_pending_probe_before_timeout(self):
+        self.actor_plan[1] = {"delay":1}
+        process = self.launch()
+        self.ready(process)
+        self.wait_request(1)
+        start = time.monotonic()
+        process.terminate()
+        self.assertEqual(self.ended(process)["reason"], "owner_signal")
+        self.assertLess(time.monotonic() - start, 0.25)
+        self.assertEqual(len(self.actor_requests), 2)
+        self.assertFalse(any(x["event"] == "lifecycle_timeout" for x in self.last_events))
+
+    def test_parent_death_interrupts_pending_probe(self):
+        owner = subprocess.Popen([sys.executable, "-c", "import time;time.sleep(5)"], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        self.processes.append(owner)
+        self.actor_plan[1] = {"delay":1}
+        process = self.launch(extra=("--owner-pid", str(owner.pid), "--owner-start-ticks", str(indicator.process_start_ticks(owner.pid))))
+        self.ready(process)
+        self.wait_request(1)
+        start = time.monotonic()
+        owner.terminate()
+        owner.wait(timeout=1)
+        self.assertEqual(self.ended(process)["reason"], "owner_process_exited")
+        self.assertLess(time.monotonic() - start, 0.25)
+        self.assertEqual(len(self.actor_requests), 2)
+
+    def test_non_timeout_failures_never_retry_or_fallback(self):
+        for plan in ({"eof":True}, {"raw":b"not-json\n"}, {"envelope":{"isError":True}}, {"status":{"lifecycle_revision":2}}, {"status":{"complete":False}}, {"status":{"actor_active":None}}):
+            with self.subTest(plan=plan):
+                self.actor_plan = {1:plan}
+                self.actor_requests.clear()
+                process = self.launch()
+                self.ready(process)
+                self.assertEqual(self.ended(process)["reason"], "capability_unavailable")
+                self.assertEqual(len(self.actor_requests), 2)
+                self.assertFalse(any(x["event"] == "lifecycle_timeout" for x in self.last_events))
+
+    def test_unknown_endpoint_fails_closed_before_renderer(self):
+        self.actor_plan[0] = {"envelope":{"isError":True}}
+        process = self.launch()
+        stdout, _ = process.communicate(timeout=2)
+        self.assertNotEqual(process.returncode, 0)
+        self.assertIn("actor rejected lifecycle request", stdout)
+        self.assertFalse(self.render_started.exists())
+        self.assertEqual(len(self.actor_requests), 1)
 
     def test_wrong_task_control_cannot_end_owned_indicator(self):
         process = self.launch()

@@ -267,6 +267,28 @@ text focus before dependent editing; never replay an already completed effect.
 This is recovery within the same task, not a task abort. Held physical
 modifiers/buttons refuse input temporarily; releasing them permits fresh
 continuation without `desktop_resume`.
+Do not end the goal, end its indicator or request desktop permission merely
+because ordinary input changed focus, selected another tab, or added unexpected
+text. A failed batch and a stopped goal are separate states. Read the actual
+partial effects and current contents, preserve human edits, and replan the
+remaining step from that state. If a disposable test needs an exact baseline,
+keep the interrupted buffer as evidence and continue in a fresh owned test
+document; do not silently erase the user's text or classify the conflict as
+Escape. For ordinary real work, reconcile the requested change with the current
+contents rather than replacing the whole buffer with an older snapshot.
+Keep the same goal and task indicator through this recovery. Explicit
+cancellation/takeover stops the goal. An unrecoverable capability failure or
+genuinely ambiguous intended work requires a clearly reported pause with the
+verified partial state; do not announce goal cancellation or success. Merely
+unexpected ordinary input is not such a blocker. A newer user instruction takes precedence over
+older stored advice to stop on every unexpected UI change.
+Once the remaining operation is known and its earlier effects are resolved,
+avoid another model round between unchanged grounding and dispatch: a bounded
+code execution may read fresh status, observe and the required focused semantics,
+explicitly check the exact window/document/contents and then send that one
+remaining operation. If any check fails, return the evidence to planning instead
+of acting or looping blindly. This preserves the same backend guards and never
+replays an uncertain edit merely because the original request was valid.
 Ordinary input may leave a captured image non-actionable: inspect `input_ready`
 and `fresh_observation_required_for_input`; do not use an old image's generation
 for input. A read-only image can still support planning. Two quick collisions
