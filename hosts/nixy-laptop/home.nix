@@ -53,6 +53,16 @@ in
     (import ../../packages/proton-pass-cli.nix { inherit pkgs pkgsUnstable; })
   ];
 
+  # Select verified Codex while keeping the user's other npm commands.
+  home.sessionPath = lib.mkBefore [ "${lib.getBin codexLatest}/bin" ];
+  # An existing desktop can pass an old, already-sourced HM environment.
+  programs.bash.initExtra = lib.mkAfter ''
+    case ":$PATH:" in
+      ":${lib.getBin codexLatest}/bin:"*) ;;
+      *) export PATH="${lib.getBin codexLatest}/bin:$PATH" ;;
+    esac
+  '';
+
   home.sessionVariables.PROTON_PASS_LINUX_KEYRING = "dbus";
   weasel.uiDecisions = {
     enable = true;
