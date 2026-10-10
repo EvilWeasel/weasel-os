@@ -50,6 +50,7 @@ in
     ../../programs/ui-decisions.nix
     ../../programs/vps-ssh.nix
     ../../programs/proton-infra-ssh.nix
+    ../../programs/cloud-backup.nix
   ];
 
   home.packages = [

@@ -203,7 +203,7 @@ in
           eval "$(zoxide init bash)"
 
           alias sv='sudo nvim'
-          alias ncg='nix-collect-garbage --delete-old && sudo nix-collect-garbage -d && sudo /run/current-system/bin/switch-to-configuration boot'
+          alias ncg='if [[ -x /run/current-system/sw/bin/weasel-storage-retention ]]; then sudo /run/current-system/sw/bin/weasel-storage-retention --apply --gc; else nix-collect-garbage --delete-old && sudo nix-collect-garbage -d && sudo /run/current-system/bin/switch-to-configuration boot; fi'
           alias v='nvim'
           alias cat='bat'
           alias ls='eza --icons --color=auto'

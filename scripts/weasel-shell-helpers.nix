@@ -48,6 +48,9 @@ pkgs.symlinkJoin {
     (mkScript {
       name = "ncg";
       body = ''
+        if [[ "${host}" == "nixy-laptop" ]]; then
+          exec ${pkgs.sudo}/bin/sudo /run/current-system/sw/bin/weasel-storage-retention --apply --gc
+        fi
         ${pkgs.nix}/bin/nix-collect-garbage --delete-old
         ${pkgs.sudo}/bin/sudo ${pkgs.nix}/bin/nix-collect-garbage -d
         ${pkgs.sudo}/bin/sudo /run/current-system/bin/switch-to-configuration boot

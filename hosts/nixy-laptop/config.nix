@@ -11,6 +11,7 @@
     ../../profiles/system/client.nix
     ../../profiles/system/laptop.nix
     ../../modules/home-snapshots.nix
+    ../../modules/storage-recovery.nix
     ../../modules/daily-updates.nix
     ../../modules/wispr-flow.nix
     # ../../modules/networking/internal-dns.nix

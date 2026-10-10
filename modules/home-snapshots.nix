@@ -27,7 +27,7 @@ in
       TIMELINE_LIMIT_HOURLY = 0;
       # The range permits extra cleanup under disk pressure, including the last
       # eligible snapshot. A fixed count disables space-aware cleanup.
-      TIMELINE_LIMIT_DAILY = "0-7";
+      TIMELINE_LIMIT_DAILY = "0-2";
       TIMELINE_LIMIT_WEEKLY = 0;
       TIMELINE_LIMIT_MONTHLY = 0;
       TIMELINE_LIMIT_QUARTERLY = 0;
