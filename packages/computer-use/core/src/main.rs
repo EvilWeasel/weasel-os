@@ -1,6 +1,7 @@
 mod global_keyboard;
 mod input_policy;
 mod mcp_cancel_registry;
+mod mcp_response;
 mod release_recovery;
 mod takeover;
 use base64::{engine::general_purpose::STANDARD, Engine};
@@ -34,6 +35,7 @@ use std::{
 type R<T> = Result<T, String>;
 const MAX_REQUEST: u64 = 262_144;
 const MAX_AGE: Duration = Duration::from_secs(60);
+const RESUME_BINDING_REVISION: u32 = 1;
 thread_local! {static CURRENT_CANCEL_FLAG: RefCell<Option<Arc<AtomicBool>>> = const { RefCell::new(None) };}
 thread_local! {static CURRENT_DEADLINE: RefCell<Option<Instant>> = const { RefCell::new(None) };}
 fn own_canceled() -> bool {
@@ -112,6 +114,8 @@ struct State {
     human_monitor: Mutex<Value>,
     release_confirmed: AtomicBool,
     capture_available: AtomicBool,
+    capture_attempts: AtomicU64,
+    capture_failure: Mutex<Option<String>>,
     active: Mutex<Value>,
     last_result: Mutex<Value>,
     observations: Mutex<HashMap<String, Observation>>,
@@ -329,13 +333,15 @@ fn physical_activity(state: &State, escape: bool, simulation: bool) {
     match state.takeover_marker.lock() {
         Ok(mut marker) => match marker.set(source, &state.session_id) {
             Ok(changed) => {
-                if newly_latched || changed {
-                    record(
-                        state,
-                        "human_takeover",
-                        json!({"epoch":epoch,"source":source,"takeover_persisted":true,"controlled_simulation":simulation}),
-                    );
-                }
+                record(
+                    state,
+                    if newly_latched || changed {
+                        "human_takeover"
+                    } else {
+                        "takeover_cause_preserved"
+                    },
+                    json!({"epoch":epoch,"source":marker.reason.source,"requested_source":source,"cause_id":marker.reason.cause_id,"cause_preserved":!changed,"takeover_persisted":true,"controlled_simulation":simulation}),
+                );
             }
             Err(error) => record(
                 state,
@@ -734,7 +740,12 @@ fn capture_unavailable(state: &State, epoch: u64, category: &str) {
     {
         return;
     }
-    state.capture_available.store(false, Ordering::SeqCst);
+    if let Ok(mut failure) = state.capture_failure.lock() {
+        *failure = Some(category.into());
+        state.capture_available.store(false, Ordering::SeqCst);
+    } else {
+        state.capture_available.store(false, Ordering::SeqCst);
+    }
     let next = state.epoch.fetch_add(1, Ordering::SeqCst) + 1;
     if let Ok(mut saved) = state.observations.lock() {
         for obs in saved.values() {
@@ -760,6 +771,13 @@ fn capture(
     timeout: Duration,
     epoch: u64,
 ) -> R<()> {
+    {
+        let _lifecycle = state
+            .capture_failure
+            .lock()
+            .map_err(|_| "Capture lifecycle state poisoned")?;
+        state.capture_attempts.fetch_add(1, Ordering::SeqCst);
+    }
     record(
         state,
         "capture_request",
@@ -1204,7 +1222,7 @@ fn observe_inner(state: &State, args: &Value, actor_held: bool) -> R<Value> {
     data["capture"]["image_width"] = json!(view.width);
     data["capture"]["image_height"] = json!(view.height);
     data["capture"]["coordinate_frame"]=json!("x/y actions are local to displayed view image. Core adds view.x/y to map to full output PNG; full output dimensions normalize virtual pointer. Never add desktop output origin.");
-    state.capture_available.store(true, Ordering::SeqCst);
+    accept_capture(state)?;
     record(
         state,
         "observed",
@@ -2497,6 +2515,10 @@ fn recover_release(state: &State, args: &Value) -> R<Value> {
     if report.confirmed {
         observations.clear();
         semantic.clear();
+        let _lifecycle = state
+            .capture_failure
+            .lock()
+            .map_err(|_| "Capture lifecycle state poisoned")?;
         state.capture_available.store(false, Ordering::SeqCst);
     }
     state
@@ -2518,11 +2540,131 @@ fn recover_release(state: &State, args: &Value) -> R<Value> {
     Ok(result)
 }
 
+fn accept_capture(state: &State) -> R<()> {
+    let mut failure = state
+        .capture_failure
+        .lock()
+        .map_err(|_| "Capture failure state poisoned")?;
+    *failure = None;
+    state.capture_available.store(true, Ordering::SeqCst);
+    Ok(())
+}
+fn capture_status(state: &State) -> R<Value> {
+    // The same short lifecycle lock protects attempt, failure and availability
+    // updates. Do not hold it across capture, filesystem work or other locks.
+    let failure = state
+        .capture_failure
+        .lock()
+        .map_err(|_| "Capture failure state poisoned")?;
+    let attempts = state.capture_attempts.load(Ordering::SeqCst);
+    let available = state.capture_available.load(Ordering::SeqCst);
+    Ok(
+        json!({"capture_available":available,"capture_attempts":attempts,"capture_not_attempted":attempts==0,"capture_failed":failure.is_some(),"capture_failure_category":*failure,"capture_state":if available{"ready"}else if failure.is_some(){"failed"}else if attempts==0{"not_attempted"}else{"no_current_observation"},"note":"No attempt at startup is expected, not capture failure. Resume requires input/release gates and current user authorization, not prior capture. Input always requires a subsequent accepted fresh observation."}),
+    )
+}
+fn resume_input_readiness(state: &State) -> R<Value> {
+    let now = state.started.elapsed().as_millis() as u64;
+    let last = state.last_human_ms.load(Ordering::SeqCst);
+    let monitor = state
+        .human_monitor
+        .lock()
+        .map_err(|_| "Human input monitor state poisoned")?;
+    let monitor_ready = monitor["available"] == true
+        && monitor["status"] != "starting"
+        && monitor["watched_devices"].as_u64().unwrap_or(0) > 0;
+    drop(monitor);
+    let startup_quiet = now >= 300;
+    let activity_age = (last != 0).then(|| now.saturating_sub(last));
+    let activity_quiet = activity_age.is_none_or(|age| age >= 300);
+    let controls_released = state.input_policy.controls_released();
+    let wait_remaining = 300u64.saturating_sub(now).max(
+        activity_age
+            .map(|age| 300u64.saturating_sub(age))
+            .unwrap_or(0),
+    );
+    Ok(
+        json!({"ready":startup_quiet&&monitor_ready&&controls_released&&activity_quiet,"monitor_ready":monitor_ready,"controls_released":controls_released,"startup_quiet_interval_complete":startup_quiet,"recent_activity_quiet_interval_complete":activity_quiet,"required_quiet_ms":300,"wait_remaining_ms":wait_remaining,"last_activity_monotonic_ms":last,"last_activity_age_ms":activity_age,"input_generation":state.input_policy.generation(),"snapshot_only":true,"note":"This shared input-readiness snapshot neither authorizes resume nor confirms actor/queue release. desktop_resume rechecks all gates and the exact observed backend session/epoch."}),
+    )
+}
+fn validate_resume_arguments(args: &Value) -> R<()> {
+    let fields = args
+        .as_object()
+        .ok_or("Desktop resume arguments must be an object")?;
+    if fields
+        .keys()
+        .any(|k| k != "expected_epoch" && k != "expected_session_id")
+    {
+        return Err(
+            "Unknown desktop resume field; only expected_epoch and expected_session_id are allowed"
+                .into(),
+        );
+    }
+    if fields
+        .get("expected_epoch")
+        .is_some_and(|v| v.as_u64().is_none_or(|e| e == 0))
+        || fields
+            .get("expected_session_id")
+            .is_some_and(|v| v.as_str().is_none_or(|v| v.is_empty()))
+    {
+        return Err("Invalid desktop resume binding field types; expected positive integer epoch and nonempty session string".into());
+    }
+    Ok(())
+}
+fn resume_proxy_preflight(args: &Value, response: &Value) -> R<Option<Value>> {
+    validate_resume_arguments(args)?;
+    if response["isError"] == true {
+        return Err("Resume backend capability query failed; no transition forwarded".into());
+    }
+    let status: Value = serde_json::from_str(
+        response["content"][0]["text"]
+            .as_str()
+            .ok_or("Resume status metadata unavailable")?,
+    )
+    .map_err(|_| "Resume status metadata invalid")?;
+    if status["resume_binding_revision"].as_u64() == Some(RESUME_BINDING_REVISION as u64) {
+        return Ok(None);
+    }
+    if status["takeover_latched"] == false
+        && status.get("active").is_some_and(Value::is_null)
+        && status["queued_batches"].as_u64() == Some(0)
+        && status["actor_release_confirmed"] == true
+        && status["epoch"].as_u64().is_some_and(|e| e > 0)
+        && status["session_id"].as_str().is_some_and(|v| !v.is_empty())
+    {
+        // Never send a mutation to an old backend that could ignore fence
+        // fields. An already-unlatched idle status needs no transition.
+        return Ok(Some(text_result(
+            json!({"schema":1,"status":"already_resumed","session_id":status["session_id"],"epoch":status["epoch"],"takeover_latched":false,"actor_release_confirmed":true,"input_permission_changed":false,"fresh_observation_required":false,"resume_request_forwarded":false,"snapshot_only":true,"note":"Read-only idle/unlatched status from an older backend; no resume mutation forwarded. This snapshot does not return control or authorize input. Reinspect status if a new stop occurs; fresh observation and actor gates still apply."}),
+        )));
+    }
+    Err("Backend does not implement resume binding revision1; active/busy/unknown-state resume refused before forwarding. Restart/reconnect the declared backend while released; never fall back to an unbound resume.".into())
+}
+
+fn validate_resume_binding(state: &State, args: &Value, request_epoch: u64) -> R<u64> {
+    check_epoch(state, Some(request_epoch))?;
+    let expected = args["expected_epoch"].as_u64().ok_or("Active takeover resume requires observed expected_epoch and expected_session_id; inspect status and honor the user's return of control")?;
+    let session = args["expected_session_id"].as_str().ok_or("Active takeover resume requires observed expected_session_id; inspect status and honor the user's return of control")?;
+    if session != state.session_id
+        || expected != request_epoch
+        || expected != state.epoch.load(Ordering::SeqCst)
+    {
+        return Err("Desktop resume binding is stale or belongs to another backend; a newer stop/cancellation remains latched. Inspect its current cause and obtain the required return of control; do not refresh and retry blindly.".into());
+    }
+    Ok(expected)
+}
+
 fn handle(state: &State, tool: &str, args: &Value, epoch: u64) -> R<Value> {
     match tool {
-        "desktop_status" => Ok(text_result(
-            json!({"schema":1,"version":"0.1.0","session_id":state.session_id,"interface_revision":GLOBAL_ROUTING_REVISION,"global_keyboard":global_keyboard_capability(),"desktop":"niri-wayland","epoch":state.epoch.load(Ordering::SeqCst),"queued_batches":state.queued.load(Ordering::SeqCst),"active":*state.active.lock().map_err(|_|"Active state poisoned")?,"last_result":*state.last_result.lock().map_err(|_|"Last result state poisoned")?,"actor_release_confirmed":state.release_confirmed.load(Ordering::SeqCst),"capture_available":state.capture_available.load(Ordering::SeqCst),"fresh_observation_required_after_capture_failure":true,"uptime_ms":state.started.elapsed().as_millis(),"takeover_latched":state.takeover.load(Ordering::SeqCst),"takeover_persistence":state.takeover_marker.lock().map_err(|_|"Takeover marker state poisoned")?.status(),"input_policy":state.input_policy.status(state.last_human_ms.load(Ordering::SeqCst)),"human_input_monitor":*state.human_monitor.lock().map_err(|_|"Human input monitor state poisoned")?}),
-        )),
+        "desktop_status" => {
+            let capture = capture_status(state)?;
+            let readiness = resume_input_readiness(state)?;
+            let mut data = json!({"schema":1,"version":"0.1.0","session_id":state.session_id,"resume_binding_revision":RESUME_BINDING_REVISION,"interface_revision":GLOBAL_ROUTING_REVISION,"global_keyboard":global_keyboard_capability(),"desktop":"niri-wayland","epoch":state.epoch.load(Ordering::SeqCst),"queued_batches":state.queued.load(Ordering::SeqCst),"active":*state.active.lock().map_err(|_|"Active state poisoned")?,"last_result":*state.last_result.lock().map_err(|_|"Last result state poisoned")?,"actor_release_confirmed":state.release_confirmed.load(Ordering::SeqCst),"capture_available":state.capture_available.load(Ordering::SeqCst),"fresh_observation_required_after_capture_failure":true,"uptime_ms":state.started.elapsed().as_millis(),"takeover_latched":state.takeover.load(Ordering::SeqCst),"takeover_persistence":state.takeover_marker.lock().map_err(|_|"Takeover marker state poisoned")?.status(),"input_policy":state.input_policy.status(state.last_human_ms.load(Ordering::SeqCst)),"human_input_monitor":*state.human_monitor.lock().map_err(|_|"Human input monitor state poisoned")?});
+            for (key, value) in capture.as_object().unwrap() {
+                data[key] = value.clone();
+            }
+            data["resume_input_readiness"] = readiness;
+            Ok(text_result(data))
+        }
         "desktop_windows" => Ok(text_result(
             json!({"schema":1,"windows":niri(state,"windows")?,"outputs":niri(state,"outputs")?,"workspaces":niri(state,"workspaces")?}),
         )),
@@ -2566,7 +2708,8 @@ fn handle(state: &State, tool: &str, args: &Value, epoch: u64) -> R<Value> {
                 json!({"schema":1,"status":"cancel_acknowledged","epoch":next,"active_at_ack":active,"ack_ms":start.elapsed().as_secs_f64()*1000.0,"actor_fully_released":false,"note":"Epoch changed immediately. Active actor releases buttons and returns canceled; inspect desktop_status until active=null and actor_release_confirmed=true before assuming desktop is free. Already-dispatched effects cannot be rolled back."}),
             ))
         }
-        "desktop_resume" => {
+        "desktop_resume" | "desktop_resume_bound" => {
+            validate_resume_arguments(args)?;
             if !state
                 .active
                 .lock()
@@ -2600,47 +2743,62 @@ fn handle(state: &State, tool: &str, args: &Value, epoch: u64) -> R<Value> {
                     json!({"schema":1,"status":"already_resumed","epoch":state.epoch.load(Ordering::SeqCst),"input_generation":state.input_policy.generation(),"takeover_latched":false,"actor_release_confirmed":true,"input_permission_changed":false,"fresh_observation_required":false,"note":"No transition or cache invalidation performed. last_reason is history. Normal physical input still invalidates stale targets; obtain a fresh observation before dispatching."}),
                 ));
             }
-            // A fresh process has not yet observed a quiet interval. Missing
-            // evdev observation is a capability failure, never evidence of idle.
-            if state.started.elapsed() < Duration::from_millis(300) {
+            let readiness = resume_input_readiness(state)?;
+            if readiness["startup_quiet_interval_complete"] != true {
                 return Err("Backend startup quiet interval is not complete; wait at least300ms and inspect desktop_status before explicit resume".into());
             }
-            let monitor = state
-                .human_monitor
-                .lock()
-                .map_err(|_| "Human input monitor state poisoned")?;
-            if monitor["available"] != true
-                || monitor["status"] == "starting"
-                || monitor["watched_devices"].as_u64().unwrap_or(0) == 0
-            {
+            if readiness["monitor_ready"] != true {
                 return Err("Physical input monitor is not ready/available; takeover remains latched. Repair input observation before resuming desktop automation.".into());
             }
-            drop(monitor);
-            if !state.input_policy.controls_released() {
+            if readiness["controls_released"] != true {
                 return Err("Physical controls are still held or their state is uncertain; wait for release/monitor recovery before explicit resume".into());
             }
-            let last = state.last_human_ms.load(Ordering::SeqCst);
-            let now = state.started.elapsed().as_millis() as u64;
-            if last != 0 && now.saturating_sub(last) < 300 {
+            if readiness["recent_activity_quiet_interval_complete"] != true {
                 return Err("Physical human input is still recent; wait until desktop is idle before resuming".into());
             }
+            let expected_epoch = validate_resume_binding(state, args, epoch)?;
+            let last = readiness["last_activity_monotonic_ms"]
+                .as_u64()
+                .ok_or("Input readiness timestamp missing")?;
+            let generation = readiness["input_generation"]
+                .as_u64()
+                .ok_or("Input readiness generation missing")?;
             // Serialize marker deletion with physical-event persistence. The
             // explicit tool call must follow the user's return-of-control policy.
+            record(
+                state,
+                "resume_preparing",
+                json!({"expected_epoch":expected_epoch,"session_id":state.session_id}),
+            );
             let mut marker = state
                 .takeover_marker
                 .lock()
                 .map_err(|_| "Takeover marker state poisoned")?;
-            if state.last_human_ms.load(Ordering::SeqCst) != last {
+            validate_resume_binding(state, args, epoch)?;
+            if state.last_human_ms.load(Ordering::SeqCst) != last
+                || !state.input_policy.matches(generation)
+                || !state.input_policy.controls_released()
+            {
                 return Err(
                     "Physical input changed while preparing resume; takeover remains latched"
                         .into(),
                 );
             }
-            let next = state.epoch.fetch_add(1, Ordering::SeqCst) + 1;
+            let next = expected_epoch
+                .checked_add(1)
+                .ok_or("Resume epoch exhausted; refusal retained")?;
+            state
+                .epoch
+                .compare_exchange(expected_epoch, next, Ordering::SeqCst, Ordering::SeqCst)
+                .map_err(|_| "New stop/cancellation arrived while resuming; refusal retained")?;
             marker.clear()?;
             state.takeover.store(false, Ordering::SeqCst);
             if state.last_human_ms.load(Ordering::SeqCst) != last
+                || !state.input_policy.matches(generation)
+                || !state.input_policy.controls_released()
                 || state.epoch.load(Ordering::SeqCst) != next
+                || own_canceled()
+                || deadline_elapsed()
             {
                 state.takeover.store(true, Ordering::SeqCst);
                 if let Err(error) = marker.restore() {
@@ -2668,16 +2826,16 @@ fn tools() -> Value {
     let action = json!({"type":"object","properties":{"kind":{"type":"string","enum":["focus","move","click","scroll","drag","type","paste","key","semantic_set_value","semantic_click","wait"]},"window_id":{"type":"integer"},"x":{"type":"number"},"y":{"type":"number"},"to_x":{"type":"number"},"to_y":{"type":"number"},"button":{"type":"string","enum":["left","right","middle"]},"count":{"type":"integer"},"dx":{"type":"integer","minimum":-100,"maximum":100,"description":"Discrete wheel steps, not pixels. Positive moves right."},"dy":{"type":"integer","minimum":-100,"maximum":100,"description":"Discrete wheel steps, not pixels. Positive moves down."},"text":{"type":"string"},"handle_id":{"type":"string"},"action_name":{"type":"string"},"expected_text":{"type":"string"},"text_method":{"type":"string","enum":["auto","keyboard","clipboard"],"default":"auto"},"keys":{"type":"array","items":{"type":"string"}},"key_scope":{"type":"string","enum":["app","compositor"],"default":"app","description":"app uses Wayland; compositor explicitly uses owned uinput. Super/meta/logo always imply compositor. Does not translate or guess Niri bindings."},"ms":{"type":"integer"},"duration_ms":{"type":"integer"},"restore_clipboard":{"type":"boolean","default":true,"description":"Only valid for kind=paste. False intentionally replaces the previous selection; kind=type always preserves it. Fields invalid for the chosen action kind reject the whole batch before input."}},"required":["kind"]});
     let crop = json!({"type":"object","properties":{"x":{"type":"integer","minimum":0},"y":{"type":"integer","minimum":0},"width":{"type":"integer","minimum":1},"height":{"type":"integer","minimum":1}},"required":["x","y","width","height"]});
     let mut catalog = json!([
-      {"name":"desktop_status","description":"Persistent Niri desktop actor status, active/preparing task, queued batches and cancel epoch. Advertises global_keyboard routing_revision=2 only when this software implements scoped owned-uinput routing; this is not a live device/UI-success attestation. Does not capture or act.","inputSchema":{"type":"object","properties":{}}},
+      {"name":"desktop_status","description":"Persistent Niri desktop actor status, active/preparing task, queued batches and cancel epoch. Reports independent capture attempt/failure evidence and shared resume_input_readiness; capture_available=false alone is not capture failure. Startup capture_not_attempted=true is expected. Readiness is only a snapshot, not user permission or actor release. Advertises global_keyboard routing_revision=2 only when this software implements scoped owned-uinput routing; this is not a live device/UI-success attestation. Does not capture or act.","inputSchema":{"type":"object","properties":{}}},
       {"name":"desktop_windows","description":"Read actual Niri windows, outputs and workspaces. Window layout may lack global app bounds; never invent bounds.","inputSchema":{"type":"object","properties":{}}},
-      {"name":"desktop_observe","description":"Capture one actual laptop output via grim at scale1, plus Niri identities. Optional crop uses full-output screenshot pixels x/y/width/height; action x/y then use local pixels of the displayed crop. Core translates crop origin; NEVER add compositor output origin. Actual PNG size can differ from Niri logical size by rounding. Observation expires in60seconds; identity/geometry and fresh target-region guards still run. Observe after focus/workspace/layout changes. include_image=false returns private PNG reference only.","inputSchema":{"type":"object","properties":{"output":{"type":"string"},"include_image":{"type":"boolean"},"crop":crop}}},
+      {"name":"desktop_observe","description":"Capture one actual laptop output via grim at scale1, plus Niri identities. Startup capture_not_attempted=true is expected and permits this first read-only observation. Input always requires accepted fresh observation and action_ready; prior successful capture is not a prerequisite for authorized startup resume. Optional crop uses full-output screenshot pixels x/y/width/height; action x/y then use local pixels of the displayed crop. Core translates crop origin; NEVER add compositor output origin. Actual PNG size can differ from Niri logical size by rounding. Observation expires in60seconds; identity/geometry and fresh target-region guards still run. Observe after focus/workspace/layout changes. include_image=false returns private PNG reference only.","inputSchema":{"type":"object","properties":{"output":{"type":"string"},"include_image":{"type":"boolean"},"crop":crop}}},
       {"name":"desktop_semantic","description":"Read fresh Cua AT-SPI elements for a Niri window. Maps only unique actual PID+title; synthetic Cua IDs are never guessed. Query filters returned elements. Accessibility bounds are app-local and NOT screenshot coordinates; do not directly click them without calibrated mapping. Limited/root-only trees require visual fallback.","inputSchema":{"type":"object","properties":{"window_id":{"type":"integer"},"query":{"type":"string"},"max_elements":{"type":"integer"},"max_depth":{"type":"integer"}},"required":["window_id"]}},
       {"name":"desktop_semantic_direct","description":"Read exact-window AT-SPI subtree with immutable direct object handles. Supplies role/label/description/parent/text excerpt/action_names. Only daemon-owned handles from complete snapshots may be used with desktop_act semantic_set_value or semantic_click. No raw object/index/Cua tokens and no pixel fallback. Native GTK candidates need live acceptance; missing/incomplete bridges use visual typed actions.","inputSchema":{"type":"object","properties":{"window_id":{"type":"integer"},"query":{"type":"string"},"max_elements":{"type":"integer"},"max_depth":{"type":"integer"}},"required":["window_id"]}},
       {"name":"desktop_act","description":"Single-writer typed desktop actions against fresh observation. Rejects changed focus/geometry/scaling or changed pixels near pointer targets. x/y are local to displayed screenshot/crop. Focus must be standalone. Unknown or misplaced fields for an action kind reject the whole batch before input; restore_clipboard belongs only to paste, while type always preserves the prior selection. By default observe_after=true returns a new after_observation ID and image in this same response after dispatch/release and a bounded80ms defaultsettle wait; settle_ms=0..1000 can adjust. Use it for the next act and inspect expected result. A slow/unchanged frame needs another observation/semantic check, not repetition of toggle input. include_image=false omits its image. Acknowledgement is not UI success. Type text_method=auto uses clipboard for known Electron IDs (code/T3) and >1000-character text, keyboard for shorter text in other apps; explicit keyboard/clipboard are available. Electron wtype Unicode is unreliable on this laptop. Clipboard preserves supported text/rich app payloads and original Chromium provenance in bounded RAM from one offer, normalizes duplicate MIME names, omits SAVE_TARGETS and SAME_APP GTK_TEXT_BUFFER_CONTENTS transport markers, preserves serialized GTK rich text, and keeps a separate source holder across actor restarts. Unsupported/sensitive/oversized formats refuse before replacement. Own-source check runs after layout/keymap/window validation and before the first paste modifier press; ownership can still change between reply and input because Wayland has no atomic selection-check-and-paste. No restore after takeover/cancel/ownership loss. Scroll dx/dy are discrete wheel steps (integer -100..100), not pixels; positive dx moves right and positive dy moves down. Smooth-scroll animation needs another fresh observation/settle check before reusing visual targets. Keys are modifiers first e.g.[ctrl,l],[Return]. Explicit key_scope=compositor and Super/meta/logo chords use an owned persistent direct-uinput device because this Niri25.11 Wayland virtual keyboard bypasses compositor bindings; Ctrl/app chords retain the Wayland transport. A fresh proxy check requires backend routing_revision=2 and binds session/epoch/observation before forwarding a global batch; an older backend is refused. Missing permission/takeover monitor/compositor device-open evidence refuses the complete batch before input. Creating the own device is a capability side effect. A kernel input acknowledgement does not verify Niri/UI acceptance; inspect the fresh result. No automatic input fallback. Direct semantic_set_value(handle_id,text,expected_text optional) replaces exact editable contents; semantic_click(handle_id,action_name from direct tree) invokes only AT-SPI named action. Both freshly revalidate context and have no input fallback. Batch stable edits/shortcuts when intermediate states cannot invalidate later targets; changed-target actions need fresh observation.","inputSchema":{"type":"object","properties":{"observation_id":{"type":"string"},"window_id":{"type":"integer"},"task_id":{"type":"string"},"timeout_ms":{"type":"integer","minimum":100,"maximum":120000,"description":"Whole batch budget including queue, validation, capture, input and post-observe. Bounded release cleanup follows even after timeout."},"observe_after":{"type":"boolean","default":true},"include_image":{"type":"boolean","default":true},"settle_ms":{"type":"integer","default":80,"minimum":0,"maximum":1000,"description":"Bounded post-action settle wait before capture; not a proof of repaint. Slow conditions require fresh observations, never repeated blind input."},"actions":{"type":"array","items":action,"minItems":1,"maxItems":32}},"required":["observation_id","actions"]}},
       {"name":"desktop_cancel","description":"Priority epoch cancellation independent of actor lock. Pending batches stop; held buttons release. Already-dispatched effects remain. Wait for desktop_status active=null and actor_release_confirmed=true for full release.","inputSchema":{"type":"object","properties":{}}},
       {"name":"desktop_takeover","description":"Explicit human desktop takeover, persists its cause across backend restarts and latches refusal of future actions and cancels queued/active automation. Only a physical Escape press does this automatically when accessible; ordinary input invalidates stale observations and releases a conflicting batch without latching takeover. Wait active=null and actor_release_confirmed=true for full release. desktop_resume then fresh observation is required.","inputSchema":{"type":"object","properties":{}}},
       {"name":"desktop_recover_release","description":"Explicit bounded recovery of unconfirmed release/receipt on existing owned actuators only. Refuses if writer busy, active task or queue nonempty. Sends only releases of owned held buttons/keys and receipt sync, no press/move/device creation/action replay, no epoch/latch/cause reset, no automatic resume. May finalize effects of already-held input. Default1500ms, maximum2000ms shared budget. Failure remains unconfirmed; original last_result preserved. Success invalidates old observations/semantic handles and requires fresh capture; inspect status queue and follow human return-of-control policy before resume.","inputSchema":{"type":"object","properties":{"timeout_ms":{"type":"integer","minimum":200,"maximum":2000,"default":1500}},"additionalProperties":false}},
-      {"name":"desktop_resume","description":"Backend startup is always latched and preserves any prior human/explicit cause. Explicitly release an active takeover latch only after the user returns control, actor stopped, queue empty and physical input idle. Do not automatically undo human takeover. A true transition invalidates older observations; observe again before acting. If already unlatched with idle/released actor and empty queue, returns already_resumed without epoch/generation/cache changes or physical quiet checks. takeover_persistence.last_reason is historical; reason is null when marker_active=false.","inputSchema":{"type":"object","properties":{}}}
+      {"name":"desktop_resume","description":"Backend startup is always latched and preserves any prior human/explicit cause. An active transition requires expected_epoch=status.epoch and expected_session_id=status.session_id for the stop the user has authorized resuming (not its historical reason.session_id); the proxy requires backend resume_binding_revision=1 and uses a new internal bound wire method so an old replacement backend cannot ignore the fence fields. An idle/unlatched older backend may return only a read-only no-op snapshot, never receive an unbound resume; stale binding refuses, never blindly refresh/retry after a new real stop. Explicitly release only after the user returns control, actor stopped, queue empty and physical input idle. Controlled tests and explicit takeover calls cannot establish ownership of a human stop. No successful capture is needed before authorized startup resume; inspect resume_input_readiness, then obtain a fresh observation before input. Do not automatically undo human takeover. If already unlatched with idle/released actor and empty queue, empty arguments return already_resumed without epoch/generation/cache changes or quiet checks. last_reason is historical; reason is null when marker_active=false.","inputSchema":{"type":"object","properties":{"expected_epoch":{"type":"integer","minimum":1},"expected_session_id":{"type":"string","minLength":1}},"additionalProperties":false}}
     ]);
     // These hints describe desktop/app effects; private read caches do not
     // grant input. The managed client policy authorizes only this server.
@@ -2685,6 +2843,14 @@ fn tools() -> Value {
         .as_array_mut()
         .expect("Static MCP tool catalog is an array")
     {
+        if matches!(
+            tool["name"].as_str(),
+            Some("desktop_observe" | "desktop_act")
+        ) {
+            tool["inputSchema"]["properties"]["detailed"] = json!({"type":"boolean","default":false,"description":"MCP presentation only. True returns original full metadata; default abbreviates known static prose and display mode catalogs while retaining selected mode, all identities/layouts/capture/guards/effects/errors/timings. Images remain unchanged."});
+            let description = tool["description"].as_str().unwrap_or("");
+            tool["description"] = json!(format!("{description} MCP metadata is compact by default; detailed=true returns full original metadata. desktop_windows retains full display mode catalogs."));
+        }
         let (read_only, destructive, open_world) = match tool["name"].as_str() {
             Some("desktop_status") => (true, false, false),
             Some(
@@ -2802,6 +2968,27 @@ fn daemon_call_owned(
     args: &Value,
     cancel: Option<Arc<AtomicBool>>,
 ) -> R<Value> {
+    if tool == "desktop_resume" {
+        let status = daemon_call_transport(
+            socket,
+            "desktop_status",
+            &json!({}),
+            cancel.clone(),
+            Duration::from_secs(2),
+        )?;
+        if let Some(noop) = resume_proxy_preflight(args, &status)? {
+            return Ok(noop);
+        }
+        // A replacement old backend cannot ignore binding fields: it does not
+        // implement this new wire method and must refuse Unknown tool.
+        return daemon_call_transport(
+            socket,
+            "desktop_resume_bound",
+            args,
+            cancel,
+            Duration::from_secs(135),
+        );
+    }
     if proxy_needs_global_guard(tool, args)? {
         let started = Instant::now();
         let budget = Duration::from_millis(
@@ -2966,6 +3153,8 @@ fn serve(socket: &Path) -> R<()> {
         human_monitor: Mutex::new(json!({"available":false,"status":"starting"})),
         release_confirmed: AtomicBool::new(true),
         capture_available: AtomicBool::new(false),
+        capture_attempts: AtomicU64::new(0),
+        capture_failure: Mutex::new(None),
         active: Mutex::new(Value::Null),
         last_result: Mutex::new(Value::Null),
         observations: Mutex::new(HashMap::new()),
@@ -3105,12 +3294,12 @@ fn mcp(socket: &Path) -> R<()> {
                         "initialize" => Ok(json!({"protocolVersion":req["params"]["protocolVersion"].as_str().unwrap_or("2024-11-05"),"capabilities":{"tools":{"listChanged":false}},"serverInfo":{"name":"weasel-computer-use","version":"0.1.0"}})),
                         "ping" => Ok(json!({})),
                         "tools/list" => Ok(json!({"tools":tools()})),
-                        "tools/call" => daemon_call_owned(
-                            &path,
-                            req["params"]["name"].as_str().unwrap_or(""),
-                            req["params"].get("arguments").unwrap_or(&json!({})),
-                            cancel,
-                        ),
+                        "tools/call" => {
+                            let tool = req["params"]["name"].as_str().unwrap_or("");
+                            let arguments = req["params"].get("arguments").cloned().unwrap_or_else(|| json!({}));
+                            daemon_call_owned(&path, tool, &arguments, cancel)
+                                .map(|result| mcp_response::present(tool, &arguments, result))
+                        },
                         _ => Err(format!("Unsupported MCP method {method}")),
                     };
                     // Completion and cancellation lookup share ONE lock. Keep
@@ -3217,6 +3406,8 @@ mod regression {
             human_monitor: Mutex::new(Value::Null),
             release_confirmed: AtomicBool::new(true),
             capture_available: AtomicBool::new(false),
+            capture_attempts: AtomicU64::new(0),
+            capture_failure: Mutex::new(None),
             active: Mutex::new(Value::Null),
             last_result: Mutex::new(Value::Null),
             observations: Mutex::new(HashMap::new()),
@@ -3254,7 +3445,13 @@ mod regression {
             .unwrap_err()
             .contains("not confirmed"));
         state.release_confirmed.store(true, Ordering::SeqCst);
-        let resumed = handle(&state, "desktop_resume", &json!({}), 1).unwrap();
+        let resumed = handle(
+            &state,
+            "desktop_resume",
+            &json!({"expected_epoch":1,"expected_session_id":state.session_id}),
+            1,
+        )
+        .unwrap();
         let data: Value =
             serde_json::from_str(resumed["content"][0]["text"].as_str().unwrap()).unwrap();
         assert_eq!(data["status"], "resumed");
@@ -3306,6 +3503,8 @@ mod regression {
             human_monitor: Mutex::new(Value::Null),
             release_confirmed: AtomicBool::new(true),
             capture_available: AtomicBool::new(false),
+            capture_attempts: AtomicU64::new(0),
+            capture_failure: Mutex::new(None),
             active: Mutex::new(Value::Null),
             last_result: Mutex::new(Value::Null),
             observations: Mutex::new(HashMap::new()),
@@ -3644,6 +3843,10 @@ mod global_routing_regression {
                         let req: Value = serde_json::from_str(&line).unwrap();
                         let response = if req["tool"] == "desktop_status" {
                             text_result(status.clone())
+                        } else if status["private_old_replacement"] == true
+                            && req["tool"] == "desktop_resume_bound"
+                        {
+                            error_result("Unknown tool desktop_resume_bound; old replacement fixture refused before transition".into())
                         } else {
                             text_result(json!({"status":"offline_fixture_ack"}))
                         };
@@ -3672,6 +3875,80 @@ mod global_routing_regression {
             requests
         });
         (socket, handle)
+    }
+
+    #[test]
+    fn r8_new_proxy_never_sends_true_resume_to_old_backend() {
+        let (socket, server) = fake_backend(
+            json!({"schema":1,"session_id":"old-backend","epoch":7,"takeover_latched":true,"active":null,"queued_batches":0,"actor_release_confirmed":true}),
+            false,
+        );
+        let error = daemon_call_owned(
+            &socket,
+            "desktop_resume",
+            &json!({"expected_epoch":7,"expected_session_id":"old-backend"}),
+            None,
+        )
+        .unwrap_err();
+        assert!(error.contains("resume binding revision1"));
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0]["tool"], "desktop_status");
+    }
+    #[test]
+    fn r8_old_unlatched_backend_resume_is_only_a_status_noop() {
+        let (socket, server) = fake_backend(
+            json!({"schema":1,"session_id":"old-idle-backend","epoch":7,"takeover_latched":false,"active":null,"queued_batches":0,"actor_release_confirmed":true}),
+            false,
+        );
+        let result = daemon_call_owned(&socket, "desktop_resume", &json!({}), None).unwrap();
+        let data: Value =
+            serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(data["status"], "already_resumed");
+        assert_eq!(data["resume_request_forwarded"], false);
+        assert_eq!(data["input_permission_changed"], false);
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0]["tool"], "desktop_status");
+    }
+    #[test]
+    fn r8_new_proxy_forwards_exact_binding_only_to_guarded_backend() {
+        let (socket, server) = fake_backend(
+            json!({"resume_binding_revision":1,"session_id":"new-backend","epoch":7,"takeover_latched":true}),
+            true,
+        );
+        let args = json!({"expected_epoch":7,"expected_session_id":"new-backend"});
+        daemon_call_owned(&socket, "desktop_resume", &args, None).unwrap();
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0]["tool"], "desktop_status");
+        assert_eq!(requests[1]["tool"], "desktop_resume_bound");
+        assert_eq!(
+            requests[1]["arguments"], args,
+            "never manufacture or refresh authorization binding"
+        );
+    }
+
+    #[test]
+    fn r8_wire_method_refuses_old_replacement_even_after_new_revision_preflight() {
+        let (socket, server) = fake_backend(
+            json!({"resume_binding_revision":1,"session_id":"new-at-preflight","epoch":7,"takeover_latched":true,"private_old_replacement":true}),
+            true,
+        );
+        let args = json!({"expected_epoch":7,"expected_session_id":"new-at-preflight"});
+        let result = daemon_call_owned(&socket, "desktop_resume", &args, None).unwrap();
+        assert_eq!(result["isError"], true);
+        assert!(result["content"][0]["text"]
+            .as_str()
+            .unwrap()
+            .contains("Unknown tool desktop_resume_bound"));
+        let requests = server.join().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[1]["tool"], "desktop_resume_bound");
+        assert!(
+            requests.iter().all(|r| r["tool"] != "desktop_resume"),
+            "old replacement must never receive the unbound effective method"
+        );
     }
     #[test]
     fn new_proxy_old_actor_refuses_entire_batch_before_any_act_request() {
@@ -3751,6 +4028,8 @@ mod release_recovery_tests {
                 human_monitor: Mutex::new(Value::Null),
                 release_confirmed: AtomicBool::new(false),
                 capture_available: AtomicBool::new(true),
+                capture_attempts: AtomicU64::new(0),
+                capture_failure: Mutex::new(None),
                 active: Mutex::new(Value::Null),
                 last_result: Mutex::new(
                     json!({"status":"failed","error":"original timeout preserved"}),
@@ -3972,6 +4251,297 @@ mod release_recovery_tests {
         assert_eq!(state.queued.load(Ordering::SeqCst), 0);
         fs::remove_dir_all(dir).unwrap();
     }
+
+    #[test]
+    fn r8_stale_resume_cannot_clear_a_new_real_escape_or_change_its_persisted_cause() {
+        let (mut state, dir) = fixture("r8-stale-resume");
+        state.started = Instant::now() - Duration::from_secs(2);
+        *state.human_monitor.lock().unwrap() = json!({"available":true,"watched_devices":1});
+        state.release_confirmed.store(true, Ordering::SeqCst);
+        let expected = state.epoch.load(Ordering::SeqCst);
+        physical_activity(&state, true, false);
+        state.last_human_ms.store(0, Ordering::SeqCst); // private elapsed-quiet fixture
+        let actual = state.epoch.load(Ordering::SeqCst);
+        let marker = fs::read(dir.join("takeover.json")).unwrap();
+        let error = handle(
+            &state,
+            "desktop_resume",
+            &json!({"expected_epoch":expected,"expected_session_id":state.session_id}),
+            actual,
+        )
+        .unwrap_err();
+        assert!(error.contains("resume") || error.contains("Resume"));
+        assert!(state.takeover.load(Ordering::SeqCst));
+        assert_eq!(state.epoch.load(Ordering::SeqCst), actual);
+        assert_eq!(fs::read(dir.join("takeover.json")).unwrap(), marker);
+        assert_eq!(
+            state.takeover_marker.lock().unwrap().reason.source,
+            "physical_escape"
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn r8_true_resume_requires_observed_binding_and_respects_scoped_cancel() {
+        let (mut state, dir) = fixture("r8-bound-resume");
+        state.started = Instant::now() - Duration::from_secs(2);
+        state.release_confirmed.store(true, Ordering::SeqCst);
+        *state.human_monitor.lock().unwrap() = json!({"available":true,"watched_devices":1});
+        let epoch = state.epoch.load(Ordering::SeqCst);
+        assert!(handle(&state, "desktop_resume", &json!({}), epoch).is_err());
+        assert!(handle(
+            &state,
+            "desktop_resume",
+            &json!({"expected_epoch":epoch,"expected_session_id":"other-backend"}),
+            epoch
+        )
+        .is_err());
+        let args = json!({"expected_epoch":epoch,"expected_session_id":state.session_id});
+        let flag = Arc::new(AtomicBool::new(true));
+        CURRENT_CANCEL_FLAG.with(|f| *f.borrow_mut() = Some(flag));
+        let canceled = handle(&state, "desktop_resume", &args, epoch);
+        CURRENT_CANCEL_FLAG.with(|f| *f.borrow_mut() = None);
+        assert!(canceled.unwrap_err().contains("canceled"));
+        assert!(state.takeover.load(Ordering::SeqCst));
+        assert_eq!(state.epoch.load(Ordering::SeqCst), epoch);
+        assert!(dir.join("takeover.json").exists());
+        let resumed = handle(&state, "desktop_resume", &args, epoch).unwrap();
+        assert_eq!(result_data(&resumed)["status"], "resumed");
+        assert!(!state.takeover.load(Ordering::SeqCst));
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn r8_resume_waiting_on_marker_cannot_erase_a_concurrent_real_escape() {
+        let (mut raw, dir) = fixture("r8-marker-race");
+        raw.started = Instant::now() - Duration::from_secs(2);
+        raw.release_confirmed.store(true, Ordering::SeqCst);
+        *raw.human_monitor.lock().unwrap() = json!({"available":true,"watched_devices":1});
+        let state = Arc::new(raw);
+        let epoch = state.epoch.load(Ordering::SeqCst);
+        let marker_guard = state.takeover_marker.lock().unwrap();
+        let worker = state.clone();
+        let resume = thread::spawn(move || {
+            handle(
+                &worker,
+                "desktop_resume",
+                &json!({"expected_epoch":epoch,"expected_session_id":worker.session_id}),
+                epoch,
+            )
+        });
+        let until = Instant::now() + Duration::from_secs(2);
+        while !fs::read_to_string(dir.join("events.jsonl"))
+            .unwrap()
+            .contains("resume_preparing")
+        {
+            assert!(
+                Instant::now() < until,
+                "resume did not reach the marker gate"
+            );
+            thread::sleep(Duration::from_millis(1));
+        }
+        let worker = state.clone();
+        let escape = thread::spawn(move || physical_activity(&worker, true, false));
+        while state.epoch.load(Ordering::SeqCst) == epoch {
+            assert!(
+                Instant::now() < until,
+                "Escape did not latch before marker persistence"
+            );
+            thread::sleep(Duration::from_millis(1));
+        }
+        drop(marker_guard);
+        assert!(resume.join().unwrap().is_err());
+        escape.join().unwrap();
+        assert!(state.takeover.load(Ordering::SeqCst));
+        assert_eq!(
+            state.epoch.load(Ordering::SeqCst),
+            epoch + 1,
+            "resume must not advance a newer stop epoch"
+        );
+        let marker = state.takeover_marker.lock().unwrap();
+        assert_eq!(marker.reason.source, "physical_escape");
+        assert_eq!(marker.reason.session_id, state.session_id);
+        assert!(!marker.reason.cause_id.is_empty());
+        assert_eq!(
+            serde_json::from_slice::<Value>(&fs::read(dir.join("takeover.json")).unwrap()).unwrap()
+                ["cause_id"],
+            marker.reason.cause_id
+        );
+        drop(marker);
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn r8_real_escape_cause_survives_actual_simulation_and_explicit_callers() {
+        let (state, dir) = cooperative_fixture("r8-caller-precedence");
+        physical_activity(&state, true, false);
+        let original = fs::read(dir.join("takeover.json")).unwrap();
+        let epoch = state.epoch.load(Ordering::SeqCst);
+        physical_activity(&state, true, true);
+        assert_eq!(fs::read(dir.join("takeover.json")).unwrap(), original);
+        assert!(state.epoch.load(Ordering::SeqCst) > epoch);
+        let current = state.epoch.load(Ordering::SeqCst);
+        handle(&state, "desktop_takeover", &json!({}), current).unwrap();
+        assert_eq!(fs::read(dir.join("takeover.json")).unwrap(), original);
+        assert!(state.takeover.load(Ordering::SeqCst));
+        assert_eq!(
+            state.takeover_marker.lock().unwrap().reason.source,
+            "physical_escape"
+        );
+        fs::remove_dir_all(dir).unwrap();
+        let (state, dir) = cooperative_fixture("r8-fresh-controlled-cause");
+        physical_activity(&state, true, true);
+        assert_eq!(
+            state.takeover_marker.lock().unwrap().reason.source,
+            "controlled_evdev_simulation"
+        );
+        assert!(state.takeover.load(Ordering::SeqCst));
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn r8_capture_status_distinguishes_unattempted_failure_and_invalidation_preserving_original_error(
+    ) {
+        let (state, dir) = fixture("r8-capture-state");
+        state.capture_available.store(false, Ordering::SeqCst);
+        let original = state.last_result.lock().unwrap().clone();
+        let initial = capture_status(&state).unwrap();
+        assert_eq!(initial["capture_state"], "not_attempted");
+        assert_eq!(initial["capture_not_attempted"], true);
+        assert_eq!(initial["capture_failed"], false);
+        state.capture_attempts.fetch_add(1, Ordering::SeqCst);
+        let epoch = state.epoch.load(Ordering::SeqCst);
+        let flag = Arc::new(AtomicBool::new(true));
+        CURRENT_CANCEL_FLAG.with(|f| *f.borrow_mut() = Some(flag));
+        capture_unavailable(&state, epoch, "scoped-cancel-is-not-capture-loss");
+        CURRENT_CANCEL_FLAG.with(|f| *f.borrow_mut() = None);
+        assert_eq!(capture_status(&state).unwrap()["capture_failed"], false);
+        assert_eq!(state.epoch.load(Ordering::SeqCst), epoch);
+        capture_unavailable(&state, epoch, "private-capture-failure");
+        let failed = capture_status(&state).unwrap();
+        assert_eq!(failed["capture_state"], "failed");
+        assert_eq!(failed["capture_not_attempted"], false);
+        assert_eq!(
+            failed["capture_failure_category"],
+            "private-capture-failure"
+        );
+        accept_capture(&state).unwrap();
+        assert_eq!(capture_status(&state).unwrap()["capture_state"], "ready");
+        assert_eq!(capture_status(&state).unwrap()["capture_failed"], false);
+        assert_eq!(
+            capture_status(&state).unwrap()["capture_failure_category"],
+            Value::Null
+        );
+        state.capture_available.store(false, Ordering::SeqCst); // existing recovery invalidation gate
+        let invalidated = capture_status(&state).unwrap();
+        assert_eq!(invalidated["capture_state"], "no_current_observation");
+        assert_eq!(invalidated["capture_failed"], false);
+        assert_eq!(invalidated["capture_not_attempted"], false);
+        assert_eq!(*state.last_result.lock().unwrap(), original);
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn r8_resume_readiness_uses_actual_quiet_monitor_and_known_released_controls_without_capture() {
+        let (mut state, dir) = fixture("r8-readiness");
+        state.capture_available.store(false, Ordering::SeqCst);
+        assert_eq!(resume_input_readiness(&state).unwrap()["ready"], false);
+        state.started = Instant::now() - Duration::from_secs(2);
+        *state.human_monitor.lock().unwrap() = json!({"available":true,"watched_devices":1});
+        let ready = resume_input_readiness(&state).unwrap();
+        assert_eq!(ready["ready"], true);
+        assert_eq!(ready["required_quiet_ms"], 300);
+        assert_eq!(ready["last_activity_age_ms"], Value::Null);
+        assert_eq!(ready["wait_remaining_ms"], 0);
+        state.input_policy.update_holds(1, true);
+        assert_eq!(resume_input_readiness(&state).unwrap()["ready"], false);
+        state.input_policy.update_holds(0, false);
+        assert_eq!(resume_input_readiness(&state).unwrap()["ready"], false);
+        state.input_policy.update_holds(0, true);
+        state
+            .last_human_ms
+            .store(state.started.elapsed().as_millis() as u64, Ordering::SeqCst);
+        let recent = resume_input_readiness(&state).unwrap();
+        assert_eq!(recent["recent_activity_quiet_interval_complete"], false);
+        assert!(recent["wait_remaining_ms"].as_u64().unwrap() > 0);
+        state.last_human_ms.store(
+            state.started.elapsed().as_millis() as u64 - 350,
+            Ordering::SeqCst,
+        );
+        assert_eq!(resume_input_readiness(&state).unwrap()["ready"], true);
+        state.release_confirmed.store(true, Ordering::SeqCst);
+        let epoch = state.epoch.load(Ordering::SeqCst);
+        let resumed = handle(
+            &state,
+            "desktop_resume",
+            &json!({"expected_epoch":epoch,"expected_session_id":state.session_id}),
+            epoch,
+        )
+        .unwrap();
+        assert_eq!(result_data(&resumed)["status"], "resumed");
+        assert!(
+            !state.capture_available.load(Ordering::SeqCst),
+            "resume must not create or attest capture"
+        );
+        assert!(handle(
+            &state,
+            "desktop_resume",
+            &json!({"expected_epoch":"bad"}),
+            epoch
+        )
+        .is_err());
+        assert!(handle(
+            &state,
+            "desktop_resume",
+            &json!({"unrecognized":true}),
+            epoch
+        )
+        .is_err());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn r8_capture_lifecycle_snapshots_cannot_mix_failure_with_success() {
+        let (state, dir) = cooperative_fixture("r8-capture-snapshot-race");
+        state.capture_attempts.store(1, Ordering::SeqCst);
+        let worker = state.clone();
+        let writer = thread::spawn(move || {
+            for _ in 0..128 {
+                let epoch = worker.epoch.load(Ordering::SeqCst);
+                capture_unavailable(&worker, epoch, "private-snapshot-failure");
+                accept_capture(&worker).unwrap();
+            }
+        });
+        for _ in 0..1024 {
+            let status = capture_status(&state).unwrap();
+            assert!(!(status["capture_available"] == true && status["capture_failed"] == true));
+            assert_eq!(status["capture_not_attempted"], false);
+        }
+        writer.join().unwrap();
+        assert_eq!(capture_status(&state).unwrap()["capture_state"], "ready");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn r8_bound_wire_method_is_internal_only_and_enforces_the_same_actor_binding() {
+        let (mut state, dir) = fixture("r8-wire-method");
+        state.started = Instant::now() - Duration::from_secs(2);
+        state.release_confirmed.store(true, Ordering::SeqCst);
+        *state.human_monitor.lock().unwrap() = json!({"available":true,"watched_devices":1});
+        assert!(tools()
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|t| t["name"] != "desktop_resume_bound"));
+        let epoch = state.epoch.load(Ordering::SeqCst);
+        assert!(handle(&state, "desktop_resume_bound", &json!({}), epoch).is_err());
+        assert!(state.takeover.load(Ordering::SeqCst));
+        let result = handle(
+            &state,
+            "desktop_resume_bound",
+            &json!({"expected_epoch":epoch,"expected_session_id":state.session_id}),
+            epoch,
+        )
+        .unwrap();
+        assert_eq!(result_data(&result)["status"], "resumed");
+        fs::remove_dir_all(dir).unwrap();
+    }
     #[test]
     fn cooperative_idle_activity_preserves_epoch_and_refuses_stale_batch_without_input() {
         let (state, dir) = cooperative_fixture("cooperative-stale");
@@ -4055,7 +4625,7 @@ mod release_recovery_tests {
         fs::remove_dir_all(dir).unwrap();
     }
     #[test]
-    fn cooperative_controlled_escape_has_separate_source_and_legacy_marker_is_preserved() {
+    fn cooperative_controlled_escape_preserves_prior_explicit_marker() {
         let (state, dir) = fixture("cooperative-simulation");
         let legacy = fs::read(dir.join("takeover.json")).unwrap();
         physical_activity(&state, false, false);
@@ -4064,8 +4634,9 @@ mod release_recovery_tests {
         physical_activity(&state, true, true);
         assert_eq!(
             state.takeover_marker.lock().unwrap().reason.source,
-            "controlled_evdev_simulation"
+            "explicit_desktop_takeover"
         );
+        assert_eq!(fs::read(dir.join("takeover.json")).unwrap(), legacy);
         fs::remove_dir_all(dir).unwrap();
     }
     #[test]
@@ -4231,7 +4802,13 @@ mod release_recovery_tests {
         assert_eq!(state.epoch.load(Ordering::SeqCst), 77);
         assert!(dir.join("takeover.json").exists());
         state.last_human_ms.store(0, Ordering::SeqCst);
-        let result = handle(&state, "desktop_resume", &json!({}), 77).unwrap();
+        let result = handle(
+            &state,
+            "desktop_resume",
+            &json!({"expected_epoch":77,"expected_session_id":state.session_id}),
+            77,
+        )
+        .unwrap();
         assert_eq!(result_data(&result)["status"], "resumed");
         assert_eq!(state.epoch.load(Ordering::SeqCst), 78);
         assert!(!state.takeover.load(Ordering::SeqCst));
@@ -4453,5 +5030,217 @@ mod release_recovery_tests {
             tool["inputSchema"]["properties"].as_object().unwrap().len(),
             1
         );
+    }
+
+    // Independent integration review: private fixtures only. This drives actual
+    // MCP classification, cancellation registry, proxy transport, daemon scope
+    // and resume handler. It does not start serve(), input, capture or apps.
+    #[test]
+    fn independent_r8_public_and_bound_resume_requests_receive_scoped_cancel_flags() {
+        use mcp_cancel_registry::{Registry, RequestKey, RequestKind};
+        for (n, name) in [(7001, "desktop_resume"), (7002, "desktop_resume_bound")] {
+            let request = json!({"method":"tools/call","params":{"name":name}});
+            let mut registry = Registry::new();
+            let flag = registry
+                .admit_then(
+                    RequestKey::Number(n),
+                    RequestKind::from_request(&request),
+                    |flag| flag,
+                )
+                .unwrap();
+            assert!(
+                flag.is_some(),
+                "{name} is an input-permission mutation and must receive scoped cancellation"
+            );
+            registry.cancel(RequestKey::Number(n));
+            assert!(flag.unwrap().load(Ordering::SeqCst));
+        }
+    }
+
+    #[test]
+    fn independent_r8_precancelled_resume_stops_before_proxy_socket_contact() {
+        use mcp_cancel_registry::{Registry, RequestKey, RequestKind};
+        let request = json!({"method":"tools/call","params":{"name":"desktop_resume"}});
+        let mut registry = Registry::new();
+        let key = RequestKey::Number(7003);
+        let cancel = registry
+            .admit_then(key.clone(), RequestKind::from_request(&request), |flag| {
+                flag
+            })
+            .unwrap();
+        registry.cancel(key);
+        let result = daemon_call_owned(
+            Path::new("/nonexistent-private-review-resume.sock"),
+            "desktop_resume",
+            &json!({"expected_epoch":7,"expected_session_id":"owned-fixture"}),
+            cancel,
+        );
+        assert!(
+            result.unwrap_err().contains("canceled before dispatch"),
+            "Canceled Resume must fail before any socket connection attempt"
+        );
+    }
+
+    #[test]
+    fn independent_r8_registry_cancel_reaches_proxy_disconnect_and_waiting_resume_marker() {
+        use mcp_cancel_registry::{Registry, RequestKey, RequestKind};
+        let (mut raw, dir) = fixture("r8-mcp-cancel");
+        raw.started = Instant::now() - Duration::from_secs(2);
+        raw.release_confirmed.store(true, Ordering::SeqCst);
+        *raw.human_monitor.lock().unwrap() = json!({"available":true,"watched_devices":1});
+        physical_activity(&raw, true, false); // private function fixture, no evdev
+        raw.last_human_ms.store(0, Ordering::SeqCst);
+        let state = Arc::new(raw);
+        let epoch = state.epoch.load(Ordering::SeqCst);
+        let args = json!({"expected_epoch":epoch,"expected_session_id":state.session_id});
+        let original_marker = fs::read(dir.join("takeover.json")).unwrap();
+        let marker_guard = state.takeover_marker.lock().unwrap();
+        let socket = dir.join("mock-actor.sock");
+        let listener = UnixListener::bind(&socket).unwrap();
+        listener.set_nonblocking(true).unwrap();
+        fn accept_private_mock(listener: &UnixListener) -> UnixStream {
+            let until = Instant::now() + Duration::from_secs(2);
+            loop {
+                match listener.accept() {
+                    Ok((stream, _)) => return stream,
+                    Err(e) if e.kind() == io::ErrorKind::WouldBlock => {
+                        assert!(
+                            Instant::now() < until,
+                            "private mock accept exceeded bounded deadline"
+                        );
+                        thread::sleep(Duration::from_millis(1));
+                    }
+                    Err(e) => panic!("private mock accept: {e}"),
+                }
+            }
+        }
+        let saw_disconnect = Arc::new(AtomicBool::new(false));
+        let daemon_scope_cancel = Arc::new(AtomicBool::new(false));
+        let (ready_tx, ready_rx) = std::sync::mpsc::channel();
+        let server_state = state.clone();
+        let server_disconnect = saw_disconnect.clone();
+        let server_cancel = daemon_scope_cancel.clone();
+        let server = thread::spawn(move || {
+            let mut requests = Vec::new();
+            let mut stream = accept_private_mock(&listener);
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let mut line = String::new();
+            BufReader::new(stream.try_clone().unwrap())
+                .read_line(&mut line)
+                .unwrap();
+            let status_request: Value = serde_json::from_str(&line).unwrap();
+            assert_eq!(status_request["tool"], "desktop_status");
+            requests.push(status_request);
+            writeln!(stream,"{}",text_result(json!({"resume_binding_revision":1,"session_id":server_state.session_id,"epoch":epoch,"takeover_latched":true}))).unwrap();
+            drop(stream);
+            let mut stream = accept_private_mock(&listener);
+            stream
+                .set_read_timeout(Some(Duration::from_secs(2)))
+                .unwrap();
+            let mut line = String::new();
+            BufReader::new(stream.try_clone().unwrap())
+                .read_line(&mut line)
+                .unwrap();
+            let bound_request: Value = serde_json::from_str(&line).unwrap();
+            assert_eq!(bound_request["tool"], "desktop_resume_bound");
+            requests.push(bound_request.clone());
+            // Same disconnect-to-thread-local cancellation binding as serve().
+            let watch = stream.try_clone().unwrap();
+            let watch_cancel = server_cancel.clone();
+            let watch_disconnect = server_disconnect.clone();
+            let done = Arc::new(AtomicBool::new(false));
+            let monitor_done = done.clone();
+            let monitor = thread::spawn(move || {
+                while !monitor_done.load(Ordering::SeqCst) {
+                    let mut fd = libc::pollfd {
+                        fd: watch.as_raw_fd(),
+                        events: libc::POLLRDHUP,
+                        revents: 0,
+                    };
+                    let status = unsafe { libc::poll(&mut fd, 1, 5) };
+                    if status > 0
+                        && fd.revents
+                            & (libc::POLLRDHUP | libc::POLLHUP | libc::POLLERR | libc::POLLNVAL)
+                            != 0
+                    {
+                        watch_disconnect.store(true, Ordering::SeqCst);
+                        watch_cancel.store(true, Ordering::SeqCst);
+                        break;
+                    }
+                    if status < 0 {
+                        watch_cancel.store(true, Ordering::SeqCst);
+                        break;
+                    }
+                }
+            });
+            CURRENT_CANCEL_FLAG.with(|f| *f.borrow_mut() = Some(server_cancel));
+            ready_tx.send(()).unwrap();
+            let handled = handle(
+                &server_state,
+                "desktop_resume_bound",
+                &bound_request["arguments"],
+                epoch,
+            );
+            CURRENT_CANCEL_FLAG.with(|f| *f.borrow_mut() = None);
+            done.store(true, Ordering::SeqCst);
+            monitor.join().unwrap();
+            let result = handled.clone().unwrap_or_else(error_result);
+            let _ = writeln!(stream, "{result}");
+            (requests, handled)
+        });
+        let request = json!({"method":"tools/call","params":{"name":"desktop_resume"}});
+        let mut registry = Registry::new();
+        let key = RequestKey::String("owned-resume-7004".into());
+        let proxy_cancel = registry
+            .admit_then(key.clone(), RequestKind::from_request(&request), |flag| {
+                flag
+            })
+            .unwrap();
+        let proxy_socket = socket.clone();
+        let client = thread::spawn(move || {
+            daemon_call_owned(&proxy_socket, "desktop_resume", &args, proxy_cancel)
+        });
+        ready_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+        let until = Instant::now() + Duration::from_secs(2);
+        while !fs::read_to_string(dir.join("events.jsonl"))
+            .unwrap()
+            .contains("resume_preparing")
+        {
+            assert!(
+                Instant::now() < until,
+                "Resume did not reach private marker gate"
+            );
+            thread::sleep(Duration::from_millis(1));
+        }
+        registry.cancel(key); // exact production notification routing target
+        let cancel_until = Instant::now() + Duration::from_millis(400);
+        while !daemon_scope_cancel.load(Ordering::SeqCst) && Instant::now() < cancel_until {
+            thread::sleep(Duration::from_millis(1));
+        }
+        drop(marker_guard);
+        let proxy_result = client.join().unwrap();
+        let (requests, daemon_result) = server.join().unwrap();
+        let retained = state.takeover.load(Ordering::SeqCst)
+            && fs::read(dir.join("takeover.json")).ok().as_deref()
+                == Some(original_marker.as_slice());
+        let disconnected = saw_disconnect.load(Ordering::SeqCst);
+        println!("independent MCP Resume cancel: requests={} proxy={:?} daemon={:?} disconnected={} marker_retained={}",requests.len(),proxy_result,daemon_result,disconnected,retained);
+        fs::remove_dir_all(dir).unwrap();
+        assert_eq!(requests.len(), 2, "one status and one bound request only");
+        assert!(
+            disconnected,
+            "MCP cancellation must close the owned still-connected Resume transport"
+        );
+        assert!(
+            proxy_result.is_err(),
+            "canceled proxy must not return successful Resume"
+        );
+        assert!(
+            daemon_result.is_err(),
+            "waiting Resume must recheck scoped cancellation before marker clear"
+        );
+        assert!(retained,"confirmed cancellation before marker transition must preserve exact active Escape cause");
     }
 }

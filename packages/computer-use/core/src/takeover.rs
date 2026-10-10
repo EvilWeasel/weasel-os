@@ -2,11 +2,24 @@
 //! when a previous marker is absent; resume is the only normal clear operation.
 use super::*;
 const MAX_MARKER: u64 = 16_384;
+static CAUSE_SERIAL: AtomicU64 = AtomicU64::new(1);
+fn source_priority(source: &str) -> Option<u8> {
+    match source {
+        "physical_escape" => Some(4),
+        "explicit_desktop_takeover" => Some(3),
+        "physical_input_activity" => Some(2),
+        "controlled_evdev_simulation" => Some(1),
+        "backend_startup" => Some(0),
+        _ => None,
+    }
+}
 #[derive(Clone, Deserialize, Serialize)]
 pub(super) struct Marker {
     schema: u8,
     pub source: String,
     pub session_id: String,
+    #[serde(default)]
+    pub cause_id: String,
     at_unix_ms: u128,
 }
 impl Marker {
@@ -15,6 +28,15 @@ impl Marker {
             schema: 1,
             source: source.into(),
             session_id: session_id.into(),
+            cause_id: format!(
+                "{}-{}-{}",
+                session_id,
+                SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap_or_default()
+                    .as_nanos(),
+                CAUSE_SERIAL.fetch_add(1, Ordering::SeqCst)
+            ),
             at_unix_ms: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
@@ -138,14 +160,24 @@ impl Latch {
         result
     }
     pub fn set(&mut self, source: &str, session_id: &str) -> R<bool> {
-        let changed = self.reason.source != source;
-        if !changed && self.marker_active && self.persistence_error.is_none() {
+        let incoming =
+            source_priority(source).ok_or("Unknown takeover source; existing refusal retained")?;
+        let current = source_priority(&self.reason.source)
+            .ok_or("Unknown active takeover source; existing refusal retained")?;
+        // Test/startup/legacy paths must not reinterpret a real active stop.
+        // Cleared historical causes have no priority over a genuinely new stop.
+        if self.marker_active && incoming < current {
+            if self.persistence_error.is_some() {
+                self.store()?;
+            }
             return Ok(false);
         }
+        // A new real Escape (including the same source) is a new stop, not an
+        // idempotent setter: retain its current event identity/session/time.
         self.reason = Marker::new(source, session_id);
+        self.marker_active = true; // current refusal remains visible on I/O error
         self.store()?;
-        self.marker_active = true;
-        Ok(changed)
+        Ok(true)
     }
     pub fn clear(&mut self) -> R<()> {
         validate_parent(&self.path)?;
@@ -163,16 +195,16 @@ impl Latch {
         Ok(())
     }
     pub fn restore(&mut self) -> R<()> {
-        self.store()?;
+        // A rollback I/O failure is still a current refusal, never history.
         self.marker_active = true;
-        Ok(())
+        self.store()
     }
     pub fn status(&self) -> Value {
         // A cleared cause is history, not a current refusal. Keep it available
         // for audit without inviting clients to treat it as an active latch.
         let reason = self.marker_active.then_some(&self.reason);
         let last_reason = (!self.marker_active).then_some(&self.reason);
-        json!({"reason":reason,"last_reason":last_reason,"marker_path":self.path,"marker_active":self.marker_active,"persistence_error":self.persistence_error,"backend_restart_requires_explicit_resume":true,"resume_policy":"Startup, physical Escape, explicit takeover and legacy persisted causes require user-authorized resume with actor released and physical input quiet. Ordinary activity never creates a marker. last_reason is historical and never authorizes or requires a transition."})
+        json!({"reason":reason,"last_reason":last_reason,"marker_path":self.path,"marker_active":self.marker_active,"persistence_error":self.persistence_error,"backend_restart_requires_explicit_resume":true,"cause_preservation":"Active physical Escape dominates explicit takeover, legacy, simulation and startup; active explicit takeover dominates legacy, simulation and startup. Each accepted new stop has a new cause identity. Cleared history never prevents a new stop.","resume_policy":"Startup, physical Escape, explicit takeover and legacy persisted causes require user-authorized resume with actor released and physical input quiet. Ordinary activity never creates a marker. last_reason is historical and never authorizes or requires a transition."})
     }
 }
 #[cfg(test)]
@@ -211,6 +243,132 @@ mod tests {
         assert_eq!(
             serde_json::from_slice::<Value>(&fs::read(&path).unwrap()).unwrap()["source"],
             "physical_input_activity"
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn r8_active_physical_escape_survives_lower_sources_and_new_escape_refreshes_identity() {
+        let dir = env::temp_dir().join(format!("weasel-r8-physical-{}", std::process::id()));
+        private_dir(&dir).unwrap();
+        let path = dir.join("takeover.json");
+        let mut latch = Latch::startup(path.clone(), "first-session").unwrap();
+        latch.set("physical_escape", "first-session").unwrap();
+        let original = fs::read(&path).unwrap();
+        for lower in [
+            "controlled_evdev_simulation",
+            "backend_startup",
+            "physical_input_activity",
+            "explicit_desktop_takeover",
+        ] {
+            assert!(
+                !latch.set(lower, "test-session").unwrap(),
+                "{lower} must not replace physical Escape"
+            );
+            assert_eq!(fs::read(&path).unwrap(), original, "{lower}");
+            assert_eq!(latch.status()["reason"]["source"], "physical_escape");
+        }
+        assert!(latch.set("physical_escape", "current-session").unwrap());
+        assert_eq!(latch.reason.session_id, "current-session");
+        let prior_cause = latch.reason.cause_id.clone();
+        assert!(latch.set("physical_escape", "current-session").unwrap());
+        assert_ne!(latch.reason.cause_id,prior_cause,"each real Escape must retain fresh event identity even in the same millisecond/session");
+        assert_ne!(fs::read(&path).unwrap(), original);
+        assert_eq!(
+            Latch::startup(path, "later-backend")
+                .unwrap()
+                .reason
+                .session_id,
+            "current-session"
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn r8_explicit_stop_survives_simulation_startup_legacy_but_clear_allows_a_new_cause() {
+        let dir = env::temp_dir().join(format!("weasel-r8-explicit-{}", std::process::id()));
+        private_dir(&dir).unwrap();
+        let path = dir.join("takeover.json");
+        let mut latch = Latch::startup(path.clone(), "explicit-session").unwrap();
+        latch
+            .set("explicit_desktop_takeover", "explicit-session")
+            .unwrap();
+        let original = fs::read(&path).unwrap();
+        for lower in [
+            "controlled_evdev_simulation",
+            "backend_startup",
+            "physical_input_activity",
+        ] {
+            assert!(!latch.set(lower, "test-session").unwrap());
+            assert_eq!(fs::read(&path).unwrap(), original);
+        }
+        latch.clear().unwrap();
+        latch
+            .set("controlled_evdev_simulation", "owned-test")
+            .unwrap();
+        assert_eq!(
+            latch.status()["reason"]["source"],
+            "controlled_evdev_simulation"
+        );
+        latch.set("physical_escape", "new-human-stop").unwrap();
+        assert_eq!(latch.reason.source, "physical_escape");
+        assert_eq!(latch.reason.session_id, "new-human-stop");
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn r8_failed_persistence_keeps_current_stop_visible_and_unknown_source_does_not_replace_it() {
+        let dir = env::temp_dir().join(format!("weasel-r8-store-failure-{}", std::process::id()));
+        private_dir(&dir).unwrap();
+        let mut latch = Latch::startup(dir.join("takeover.json"), "store-session").unwrap();
+        let original = fs::read(dir.join("takeover.json")).unwrap();
+        assert!(latch.set("unknown-test-source", "store-session").is_err());
+        assert_eq!(fs::read(dir.join("takeover.json")).unwrap(), original);
+        latch.clear().unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o750)).unwrap();
+        assert!(latch.set("physical_escape", "store-session").is_err());
+        assert_eq!(latch.status()["marker_active"], true);
+        assert_eq!(latch.status()["reason"]["source"], "physical_escape");
+        assert!(latch.persistence_error.is_some());
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(!latch
+            .set("controlled_evdev_simulation", "test-session")
+            .unwrap());
+        assert!(latch.persistence_error.is_none());
+        assert_eq!(
+            Latch::startup(dir.join("takeover.json"), "restart-session")
+                .unwrap()
+                .reason
+                .source,
+            "physical_escape"
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn r8_failed_rollback_retains_active_human_cause_against_a_later_low_source() {
+        let dir =
+            env::temp_dir().join(format!("weasel-r8-rollback-failure-{}", std::process::id()));
+        private_dir(&dir).unwrap();
+        let path = dir.join("takeover.json");
+        let mut latch = Latch::startup(path.clone(), "rollback-session").unwrap();
+        latch.set("physical_escape", "rollback-session").unwrap();
+        let cause = latch.reason.cause_id.clone();
+        latch.clear().unwrap();
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o750)).unwrap();
+        assert!(latch.restore().is_err());
+        assert_eq!(latch.status()["marker_active"], true);
+        assert_eq!(latch.status()["reason"]["source"], "physical_escape");
+        assert_eq!(latch.status()["last_reason"], Value::Null);
+        assert_eq!(latch.reason.cause_id, cause);
+        fs::set_permissions(&dir, fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(!latch
+            .set("controlled_evdev_simulation", "test-session")
+            .unwrap());
+        assert_eq!(latch.reason.cause_id, cause);
+        assert_eq!(latch.reason.source, "physical_escape");
+        assert_eq!(
+            Latch::startup(path, "new-backend").unwrap().reason.cause_id,
+            cause
         );
         fs::remove_dir_all(dir).unwrap();
     }

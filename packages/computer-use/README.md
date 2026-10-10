@@ -20,6 +20,10 @@ additive Codex MCP entry and the `niri-computer-use` skill. T3 and ordinary Code
 share the existing Codex home and the same single physical writer. Existing
 clients need their supported MCP reconnect or a fresh agent session after config
 changes. Source and service installation alone are not live acceptance.
+For task-owned Meld launches from T3, omit only the inherited `LD_LIBRARY_PATH`
+in that child process. The tested GI import otherwise loads conflicting T3 and
+Meld GLib/AT-SPI versions. Preserve graphical-session variables and rely on
+Meld's own package wrapper; actual window/edit/save verification remains required.
 
 T3 desktop execution defaults to one delegated GPT-6-luna Codex worker with
 medium reasoning; the parent conversation can retain its selected model.
@@ -60,6 +64,32 @@ unique session/observation ID, monotonic timing, actual PNG/crop dimensions,
 Niri identity, fractional output geometry and capabilities. Coordinates are local
 to the returned screenshot or crop. Cua bounds are not screenshot coordinates.
 
+Startup status distinguishes `capture_state: "not_attempted"` from a failed
+capture. `capture_available: false` by itself does not establish a failure or
+prevent an authorized startup resume. Inspect the current latch, actor release,
+queue and `resume_input_readiness`; readiness is advisory, not permission.
+An active `desktop_resume` requires `expected_epoch` and
+`expected_session_id` from the current backend status for the stop the user has
+authorized resuming. Do not use the historical cause's session or automatically
+refresh a stale binding after another stop. The proxy checks binding support
+and forwards a distinct bound wire method so an older replacement backend cannot
+ignore these fields. An idle, released, already-resumed actor permits a read-only
+no-op without changing the epoch or cached targets.
+Both action and resume MCP requests have request-scoped cancellation ownership.
+A cancellation can still arrive after a transition has completed; inspect fresh
+status rather than assuming reversal. Active physical Escape has priority over
+test, startup and explicit takeover markers, and every new accepted stop gets
+its own cause identity. A failed persistence or rollback remains a visible stop.
+
+For visual input, the skill treats images over 1200 pixels on either axis as
+overviews and requires a fresh crop no larger than 1200 pixels on either axis.
+Small or crowded targets also need crops. Ground points in the actual returned
+crop dimensions and view; do not infer a model's prepared image dimensions from
+monitor scale or a chat thumbnail. The actor checks freshness and nearby pixels,
+but cannot prove that an arbitrary point belongs to the named window when Niri
+does not provide absolute bounds. Check the new focus and intended UI effect;
+a wrong window requires a separate focus and fresh grounding before recovery.
+
 Input uses output-bound wlr virtual pointers and a canonical German Wayland
 keyboard for app shortcuts. Every app chord refreshes and acknowledges the keymap.
 `key` accepts `key_scope: "app" | "compositor"`, defaulting to `app`.
@@ -87,6 +117,13 @@ release cleanup retains its own bounded budget. Default post-action settle is
 `after_observation` and image may feed the next action directly. Changed or slow
 UI needs a bounded fresh result check rather than replaying toggle input.
 Effects, partial effects, release status and failures remain explicit.
+At the stdio MCP boundary, observation/action replies abbreviate exact known
+explanatory prose and replace valid display mode catalogs with the exact selected
+mode, original index and catalog fingerprint. All window identities, geometry,
+guards, effects, errors, timings and image bytes remain. Control fields precede
+large inventories in JSON text. `detailed: true` returns the original complete
+envelope; `desktop_windows` also retains full mode catalogs. Internal observations,
+actor state, event receipts and ordinary CLI replies are not projected.
 Fields must match the selected action kind. An unknown or misplaced field
 rejects the complete batch before input. In particular, `restore_clipboard`
 belongs to `paste`; `type` always requests preservation of the prior selection.

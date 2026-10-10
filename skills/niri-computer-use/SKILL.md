@@ -42,7 +42,14 @@ After a managed configuration change, prove the connection in a fresh ordinary
 agent session. If a tool is blocked by client approval policy, preserve global
 Codex settings and report/reconnect the specific integration.
 
-Start with `desktop_status`. Every backend start initially latches input, and a
+Start with `desktop_status`. Expected startup `capture_not_attempted=true` is
+not capture failure and does not block an already authorized startup resume.
+Use the shared `resume_input_readiness` for the backend's 300ms startup/recent
+activity checks, ready physical monitor and known released controls. It is a
+snapshot, not permission or actor release. A recorded `capture_failed` retains
+its category until a successful fresh observation; input remains blocked until
+that observation. Resume itself does not require a previous capture.
+Every backend start initially latches input, and a
 restart preserves any prior takeover cause. Inspect
 `takeover_persistence.reason.source`: for `backend_startup`, a current user
 request authorizing desktop work permits an explicit `desktop_resume` once the
@@ -61,6 +68,19 @@ Do not request another resume for an already resumed actor; ordinary recent
 input only requires fresh grounding and release, not permission or resume.
 A resume refusal requires bounded status checks or capability repair, and a
 successful resume always requires a fresh observation before input.
+For an active stop, pass `expected_epoch=status.epoch` and
+`expected_session_id=status.session_id` identifying the exact stop the user has
+authorized resuming. Use the current backend session, not the retained
+`takeover_persistence.reason.session_id` from a prior backend. The proxy requires
+`resume_binding_revision=1` before forwarding any transition; an older idle,
+unlatched backend can return only a read-only no-op snapshot. A stale
+binding means a new stop/cancellation or backend intervened: inspect its cause
+and honor the new return-of-control requirement, never refresh and retry
+blindly. Empty arguments are allowed only for the idempotent unlatched case.
+Active real Escape/explicit stop causes cannot be reclassified by controlled
+simulation, startup or legacy paths. An explicit takeover from a test shares
+the human takeover interface and has no proven task ownership; a later test
+resume must never clear a newer human stop.
 
 Read `desktop_windows` to identify the exact app instance by Niri ID, PID,
 app ID and contents. `desktop_observe` captures one named output and reports
@@ -68,9 +88,32 @@ actual image dimensions, fractional display geometry, focus and capabilities.
 Pointer coordinates are local to that screenshot, not global compositor
 coordinates. Niri may omit window bounds; never derive them from invented
 geometry or Cua's window-local accessibility frames.
-For small or crowded visual targets, obtain a targeted crop and use its local
-coordinates. A crop changes the coordinate frame; never reuse full-output
-coordinates in it. Reobserve after animation and focus changes.
+Use a complete direct semantic snapshot and an exact showing, enabled node
+with the required typed-action capability before choosing a visual click.
+A returned action name alone does not make a disabled node actionable.
+For visual targeting, treat a full-output image larger than 1200 pixels in
+either dimension as an overview. Before pointer input, capture a fresh region
+containing the target with both crop dimensions at most 1200 pixels; also crop
+small or crowded controls on smaller images. Select the region from visible
+pixels in the observation, not guessed absolute window bounds. If necessary,
+inspect overlapping smaller regions until the intended control is unambiguous.
+Read the returned crop's actual `capture.image_width`, `image_height` and
+`view`, and ground x/y in that exact crop. Do not estimate coordinates from a
+chat thumbnail, monitor resolution, fractional display scale or an assumed
+2048-pixel preview. If the client explicitly reports different prepared image
+dimensions, convert the visual point independently on each axis using
+x * capture.image_width / prepared_width and
+y * capture.image_height / prepared_height; never guess those prepared sizes.
+If the image is clipped, letterboxed or its mapping is unknown, obtain a smaller
+fresh crop instead. Send crop-local coordinates; the actor adds its origin.
+A crop changes the coordinate frame; never reuse full-output coordinates in it.
+Record observation ID, target identity, view dimensions and selected point in a
+compact action receipt. Verify the new focus and intended UI change after the
+click. `window_id` validates the focused instance, but cannot prove an arbitrary
+pixel belongs to it when Niri supplies no absolute window bounds. A different
+focused window is a wrong-target failure: stop the batch, inspect possible
+effects, then focus the intended instance separately and ground it afresh.
+Reobserve after animation, layout, modal and focus changes.
 
 `desktop_semantic` maps the Niri inventory identity to a fresh, unambiguous Cua
 entry and supports bounded queries. Its tree is application/PID scoped because
@@ -217,3 +260,12 @@ unit and `--property=ExitType=cgroup`) with absolute executable and explicit
 private profile/files. Verify actual PID/profile/window binding: single-instance
 apps may forward to an existing process. Do not stop shared apps or unrelated
 units. Prove continued GUI use from the next ordinary client session.
+
+T3's inherited `LD_LIBRARY_PATH` is for T3 itself. On the tested laptop it made
+Meld load two incompatible GLib/AT-SPI library sets and fail before opening a
+window. For an authorized task-owned Meld launch, remove only that variable
+from the child environment (`env -u LD_LIBRARY_PATH /run/current-system/sw/bin/meld
+OWN_FILE`); retain the graphical-session variables and let Meld's own wrapper
+select its libraries. A transient user service must likewise omit the inherited
+T3 library path. Do not change T3's or the user's global environment, and verify
+the actual new app/window and GUI result after launch.

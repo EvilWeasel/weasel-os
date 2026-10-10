@@ -40,7 +40,10 @@ impl RequestKind {
         match request["method"].as_str() {
             Some("initialize" | "ping" | "tools/list") => Self::Priority,
             Some("tools/call") => match request["params"]["name"].as_str() {
-                Some("desktop_act") => Self::Act,
+                // Resume changes input permission, so it needs the same scoped
+                // cancellation ownership as input. It must remain outside the
+                // degraded priority reserve, including the internal wire name.
+                Some("desktop_act" | "desktop_resume" | "desktop_resume_bound") => Self::Act,
                 Some(
                     "desktop_status"
                     | "desktop_cancel"
@@ -476,5 +479,75 @@ mod tests {
                 "no Act dispatch at cap"
             ))
             .is_err());
+    }
+
+    #[test]
+    fn independent_r8_resume_cancel_keeps_typed_ids_duplicates_and_late_isolation() {
+        for name in ["desktop_resume", "desktop_resume_bound"] {
+            let request = json!({"method":"tools/call","params":{"name":name}});
+            let kind = RequestKind::from_request(&request);
+            let mut registry = Registry::new();
+            let numeric = registry
+                .admit_then(key(70), kind, |flag| flag)
+                .unwrap()
+                .expect("Resume cancellation flag");
+            let string_key = RequestKey::String("70".into());
+            let string = registry
+                .admit_then(string_key.clone(), kind, |flag| flag)
+                .unwrap()
+                .expect("Resume cancellation flag");
+            registry.cancel(key(70));
+            assert!(numeric.load(Ordering::SeqCst));
+            assert!(!string.load(Ordering::SeqCst));
+            registry.finish(&key(70));
+            registry.cancel(key(70));
+            assert!(!string.load(Ordering::SeqCst));
+            assert_eq!(
+                registry.admit_then(key(70), kind, |_| ()),
+                Err(Refusal::Duplicate)
+            );
+            registry.cancel(string_key);
+            assert!(string.load(Ordering::SeqCst));
+        }
+    }
+    #[test]
+    fn independent_r8_resume_never_enters_degraded_priority_reserve() {
+        for name in ["desktop_resume", "desktop_resume_bound"] {
+            let request = json!({"method":"tools/call","params":{"name":name}});
+            let kind = RequestKind::from_request(&request);
+            let mut registry = Registry::with_limits(1, 1, 1);
+            registry.cancel(key(1));
+            let dispatched = Cell::new(false);
+            let result = registry.admit_then(key(2), kind, |_| dispatched.set(true));
+            assert_eq!(result, Err(Refusal::HistoryExhausted));
+            assert!(!dispatched.get());
+            assert!(registry
+                .admit_then(
+                    key(3),
+                    RequestKind::Priority,
+                    |flag| assert!(flag.is_none())
+                )
+                .is_ok());
+        }
+    }
+    #[test]
+    fn independent_r8_eof_cancels_own_pending_resumes_without_other_connection() {
+        for name in ["desktop_resume", "desktop_resume_bound"] {
+            let request = json!({"method":"tools/call","params":{"name":name}});
+            let kind = RequestKind::from_request(&request);
+            let mut own = Registry::new();
+            let mut other = Registry::new();
+            let a = own
+                .admit_then(key(1), kind, |flag| flag)
+                .unwrap()
+                .expect("Resume cancellation flag");
+            let b = other
+                .admit_then(key(1), kind, |flag| flag)
+                .unwrap()
+                .expect("Resume cancellation flag");
+            own.cancel_owned_pending();
+            assert!(a.load(Ordering::SeqCst));
+            assert!(!b.load(Ordering::SeqCst));
+        }
     }
 }
