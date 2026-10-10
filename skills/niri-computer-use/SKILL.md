@@ -136,6 +136,33 @@ targets. After an edit changes the semantic window context, read fresh semantics
 before a dependent Save-button action. Incomplete or unsupported trees require
 a deliberate visual route and fresh result verification. A failed action may
 already have effects; inspect its report instead of replaying it.
+
+To narrow the returned direct elements, pass `query` as a string alongside
+its required actual `window_id`, for example `query: "Save"` when that label
+was observed. The filter lowercases the query and each emitted node's JSON
+and performs a literal substring match across that JSON, including metadata.
+It is not a label-only, role-selector, fuzzy or regex query. Omitted or empty
+`query` returns all nodes from the captured subtree. Default traversal limits
+are 1000 nodes and depth 40; `max_elements` and `max_depth` are capped at those
+values. Filtering narrows returned elements, not traversal or visibility scope.
+
+The daemon builds the full snapshot and retains its handles before filtering.
+Inspect `niri_window_id`, PID/title, `semantic_scope`, `visibility_traversal`,
+`elements_complete`, `total_element_count` and `returned_element_count`.
+An empty filtered result means no substring match in that snapshot; it does
+not establish that the control is absent. Change the query or inspect the
+unfiltered snapshot without changing windows or treating a limited tree as
+complete. Filtering does not extend handle freshness or change action guards.
+
+Before acting, require `elements_complete=true`, the fresh intended window
+identity and a nonempty daemon handle for a showing, enabled node whose
+label/role/description match the task. For replacement also require
+`editable=true` and `capabilities.set_value=true`, with the complete prior-text
+precondition. For a named action require `capabilities.click=true` and choose
+an exact entry from `action_names`. A query match or role alone grants no
+capability. Inspect a fresh result after the action; dependent context changes
+still require fresh semantics. Use visual input when the bridge cannot supply
+a valid target, preserving the existing independent result checks.
 On the tested Zen 1.21.8b bridge, `SetTextContents` acknowledged a no-op.
 Use fresh named actions and guarded keyboard input for browser editing;
 an acknowledgement does not prove focus or text. If a named `activate` action

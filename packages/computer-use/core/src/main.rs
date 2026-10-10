@@ -2822,8 +2822,242 @@ fn handle(state: &State, tool: &str, args: &Value, epoch: u64) -> R<Value> {
     }
 }
 
+// Keep each tagged object aligned with Action's deny_unknown_fields contract.
+// The union stays small enough for the client's ordinary MCP schema budget.
+fn action_schema() -> Value {
+    fn variant(kind: &str, mut properties: Value, fields: &[&str]) -> Value {
+        properties["kind"] = json!({"type":"string","enum":[kind]});
+        let mut required = vec!["kind"];
+        required.extend_from_slice(fields);
+        json!({"type":"object","properties":properties,"required":required,"additionalProperties":false})
+    }
+    let number = json!({"type":"number"});
+    let string = json!({"type":"string"});
+    json!({"anyOf":[
+        variant("focus", json!({"window_id":{"type":"integer","minimum":0,"description":"Destination window ID belongs inside this standalone action."}}), &["window_id"]),
+        variant("move", json!({"x":number,"y":number}), &["x","y"]),
+        variant("click", json!({"x":number,"y":number,"button":{"type":["string","null"],"enum":["left","right","middle",null],"default":"left"},"count":{"type":["integer","null"],"minimum":1,"maximum":3,"default":1}}), &["x","y"]),
+        variant("scroll", json!({"x":number,"y":number,"dx":{"type":"integer","minimum":-100,"maximum":100,"default":0},"dy":{"type":"integer","minimum":-100,"maximum":100,"default":0}}), &["x","y"]),
+        variant("drag", json!({"x":number,"y":number,"to_x":number,"to_y":number,"duration_ms":{"type":["integer","null"],"minimum":50,"maximum":3000,"default":300}}), &["x","y","to_x","to_y"]),
+        variant("type", json!({"text":string,"text_method":{"type":"string","enum":["auto","keyboard","clipboard"],"default":"auto"}}), &["text"]),
+        variant("paste", json!({"text":string,"restore_clipboard":{"type":"boolean","default":true}}), &["text"]),
+        variant("key", json!({"keys":{"type":"array","items":{"type":"string"},"minItems":1,"maxItems":6,"description":"Modifiers first: [ctrl,l], [Return], [shift,Tab]. No window_id here."},"key_scope":{"type":"string","enum":["app","compositor"],"default":"app"}}), &["keys"]),
+        variant("semantic_set_value", json!({"handle_id":string,"text":string,"expected_text":{"type":["string","null"]}}), &["handle_id","text"]),
+        variant("semantic_click", json!({"handle_id":string,"action_name":string}), &["handle_id","action_name"]),
+        variant("wait", json!({"ms":{"type":"integer","minimum":0,"maximum":10000}}), &["ms"])
+    ]})
+}
+
+#[cfg(test)]
+mod action_schema_contract_tests {
+    use super::*;
+
+    fn variant(schema: &Value, kind: &str) -> Value {
+        schema["anyOf"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|v| v["properties"]["kind"]["enum"] == json!([kind]))
+            .unwrap()
+            .clone()
+    }
+
+    #[test]
+    fn variant_fields_and_required_members_match_actual_serde() {
+        let samples = [
+            (json!({"kind":"focus","window_id":261}), vec!["window_id"]),
+            (json!({"kind":"move","x":2.5,"y":3.0}), vec!["x", "y"]),
+            (
+                json!({"kind":"click","x":2.0,"y":3.0,"button":"right","count":2}),
+                vec!["x", "y"],
+            ),
+            (
+                json!({"kind":"scroll","x":2.0,"y":3.0,"dx":1,"dy":-1}),
+                vec!["x", "y"],
+            ),
+            (
+                json!({"kind":"drag","x":2.0,"y":3.0,"to_x":4.0,"to_y":5.0,"duration_ms":500}),
+                vec!["x", "y", "to_x", "to_y"],
+            ),
+            (
+                json!({"kind":"type","text":"äöüß 🦦\n","text_method":"clipboard"}),
+                vec!["text"],
+            ),
+            (
+                json!({"kind":"paste","text":"äöüß 🦦\n","restore_clipboard":false}),
+                vec!["text"],
+            ),
+            (
+                json!({"kind":"key","keys":["ctrl","l"],"key_scope":"app"}),
+                vec!["keys"],
+            ),
+            (
+                json!({"kind":"semantic_set_value","handle_id":"handle","text":"new","expected_text":"old"}),
+                vec!["handle_id", "text"],
+            ),
+            (
+                json!({"kind":"semantic_click","handle_id":"handle","action_name":"click"}),
+                vec!["handle_id", "action_name"],
+            ),
+            (json!({"kind":"wait","ms":80}), vec!["ms"]),
+        ];
+        let schema = action_schema();
+        assert_eq!(schema["anyOf"].as_array().unwrap().len(), samples.len());
+        for (sample, required) in samples {
+            let parsed: Action = serde_json::from_value(sample.clone()).unwrap();
+            let branch = variant(&schema, parsed.name());
+            assert_eq!(branch["additionalProperties"], false);
+            assert_eq!(
+                branch["properties"]
+                    .as_object()
+                    .unwrap()
+                    .keys()
+                    .collect::<Vec<_>>(),
+                sample.as_object().unwrap().keys().collect::<Vec<_>>()
+            );
+            let mut all_required = vec!["kind"];
+            all_required.extend(required);
+            assert_eq!(branch["required"], json!(all_required));
+            for field in &all_required {
+                let mut missing = sample.clone();
+                missing.as_object_mut().unwrap().remove(*field);
+                assert!(serde_json::from_value::<Action>(missing).is_err());
+            }
+            let mut unknown = sample;
+            unknown["not_an_action_field"] = json!(true);
+            assert!(serde_json::from_value::<Action>(unknown).is_err());
+        }
+    }
+
+    #[test]
+    fn omitted_defaults_and_nullable_options_preserve_serde_contract() {
+        assert!(matches!(
+            serde_json::from_value::<Action>(json!({"kind":"type","text":""})).unwrap(),
+            Action::Type {
+                text_method: TextMethod::Auto,
+                ..
+            }
+        ));
+        assert!(matches!(
+            serde_json::from_value::<Action>(json!({"kind":"paste","text":""})).unwrap(),
+            Action::Paste {
+                restore_clipboard: true,
+                ..
+            }
+        ));
+        assert!(matches!(
+            serde_json::from_value::<Action>(json!({"kind":"key","keys":["Return"]})).unwrap(),
+            Action::Key {
+                key_scope: KeyScope::App,
+                ..
+            }
+        ));
+        assert!(matches!(
+            serde_json::from_value::<Action>(json!({"kind":"scroll","x":0,"y":0})).unwrap(),
+            Action::Scroll { dx: 0, dy: 0, .. }
+        ));
+        let schema = action_schema();
+        for (kind, field, sample, nullable_type) in [
+            (
+                "click",
+                "button",
+                json!({"kind":"click","x":0,"y":0,"button":null}),
+                "string",
+            ),
+            (
+                "click",
+                "count",
+                json!({"kind":"click","x":0,"y":0,"count":null}),
+                "integer",
+            ),
+            (
+                "drag",
+                "duration_ms",
+                json!({"kind":"drag","x":0,"y":0,"to_x":1,"to_y":1,"duration_ms":null}),
+                "integer",
+            ),
+            (
+                "semantic_set_value",
+                "expected_text",
+                json!({"kind":"semantic_set_value","handle_id":"h","text":"","expected_text":null}),
+                "string",
+            ),
+        ] {
+            assert!(serde_json::from_value::<Action>(sample).is_ok());
+            assert_eq!(
+                variant(&schema, kind)["properties"][field]["type"],
+                json!([nullable_type, "null"])
+            );
+        }
+        for sample in [
+            json!({"kind":"type","text":"","text_method":null}),
+            json!({"kind":"paste","text":"","restore_clipboard":null}),
+            json!({"kind":"key","keys":["Return"],"key_scope":null}),
+            json!({"kind":"scroll","x":0,"y":0,"dx":null}),
+        ] {
+            assert!(serde_json::from_value::<Action>(sample).is_err());
+        }
+        for key in ["Return", "ESC", "Control", "Page_Up", "ä"] {
+            assert!(keyboard::named_evdev(key).is_ok());
+        }
+        assert!(variant(&schema, "key")["properties"]["keys"]["items"]
+            .get("enum")
+            .is_none());
+    }
+
+    #[test]
+    fn original_r3_rejections_cannot_be_mistaken_for_valid_action_shapes() {
+        // Saved original positions47/66: top-level window_id never supplies a
+        // Focus action member and must not be copied into a Key action.
+        let mut focus =
+            json!({"observation_id":"obs-r3","window_id":261,"actions":[{"kind":"focus"}]});
+        let error = serde_json::from_value::<ActArgs>(focus.clone())
+            .err()
+            .expect("The saved malformed action must be rejected")
+            .to_string();
+        assert!(error.contains("missing field `window_id`"));
+        focus["actions"][0]["window_id"] = json!(261);
+        assert!(serde_json::from_value::<ActArgs>(focus).is_ok());
+        let mut key = json!({"observation_id":"obs-r3","window_id":262,"actions":[{"kind":"key","window_id":262,"keys":["ctrl","l"],"key_scope":"app"}]});
+        let error = serde_json::from_value::<ActArgs>(key.clone())
+            .err()
+            .expect("The saved malformed action must be rejected")
+            .to_string();
+        assert!(error.contains("unknown field `window_id`"));
+        key["actions"][0]
+            .as_object_mut()
+            .unwrap()
+            .remove("window_id");
+        assert!(serde_json::from_value::<ActArgs>(key).is_ok());
+        let schema = action_schema();
+        assert_eq!(
+            variant(&schema, "focus")["required"],
+            json!(["kind", "window_id"])
+        );
+        assert!(variant(&schema, "key")["properties"]
+            .get("window_id")
+            .is_none());
+    }
+
+    #[test]
+    fn published_union_stays_below_pinned_client_compaction_budget() {
+        let catalog = tools();
+        let tool = catalog
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|v| v["name"] == "desktop_act")
+            .unwrap();
+        assert_eq!(
+            tool["inputSchema"]["properties"]["actions"]["items"],
+            action_schema()
+        );
+        assert!(serde_json::to_vec(&tool["inputSchema"]).unwrap().len() < 5000);
+    }
+}
+
 fn tools() -> Value {
-    let action = json!({"type":"object","properties":{"kind":{"type":"string","enum":["focus","move","click","scroll","drag","type","paste","key","semantic_set_value","semantic_click","wait"]},"window_id":{"type":"integer"},"x":{"type":"number"},"y":{"type":"number"},"to_x":{"type":"number"},"to_y":{"type":"number"},"button":{"type":"string","enum":["left","right","middle"]},"count":{"type":"integer"},"dx":{"type":"integer","minimum":-100,"maximum":100,"description":"Discrete wheel steps, not pixels. Positive moves right."},"dy":{"type":"integer","minimum":-100,"maximum":100,"description":"Discrete wheel steps, not pixels. Positive moves down."},"text":{"type":"string"},"handle_id":{"type":"string"},"action_name":{"type":"string"},"expected_text":{"type":"string"},"text_method":{"type":"string","enum":["auto","keyboard","clipboard"],"default":"auto"},"keys":{"type":"array","items":{"type":"string"}},"key_scope":{"type":"string","enum":["app","compositor"],"default":"app","description":"app uses Wayland; compositor explicitly uses owned uinput. Super/meta/logo always imply compositor. Does not translate or guess Niri bindings."},"ms":{"type":"integer"},"duration_ms":{"type":"integer"},"restore_clipboard":{"type":"boolean","default":true,"description":"Only valid for kind=paste. False intentionally replaces the previous selection; kind=type always preserves it. Fields invalid for the chosen action kind reject the whole batch before input."}},"required":["kind"]});
+    let action = action_schema();
     let crop = json!({"type":"object","properties":{"x":{"type":"integer","minimum":0},"y":{"type":"integer","minimum":0},"width":{"type":"integer","minimum":1},"height":{"type":"integer","minimum":1}},"required":["x","y","width","height"]});
     let mut catalog = json!([
       {"name":"desktop_status","description":"Persistent Niri desktop actor status, active/preparing task, queued batches and cancel epoch. Reports independent capture attempt/failure evidence and shared resume_input_readiness; capture_available=false alone is not capture failure. Startup capture_not_attempted=true is expected. Readiness is only a snapshot, not user permission or actor release. Advertises global_keyboard routing_revision=2 only when this software implements scoped owned-uinput routing; this is not a live device/UI-success attestation. Does not capture or act.","inputSchema":{"type":"object","properties":{}}},
