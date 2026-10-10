@@ -4,6 +4,78 @@ Stand: 10. Oktober 2026. Host: `nixy-laptop`. Die Konfiguration liegt in
 `modules/storage-recovery.nix`, `modules/home-snapshots.nix` und
 `programs/cloud-backup.nix`; Backup-Ausnahmen in `config/backup-excludes.txt`.
 
+## Btrfs-Reserve und Projekt-Ausschlüsse
+
+Die vorbereitete Erweiterung liegt in `modules/btrfs-reserve.nix`,
+`programs/storage-health.nix` und den beiden `scripts/weasel-*.py`-Helfern.
+Stand dieser Änderung: im eigenen Worktree vorbereitet; während der laufenden
+26.05-Updateprüfung weder integriert noch aktiviert. Die folgenden Dienste sind
+erst nach der abgestimmten Integration und Aktivierung verfügbar.
+
+`weasel-btrfs-health` misst alle 15 Minuten getrennt Dateisystem-Freiraum,
+unzugewiesenen Geräteplatz, belegte Metadaten und temporäre Reservierungen.
+Reservierungen werden nicht als zusätzliche belegte Metadaten-Prozentzahl
+ausgegeben. Der lesbare Messbeleg liegt unter
+`/run/weasel-storage-health/status.json`; private Historie des letzten Laufs unter
+`/var/lib/weasel-storage-health/last.json`. Zwei aufeinanderfolgende kritische
+Messungen lösen die gedrosselte Benutzerbenachrichtigung aus. Der bekannte alte
+Minuten-Timer wird bei Home-Manager-Aktivierung deaktiviert, seine Dateien und
+der pausierte Factorio-Companion-Code bleiben erhalten.
+
+`weasel-btrfs-reserve` prüft stündlich: unter 15 GiB unzugewiesenem Platz beginnt
+eine kleine, datenbezogene Balance; ab 25 GiB wird beendet. Dies sind lokale
+Betriebswerte, keine Btrfs-Garantie. Zuerst werden leere Datenbereiche freigegeben,
+danach höchstens drei Durchläufe mit je acht schwach belegten Datenbereichen.
+Metadaten-DUP bleibt erhalten. Gerätefehler, weniger als 30 GiB freier Speicher,
+aktive Builds, eine bestehende Balance oder ein nicht abgeschlossener Update-
+oder Aktivierungsvorgang verhindern die Wartung. Ein laufendes Update hält
+denselben Aktivierungs-Lock. Einzelne Durchläufe haben ein Zeitlimit; bei dessen
+Überschreitung wird die selbst gestartete Kernel-Balance ausdrücklich abgebrochen.
+Ein Lauf kann deshalb unter dem Ziel bleiben und meldet seinen tatsächlichen
+Ausgang. Er löscht keine Dateien und vergrößert keine SSD.
+
+Home-Snapshots sind nicht rekursiv über verschachtelte Subvolumes. Deshalb
+bekommen **erkannte Buildverzeichnisse** eigene Subvolumes an ihrem bisherigen
+Pfad. Quellcode, `.git`, Saves, Testnachweise und Anwendungszustand bleiben in
+Home-Snapshots; die Restic-Backup-Ausnahmen gelten davon unabhängig.
+Keine allgemeinen Ausschlüsse von `build`, `dist`, `bin`, `obj`, `Documents`,
+`.t3`, `.local/state` oder ganzen Projekten.
+
+```bash
+weasel-btrfs-health check             # nur lesen, keine Zustandsdatei/Balance
+weasel-snapshot-excludes              # Inventar, keine Migration
+sudo weasel-snapshot-excludes --migrate /home/evilweasel/source/PROJEKT/node_modules
+```
+
+Migration erfolgt **erst nach Freigabe der laufenden Update-Transaktion**.
+Der Helfer prüft erkannte Manifest-/Cache-Merkmale, Git-verfolgte Dateien,
+Symlink-Komponenten, laufende Builds und offene Prozesszugriffe. Er kopiert per
+Reflink, prüft Inhalt per Rsync-Prüfsumme einschließlich Rechten, Hardlinks und
+erweiterten Attributen, erhält den Pfad und entfernt nur das danach verifizierte
+Duplikat. Private Phasenjournale unter
+`/var/lib/weasel-storage-health/migrations` erhalten Fehler/Abbrüche. Nach einem
+Abbruch die dort aufgezeichneten Original-/Zwischenpfade prüfen und erhalten;
+nicht blind neu ausführen oder pauschal Zwischenverzeichnisse löschen. Bereits
+migrierte Verzeichnisse werden im Inventar übersprungen.
+
+Wichtig für Recovery: In neuen Home-Snapshots erscheint ein ausgeschlossener
+Buildpfad leer. Beim Zurückrollen diese Subvolumes erhalten oder erneut am
+ursprünglichen Pfad bereitstellen. Alte Snapshots halten ihre alten Cache-Blöcke
+bis zur normalen Aufbewahrungsbereinigung fest; eine Migration schafft daher
+nicht sofort 12 GiB freien Platz. Ein Werkzeug, das den ganzen Cache-Ordner
+löscht und neu erstellt, kann die Subvolume-Grenze beseitigen. Nach `cargo clean`
+oder einer entsprechenden Neuinstallation erneut inventarisieren und einen
+gegebenenfalls normalen Ordner im ruhenden Zustand erneut migrieren.
+
+Die erste Bestandsaufnahme vom 10. Oktober 2026 ergab 24 erkannte Verzeichnisse
+mit nominell 12,37 GiB. Dies ist keine Messung exklusiv freigebbarer Bytes.
+Die großen Factorio-Akzeptanzartefakte und Computer-Use-Nachweise wurden nicht
+als Cache eingestuft. Home braucht für diese Änderung keine neuen Projektpfade
+und keine pauschale Neuorganisation.
+
+Grundlagen: [Btrfs Balance und ENOSPC](https://btrfs.readthedocs.io/en/latest/btrfs-balance.html#enospc)
+und [verschachtelte Subvolumes](https://btrfs.readthedocs.io/en/latest/btrfs-subvolume.html#nested-subvolumes).
+
 ## Warum die SSD voll war und was geändert wurde
 
 20 Home-Snapshots hielten viele inzwischen überschriebene oder gelöschte Daten

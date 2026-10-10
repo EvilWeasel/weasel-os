@@ -44,6 +44,9 @@ in
     after = [ "systemd-tmpfiles-setup.service" ];
     unitConfig.RequiresMountsFor = "/home";
     # The native timeline helper does not check FREE_LIMIT before creation.
-    serviceConfig.ExecCondition = spaceCheck;
+    serviceConfig.ExecCondition = "${pkgs.util-linux}/bin/flock --nonblock --conflict-exit-code 1 /var/lib/weasel-updates/activation.lock ${spaceCheck}";
+    # Coordinate scheduled snapshots with update/retention/cache migration.
+    # A busy lock is a clean skip; the next timer can retry normally.
+    serviceConfig.ExecStart = lib.mkForce "${pkgs.util-linux}/bin/flock --nonblock --conflict-exit-code 0 /var/lib/weasel-updates/activation.lock ${pkgs.snapper}/lib/snapper/systemd-helper --timeline";
   };
 }

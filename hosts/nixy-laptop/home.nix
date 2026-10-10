@@ -51,6 +51,7 @@ in
     ../../programs/vps-ssh.nix
     ../../programs/proton-infra-ssh.nix
     ../../programs/cloud-backup.nix
+    ../../programs/storage-health.nix
   ];
 
   home.packages = [

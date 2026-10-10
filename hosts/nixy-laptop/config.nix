@@ -12,6 +12,7 @@
     ../../profiles/system/laptop.nix
     ../../modules/home-snapshots.nix
     ../../modules/storage-recovery.nix
+    ../../modules/btrfs-reserve.nix
     ../../modules/daily-updates.nix
     ../../modules/wispr-flow.nix
     # ../../modules/networking/internal-dns.nix
