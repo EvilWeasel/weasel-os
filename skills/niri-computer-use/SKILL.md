@@ -86,6 +86,11 @@ resume must never clear a newer human stop.
 Read `desktop_windows` to identify the exact app instance by Niri ID, PID,
 app ID and contents. `desktop_observe` captures one named output and reports
 actual image dimensions, fractional display geometry, focus and capabilities.
+For an authorized app start, resolve its installed launcher from PATH and the
+user profile before declaring it missing. NixOS user applications can live in
+`/etc/profiles/per-user/<user>/bin` without a system-profile launcher. Verify
+the resolved program and use a disposable profile when required; a missing
+guessed path is not proof that the app is unavailable.
 Pointer coordinates are local to that screenshot, not global compositor
 coordinates. Niri may omit window bounds; never derive them from invented
 geometry or Cua's window-local accessibility frames.
@@ -131,6 +136,12 @@ excerpts. Descriptions can identify icon-only GTK toolbar controls. Its versione
 scope retains the selected root and SHOWING ancestor chains; hidden branches
 and their deeper descendants are omitted. Inspect the scope/pruning metadata.
 Visibility contradictions or unknown states make the snapshot read-only.
+Labels can remain readable during ordinary input or held controls. Treat
+`available`/`limited` as tree availability and inspect `input_ready`,
+`action_ready` and `fresh_semantic_snapshot_required_for_input` separately.
+Non-actionable snapshots deliberately issue no handles. After release, obtain
+a fresh complete semantic snapshot and current visual observation before acting;
+ordinary input does not require a resume. Escape and cancellation remain stops.
 Use only a complete snapshot and a showing, enabled node whose meaning matches the fresh
 UI. `semantic_set_value` replaces its complete editable buffer with a complete
 prior-text precondition; `semantic_click` invokes the node's exact named action.

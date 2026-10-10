@@ -1,10 +1,12 @@
 mod global_keyboard;
+mod image_reference;
 mod input_policy;
 mod mcp_cancel_registry;
 mod mcp_response;
 mod release_recovery;
 mod takeover;
 use base64::{engine::general_purpose::STANDARD, Engine};
+use image_reference::{Cache as ReferenceCache, Key as ReferenceKey, Pixels};
 use keyboard::Keyboard;
 use pointer::{Button, Pointer};
 use serde::{Deserialize, Serialize};
@@ -120,6 +122,7 @@ struct State {
     active: Mutex<Value>,
     last_result: Mutex<Value>,
     observations: Mutex<HashMap<String, Observation>>,
+    reference_cache: ReferenceCache,
     semantic_targets: Mutex<HashMap<String, SemanticTarget>>,
     actor: Mutex<Option<Pointer>>,
     keyboard: Mutex<Option<Keyboard>>,
@@ -320,6 +323,7 @@ fn physical_activity(state: &State, escape: bool, simulation: bool) {
     // A normal mouse/key event invalidates old targets and stops any batch bound
     // to that generation. It never cancels the whole task or persists takeover.
     state.input_policy.activity();
+    state.reference_cache.invalidate();
     if !escape {
         return;
     }
@@ -754,6 +758,7 @@ fn capture_unavailable(state: &State, epoch: u64, category: &str) {
             let _ = fs::remove_file(&obs.view_image);
         }
         saved.clear();
+        state.reference_cache.invalidate();
     }
     if let Ok(mut targets) = state.semantic_targets.lock() {
         targets.clear();
@@ -834,12 +839,6 @@ fn png_size(path: &Path) -> R<(u32, u32)> {
     ))
 }
 
-struct Pixels {
-    width: u32,
-    height: u32,
-    channels: usize,
-    bytes: Vec<u8>,
-}
 fn view_point(obs: &Observation, x: f64, y: f64) -> R<()> {
     if !x.is_finite()
         || !y.is_finite()
@@ -892,39 +891,46 @@ fn preflight(obs: &Observation, action: &Action) -> R<()> {
     Ok(())
 }
 fn png_pixels(path: &Path) -> R<Pixels> {
-    let file = fs::File::open(path).map_err(|e| format!("Guard image unavailable: {e}"))?;
-    let mut decoder = png::Decoder::new(BufReader::new(file));
-    decoder.set_transformations(png::Transformations::EXPAND | png::Transformations::STRIP_16);
-    let mut reader = decoder
-        .read_info()
-        .map_err(|e| format!("Guard PNG decode failed: {e}"))?;
-    let size = reader
-        .output_buffer_size()
-        .ok_or("Guard PNG size overflow")?;
-    if size > 128 * 1024 * 1024 {
-        return Err("Guard PNG exceeds 128MiB".into());
-    }
-    let mut bytes = vec![0; size];
-    let info = reader
-        .next_frame(&mut bytes)
-        .map_err(|e| format!("Guard PNG pixels unavailable: {e}"))?;
-    let channels = match info.color_type {
-        png::ColorType::Rgb => 3,
-        png::ColorType::Rgba => 4,
-        png::ColorType::Grayscale => 1,
-        png::ColorType::GrayscaleAlpha => 2,
-        _ => return Err("Unsupported guard PNG color type".into()),
-    };
-    bytes.truncate(info.buffer_size());
-    Ok(Pixels {
-        width: info.width,
-        height: info.height,
-        channels,
-        bytes,
-    })
+    image_reference::read_pixels(path)
+}
+fn reference_pixels(
+    state: &State,
+    id: &str,
+    image: &Path,
+    epoch: u64,
+    generation: u64,
+) -> R<Arc<Pixels>> {
+    state.reference_cache.pixels(
+        ReferenceKey {
+            session: state.session_id.clone(),
+            epoch,
+            input_generation: generation,
+            observation: id.into(),
+            path: image.into(),
+        },
+        || check_epoch(state, Some(epoch)),
+    )
 }
 
 fn visual_guard(state: &State, obs: &Observation, action: &Action, epoch: u64) -> R<Value> {
+    visual_guard_with_capture(state, obs, action, epoch, |path| {
+        capture(
+            state,
+            &obs.output,
+            path,
+            &obs.id,
+            Duration::from_secs(5),
+            epoch,
+        )
+    })
+}
+fn visual_guard_with_capture(
+    state: &State,
+    obs: &Observation,
+    action: &Action,
+    epoch: u64,
+    mut capture_current: impl FnMut(&Path) -> R<()>,
+) -> R<Value> {
     preflight(obs, action)?;
     let points = match action {
         Action::Click { x, y, .. } | Action::Scroll { x, y, .. } => vec![(*x, *y)],
@@ -935,23 +941,18 @@ fn visual_guard(state: &State, obs: &Observation, action: &Action, epoch: u64) -
     };
     let start = Instant::now();
     check_epoch(state, Some(epoch))?;
-    let prior = png_pixels(&obs.image).map_err(|_| {
-        capture_unavailable(state, epoch, "prior_image_unavailable");
-        "Prior capture artifact unavailable; fresh observation required".to_string()
-    })?;
+    let prior = reference_pixels(state, &obs.id, &obs.image, epoch, obs.input_generation).map_err(
+        |_| {
+            capture_unavailable(state, epoch, "prior_image_unavailable");
+            "Prior capture artifact unavailable; fresh observation required".to_string()
+        },
+    )?;
     let path = state.image_dir.join(format!(
         "guard-{}.png",
         state.serial.fetch_add(1, Ordering::SeqCst)
     ));
     let capture_start = Instant::now();
-    capture(
-        state,
-        &obs.output,
-        &path,
-        &obs.id,
-        Duration::from_secs(5),
-        epoch,
-    )?;
+    capture_current(&path)?;
     let capture_ms = capture_start.elapsed().as_secs_f64() * 1000.0;
     let current = png_pixels(&path);
     let _ = fs::remove_file(&path);
@@ -1015,8 +1016,7 @@ fn visual_guard(state: &State, obs: &Observation, action: &Action, epoch: u64) -
     Ok(result)
 }
 
-fn crop_png(source: &Path, destination: &Path, crop: &Crop) -> R<()> {
-    let pixels = png_pixels(source)?;
+fn crop_png(pixels: &Pixels, destination: &Path, crop: &Crop) -> R<()> {
     if crop.width == 0
         || crop.height == 0
         || crop
@@ -1147,7 +1147,8 @@ fn observe_inner(state: &State, args: &Value, actor_held: bool) -> R<Value> {
     };
     let view_image = if args["crop"].is_object() {
         let path = state.image_dir.join(format!("{id}-crop.png"));
-        crop_png(&image, &path, &view)?;
+        let pixels = reference_pixels(state, &id, &image, epoch, input_generation)?;
+        crop_png(&pixels, &path, &view)?;
         path
     } else {
         image.clone()
@@ -1195,6 +1196,7 @@ fn observe_inner(state: &State, args: &Value, actor_held: bool) -> R<Value> {
     if saved.len() >= 64 {
         if let Some(old) = saved.values().min_by_key(|o| o.at).map(|o| o.id.clone()) {
             if let Some(o) = saved.remove(&old) {
+                state.reference_cache.evict(&o.id);
                 let _ = fs::remove_file(o.image);
                 let _ = fs::remove_file(o.view_image);
             }
@@ -1872,7 +1874,7 @@ fn execute(
 }
 
 fn act(state: &State, args: &Value, epoch: u64) -> R<Value> {
-    match act_inner(state, args, epoch) {
+    let result = match act_inner(state, args, epoch) {
         // Generation failures that happen before the active writer is installed
         // have no dispatched effects. In-flight conflicts are reported by the
         // inner batch together with its actual effects and release receipt.
@@ -1888,7 +1890,11 @@ fn act(state: &State, args: &Value, epoch: u64) -> R<Value> {
             Ok(result)
         }
         result => result,
+    };
+    if own_canceled() || deadline_elapsed() {
+        state.reference_cache.invalidate();
     }
+    result
 }
 
 fn act_inner(state: &State, args: &Value, epoch: u64) -> R<Value> {
@@ -2360,7 +2366,48 @@ fn semantic_direct(state: &State, args: &Value) -> R<Value> {
         return Err("Niri target changed during semantic capture; reobserve".into());
     }
     check_epoch(state, Some(epoch))?;
-    state.input_policy.check(input_generation)?;
+    semantic_snapshot_result(
+        state,
+        args,
+        window,
+        snapshot,
+        epoch,
+        input_generation,
+        started,
+    )
+}
+
+fn semantic_input_readiness(state: &State, input_generation: u64, complete: bool) -> Value {
+    let mut readiness = observation_input_readiness(state, input_generation);
+    let activity = readiness
+        .as_object_mut()
+        .unwrap()
+        .remove("input_activity_during_capture")
+        .unwrap();
+    readiness["input_activity_during_snapshot"] = activity;
+    let actionable = complete && readiness["action_ready"] == true;
+    readiness["action_ready"] = json!(actionable);
+    readiness["fresh_semantic_snapshot_required_for_input"] = json!(!actionable);
+    readiness["note"] = json!("Semantic labels remain readable during ordinary input/holds. Readiness is advisory, not input permission. Non-actionable or incomplete snapshots issue no handles; semantic input requires a new complete snapshot with released controls and unchanged original generation.");
+    readiness
+}
+
+fn semantic_snapshot_result(
+    state: &State,
+    args: &Value,
+    window: Value,
+    snapshot: atspi::Snapshot,
+    epoch: u64,
+    input_generation: u64,
+    started: Instant,
+) -> R<Value> {
+    let id = window["id"]
+        .as_u64()
+        .ok_or("Semantic target has no Niri ID")?;
+    let pid = window["pid"].as_u64().ok_or("Semantic target has no PID")?;
+    let title = window["title"].as_str().unwrap_or("");
+    check_epoch(state, Some(epoch))?;
+    let initial_readiness = semantic_input_readiness(state, input_generation, snapshot.complete);
     let snapshot = Arc::new(snapshot);
     let snapshot_id = format!(
         "ax-snapshot-{}-{}",
@@ -2370,7 +2417,7 @@ fn semantic_direct(state: &State, args: &Value) -> R<Value> {
     let handles: HashMap<atspi::Object, String> = snapshot
         .nodes
         .iter()
-        .filter(|n| !n.protected && snapshot.complete)
+        .filter(|n| !n.protected && initial_readiness["action_ready"] == true)
         .map(|n| {
             (
                 n.object.clone(),
@@ -2386,11 +2433,13 @@ fn semantic_direct(state: &State, args: &Value) -> R<Value> {
         .semantic_targets
         .lock()
         .map_err(|_| "Semantic handle cache poisoned")?;
-    cache.retain(|_, t| {
-        t.epoch == epoch && t.input_generation == input_generation && t.at.elapsed() < MAX_AGE
-    });
-    if cache.len() + handles.len() > 2048 {
-        cache.clear();
+    if !handles.is_empty() {
+        cache.retain(|_, t| {
+            t.epoch == epoch && t.input_generation == input_generation && t.at.elapsed() < MAX_AGE
+        });
+        if cache.len() + handles.len() > 2048 {
+            cache.clear();
+        }
     }
     let mut elements = Vec::new();
     for node in &snapshot.nodes {
@@ -2423,9 +2472,61 @@ fn semantic_direct(state: &State, args: &Value) -> R<Value> {
         let query = query.to_lowercase();
         elements.retain(|n| n.to_string().to_lowercase().contains(&query));
     }
+    let readiness = finalize_semantic_handles(
+        state,
+        epoch,
+        input_generation,
+        snapshot.complete,
+        initial_readiness["action_ready"] == true,
+        &handles,
+        &mut cache,
+        &mut elements,
+    )?;
     Ok(text_result(
-        json!({"schema":1,"status":if snapshot.complete{"available"}else{"limited"},"niri_window_id":id,"epoch":epoch,"input_generation":input_generation,"pid":pid,"title":title,"semantic_snapshot_id":snapshot_id,"elements_complete":snapshot.complete,"returned_element_count":elements.len(),"total_element_count":snapshot.nodes.len(),"elements":elements,"semantic_scope":snapshot.semantic_scope,"visibility_traversal":snapshot.visibility_traversal,"coordinate_frame":"No pixel bounds exported; direct typed actions use daemon-owned opaque handles only. Cua tokens and raw D-Bus paths are not accepted.","expires_after_ms":60000,"note":"Mutations freshly validate immutable bus generation/unique owner, object role/name/description/interfaces, observed ancestry, the defined SHOWING-ancestor-chain semantic context, enabled/showing state and modal set. Incomplete snapshots are read-only. set_value requires expected complete prior text or a complete matching512char excerpt; exact saved artifact remains independently verified.","latency_ms":started.elapsed().as_secs_f64()*1000.0}),
+        json!({"schema":1,"status":if snapshot.complete{"available"}else{"limited"},"niri_window_id":id,"epoch":epoch,"input_generation":input_generation,"current_input_generation":readiness["current_input_generation"],"input_ready":readiness["input_ready"],"action_ready":readiness["action_ready"],"input_activity_during_snapshot":readiness["input_activity_during_snapshot"],"fresh_observation_required_for_input":readiness["fresh_observation_required_for_input"],"fresh_semantic_snapshot_required_for_input":readiness["fresh_semantic_snapshot_required_for_input"],"takeover_latched":readiness["takeover_latched"],"input_readiness":readiness,"pid":pid,"title":title,"semantic_snapshot_id":snapshot_id,"elements_complete":snapshot.complete,"returned_element_count":elements.len(),"total_element_count":snapshot.nodes.len(),"elements":elements,"semantic_scope":snapshot.semantic_scope,"visibility_traversal":snapshot.visibility_traversal,"coordinate_frame":"No pixel bounds exported; direct typed actions use daemon-owned opaque handles only. Cua tokens and raw D-Bus paths are not accepted.","expires_after_ms":60000,"note":"Labels remain readable during ordinary input or held controls. Non-actionable or incomplete snapshots issue no handles; obtain a fresh complete semantic snapshot after controls are released. Mutations freshly validate original input generation, immutable bus generation/unique owner, object role/name/description/interfaces, observed ancestry, the defined SHOWING-ancestor-chain semantic context, enabled/showing state and modal set. set_value requires expected complete prior text or a complete matching512char excerpt; exact saved artifact remains independently verified.","latency_ms":started.elapsed().as_secs_f64()*1000.0}),
     ))
+}
+
+// A collision while rendering must not publish newly actionable handles.
+// This boundary removes only this snapshot's entries; later input still has
+// every original action generation/epoch/window/AT-SPI check.
+fn finalize_semantic_handles(
+    state: &State,
+    epoch: u64,
+    input_generation: u64,
+    complete: bool,
+    initial_action_ready: bool,
+    handles: &HashMap<atspi::Object, String>,
+    cache: &mut HashMap<String, SemanticTarget>,
+    elements: &mut [Value],
+) -> R<Value> {
+    let publication = (|| {
+        check_epoch(state, Some(epoch))?;
+        let mut readiness = semantic_input_readiness(state, input_generation, complete);
+        if !initial_action_ready {
+            readiness["action_ready"] = json!(false);
+            readiness["fresh_semantic_snapshot_required_for_input"] = json!(true);
+        }
+        if readiness["action_ready"] != true {
+            for handle in handles.values() {
+                cache.remove(handle);
+            }
+            for element in elements.iter_mut() {
+                element["handle_id"] = Value::Null;
+                element["parent_handle_id"] = Value::Null;
+                element["capabilities"]["set_value"] = json!(false);
+                element["capabilities"]["click"] = json!(false);
+            }
+        }
+        check_epoch(state, Some(epoch))?;
+        Ok(readiness)
+    })();
+    if publication.is_err() {
+        for handle in handles.values() {
+            cache.remove(handle);
+        }
+    }
+    publication
 }
 
 fn validate_retained_observation(state: &State, obs: &Observation) -> R<()> {
@@ -2533,6 +2634,7 @@ fn recover_release(state: &State, args: &Value) -> R<Value> {
     .expect("Release recovery budget was validated before locking");
     if report.confirmed {
         observations.clear();
+        state.reference_cache.invalidate();
         semantic.clear();
         let _lifecycle = state
             .capture_failure
@@ -2698,6 +2800,7 @@ fn handle(state: &State, tool: &str, args: &Value, epoch: u64) -> R<Value> {
             }
             let start = Instant::now();
             let next = state.epoch.fetch_add(1, Ordering::SeqCst) + 1;
+            state.reference_cache.invalidate();
             if tool == "desktop_takeover" {
                 if let Err(error) = state
                     .takeover_marker
@@ -2810,6 +2913,7 @@ fn handle(state: &State, tool: &str, args: &Value, epoch: u64) -> R<Value> {
                 .epoch
                 .compare_exchange(expected_epoch, next, Ordering::SeqCst, Ordering::SeqCst)
                 .map_err(|_| "New stop/cancellation arrived while resuming; refusal retained")?;
+            state.reference_cache.invalidate();
             marker.clear()?;
             state.takeover.store(false, Ordering::SeqCst);
             if state.last_human_ms.load(Ordering::SeqCst) != last
@@ -3083,7 +3187,7 @@ fn tools() -> Value {
       {"name":"desktop_windows","description":"Read actual Niri windows, outputs and workspaces. Window layout may lack global app bounds; never invent bounds.","inputSchema":{"type":"object","properties":{}}},
       {"name":"desktop_observe","description":"Capture one actual laptop output via grim at scale1, plus Niri identities. Startup capture_not_attempted=true is expected and permits this first read-only observation. Input always requires accepted fresh observation and action_ready; prior successful capture is not a prerequisite for authorized startup resume. Optional crop uses full-output screenshot pixels x/y/width/height; action x/y then use local pixels of the displayed crop. Core translates crop origin; NEVER add compositor output origin. Actual PNG size can differ from Niri logical size by rounding. Observation expires in60seconds; identity/geometry and fresh target-region guards still run. Observe after focus/workspace/layout changes. include_image=false returns private PNG reference only.","inputSchema":{"type":"object","properties":{"output":{"type":"string"},"include_image":{"type":"boolean"},"crop":crop}}},
       {"name":"desktop_semantic","description":"Read fresh Cua AT-SPI elements for a Niri window. Maps only unique actual PID+title; synthetic Cua IDs are never guessed. Query filters returned elements. Accessibility bounds are app-local and NOT screenshot coordinates; do not directly click them without calibrated mapping. Limited/root-only trees require visual fallback.","inputSchema":{"type":"object","properties":{"window_id":{"type":"integer"},"query":{"type":"string"},"max_elements":{"type":"integer"},"max_depth":{"type":"integer"}},"required":["window_id"]}},
-      {"name":"desktop_semantic_direct","description":"Read exact-window AT-SPI subtree with immutable direct object handles. Supplies role/label/description/parent/text excerpt/action_names. Only daemon-owned handles from complete snapshots may be used with desktop_act semantic_set_value or semantic_click. No raw object/index/Cua tokens and no pixel fallback. Native GTK candidates need live acceptance; missing/incomplete bridges use visual typed actions.","inputSchema":{"type":"object","properties":{"window_id":{"type":"integer"},"query":{"type":"string"},"max_elements":{"type":"integer"},"max_depth":{"type":"integer"}},"required":["window_id"]}},
+      {"name":"desktop_semantic_direct","description":"Read exact-window AT-SPI labels/tree even during ordinary physical activity or held controls. Returns original/current input generation and explicit input/action readiness. Non-actionable or incomplete snapshots issue no handles (click/set_value=false); obtain a fresh complete snapshot after controls release. Only daemon-owned handles from actionable complete snapshots may be used with desktop_act semantic_set_value or semantic_click. No raw object/index/Cua tokens and no pixel fallback. Native GTK candidates need live acceptance; missing/incomplete bridges use visual typed actions.","inputSchema":{"type":"object","properties":{"window_id":{"type":"integer"},"query":{"type":"string"},"max_elements":{"type":"integer"},"max_depth":{"type":"integer"}},"required":["window_id"]}},
       {"name":"desktop_act","description":"Single-writer typed desktop actions against fresh observation. Rejects changed focus/geometry/scaling or changed pixels near pointer targets. x/y are local to displayed screenshot/crop. Every move/click/scroll/drag requires the displayed view to be at most1200 pixels on each axis; an oversized view rejects the whole batch before any input, queue admission or device preparation. Capture a fresh target crop and use its crop-local coordinates. Full images remain usable for overview, focus, keys and semantics. Focus must be standalone. Unknown or misplaced fields for an action kind reject the whole batch before input; restore_clipboard belongs only to paste, while type always preserves the prior selection. By default observe_after=true returns a new after_observation ID and image in this same response after dispatch/release and a bounded80ms defaultsettle wait; settle_ms=0..1000 can adjust. Use it for the next act and inspect expected result. A slow/unchanged frame needs another observation/semantic check, not repetition of toggle input. include_image=false omits its image. Acknowledgement is not UI success. Type text_method=auto uses clipboard for known Electron IDs (code/T3) and >1000-character text, keyboard for shorter text in other apps; explicit keyboard/clipboard are available. Electron wtype Unicode is unreliable on this laptop. Clipboard preserves supported text/rich app payloads and original Chromium provenance in bounded RAM from one offer, normalizes duplicate MIME names, omits SAVE_TARGETS and SAME_APP GTK_TEXT_BUFFER_CONTENTS transport markers, preserves serialized GTK rich text, and keeps a separate source holder across actor restarts. Unsupported/sensitive/oversized formats refuse before replacement. Own-source check runs after layout/keymap/window validation and before the first paste modifier press; ownership can still change between reply and input because Wayland has no atomic selection-check-and-paste. No restore after takeover/cancel/ownership loss. Scroll dx/dy are discrete wheel steps (integer -100..100), not pixels; positive dx moves right and positive dy moves down. Smooth-scroll animation needs another fresh observation/settle check before reusing visual targets. Keys are modifiers first e.g.[ctrl,l],[Return]. Explicit key_scope=compositor and Super/meta/logo chords use an owned persistent direct-uinput device because this Niri25.11 Wayland virtual keyboard bypasses compositor bindings; Ctrl/app chords retain the Wayland transport. A fresh proxy check requires backend routing_revision=2 and binds session/epoch/observation before forwarding a global batch; an older backend is refused. Missing permission/takeover monitor/compositor device-open evidence refuses the complete batch before input. Creating the own device is a capability side effect. A kernel input acknowledgement does not verify Niri/UI acceptance; inspect the fresh result. No automatic input fallback. Direct semantic_set_value(handle_id,text,expected_text optional) replaces exact editable contents; semantic_click(handle_id,action_name from direct tree) invokes only AT-SPI named action. Both freshly revalidate context and have no input fallback. Batch stable edits/shortcuts when intermediate states cannot invalidate later targets; changed-target actions need fresh observation.","inputSchema":{"type":"object","properties":{"observation_id":{"type":"string"},"window_id":{"type":"integer"},"task_id":{"type":"string"},"timeout_ms":{"type":"integer","minimum":100,"maximum":120000,"description":"Whole batch budget including queue, validation, capture, input and post-observe. Bounded release cleanup follows even after timeout."},"observe_after":{"type":"boolean","default":true},"include_image":{"type":"boolean","default":true},"settle_ms":{"type":"integer","default":80,"minimum":0,"maximum":1000,"description":"Bounded post-action settle wait before capture; not a proof of repaint. Slow conditions require fresh observations, never repeated blind input."},"actions":{"type":"array","items":action,"minItems":1,"maxItems":32}},"required":["observation_id","actions"]}},
       {"name":"desktop_cancel","description":"Priority epoch cancellation independent of actor lock. Pending batches stop; held buttons release. Already-dispatched effects remain. Wait for desktop_status active=null and actor_release_confirmed=true for full release.","inputSchema":{"type":"object","properties":{}}},
       {"name":"desktop_takeover","description":"Explicit human desktop takeover, persists its cause across backend restarts and latches refusal of future actions and cancels queued/active automation. Only a physical Escape press does this automatically when accessible; ordinary input invalidates stale observations and releases a conflicting batch without latching takeover. Wait active=null and actor_release_confirmed=true for full release. desktop_resume then fresh observation is required.","inputSchema":{"type":"object","properties":{}}},
@@ -3411,6 +3515,7 @@ fn serve(socket: &Path) -> R<()> {
         active: Mutex::new(Value::Null),
         last_result: Mutex::new(Value::Null),
         observations: Mutex::new(HashMap::new()),
+        reference_cache: ReferenceCache::default(),
         semantic_targets: Mutex::new(HashMap::new()),
         actor: Mutex::new(None),
         keyboard: Mutex::new(None),
@@ -3664,6 +3769,7 @@ mod regression {
             active: Mutex::new(Value::Null),
             last_result: Mutex::new(Value::Null),
             observations: Mutex::new(HashMap::new()),
+            reference_cache: ReferenceCache::default(),
             semantic_targets: Mutex::new(HashMap::new()),
             actor: Mutex::new(None),
             keyboard: Mutex::new(None),
@@ -3761,6 +3867,7 @@ mod regression {
             active: Mutex::new(Value::Null),
             last_result: Mutex::new(Value::Null),
             observations: Mutex::new(HashMap::new()),
+            reference_cache: ReferenceCache::default(),
             semantic_targets: Mutex::new(HashMap::new()),
             actor: Mutex::new(None),
             keyboard: Mutex::new(None),
@@ -4252,7 +4359,7 @@ mod global_routing_regression {
 #[cfg(test)]
 mod release_recovery_tests {
     use super::*;
-    fn fixture(label: &str) -> (State, PathBuf) {
+    pub(super) fn fixture(label: &str) -> (State, PathBuf) {
         let dir = env::temp_dir().join(format!(
             "weasel-private-release-recovery-{}-{label}",
             std::process::id()
@@ -4288,6 +4395,7 @@ mod release_recovery_tests {
                     json!({"status":"failed","error":"original timeout preserved"}),
                 ),
                 observations: Mutex::new(HashMap::new()),
+                reference_cache: ReferenceCache::default(),
                 semantic_targets: Mutex::new(HashMap::new()),
                 actor: Mutex::new(None),
                 keyboard: Mutex::new(None),
@@ -4298,7 +4406,7 @@ mod release_recovery_tests {
             dir,
         )
     }
-    fn obs(dir: &Path) -> Observation {
+    pub(super) fn obs(dir: &Path) -> Observation {
         Observation {
             id: "cloned-before-recovery".into(),
             at: Instant::now(),
@@ -4321,7 +4429,7 @@ mod release_recovery_tests {
             view_image: dir.join("never-read.png"),
         }
     }
-    fn cooperative_fixture(label: &str) -> (Arc<State>, PathBuf) {
+    pub(super) fn cooperative_fixture(label: &str) -> (Arc<State>, PathBuf) {
         let (state, dir) = fixture(label);
         state.takeover_marker.lock().unwrap().clear().unwrap();
         state.takeover.store(false, Ordering::SeqCst);
@@ -5170,6 +5278,333 @@ mod release_recovery_tests {
         assert!(!dir.join("takeover.json").exists());
         fs::remove_dir_all(dir).unwrap();
     }
+    fn semantic_readiness_snapshot(complete: bool) -> atspi::Snapshot {
+        serde_json::from_value(json!({"pid":42,"requested_title":"fixture","application":{"bus":":1.999","path":"/fixture"},"window":{"bus":":1.999","path":"/fixture/window"},"nodes":[{"object":{"bus":":1.999","path":"/fixture/filter"},"parent":null,"depth":1,"name":"Filter Menge","description":"quantity filter","role":"text","role_id":60,"interfaces":["org.a11y.atspi.EditableText","org.a11y.atspi.Action"],"states":[(1u32<<7)|(1u32<<8)|(1u32<<24)|(1u32<<25)],"protected":false,"action_names":["click"],"text_excerpt":"Menge >= 5"}],"complete":complete,"visible_modals":[],"semantic_scope":"offline fixture","sole_window_fallback_allowed":false,"bus_guid":"never-connect"})).unwrap()
+    }
+    fn semantic_readiness_window() -> Value {
+        json!({"id":1,"pid":42,"app_id":"offline-fixture","workspace_id":1})
+    }
+    #[test]
+    fn semantic_readiness_complete_ready_issues_handles_but_incomplete_tree_is_read_only() {
+        let (state, dir) = cooperative_fixture("semantic-ready");
+        let ready = result_data(
+            &semantic_snapshot_result(
+                &state,
+                &json!({"query":"Filter"}),
+                semantic_readiness_window(),
+                semantic_readiness_snapshot(true),
+                77,
+                0,
+                Instant::now(),
+            )
+            .unwrap(),
+        );
+        assert_eq!(ready["action_ready"], true);
+        assert_eq!(ready["input_generation"], 0);
+        assert_eq!(ready["current_input_generation"], 0);
+        assert_eq!(ready["elements"][0]["capabilities"]["click"], true);
+        assert_eq!(ready["elements"][0]["capabilities"]["set_value"], true);
+        let handle = ready["elements"][0]["handle_id"].as_str().unwrap();
+        let mut visual = obs(&dir);
+        visual.focused_window = Some(semantic_readiness_window());
+        assert!(semantic_target(&state, &visual, handle).is_ok());
+        let before = state.semantic_targets.lock().unwrap().len();
+        let limited = result_data(
+            &semantic_snapshot_result(
+                &state,
+                &json!({}),
+                semantic_readiness_window(),
+                semantic_readiness_snapshot(false),
+                77,
+                0,
+                Instant::now(),
+            )
+            .unwrap(),
+        );
+        assert_eq!(limited["status"], "limited");
+        assert_eq!(limited["input_ready"], true);
+        assert_eq!(limited["action_ready"], false);
+        assert_eq!(limited["fresh_semantic_snapshot_required_for_input"], true);
+        assert_eq!(limited["elements"][0]["label"], "Filter Menge");
+        assert_eq!(limited["elements"][0]["handle_id"], Value::Null);
+        assert_eq!(
+            limited["elements"][0]["capabilities"],
+            json!({"set_value":false,"click":false})
+        );
+        assert_eq!(state.semantic_targets.lock().unwrap().len(), before);
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn semantic_readiness_held_or_unknown_controls_preserve_readable_labels_without_handles() {
+        let (state, dir) = cooperative_fixture("semantic-held");
+        for (count, known) in [(2, true), (0, false)] {
+            state.input_policy.update_holds(count, known);
+            let generation = state.input_policy.generation();
+            let data = result_data(
+                &semantic_snapshot_result(
+                    &state,
+                    &json!({}),
+                    semantic_readiness_window(),
+                    semantic_readiness_snapshot(true),
+                    77,
+                    generation,
+                    Instant::now(),
+                )
+                .unwrap(),
+            );
+            assert_eq!(
+                data["status"], "available",
+                "tree availability is separate from input"
+            );
+            assert_eq!(data["input_ready"], false);
+            assert_eq!(data["action_ready"], false);
+            assert_eq!(data["input_generation"], generation);
+            assert_eq!(data["current_input_generation"], generation);
+            assert_eq!(data["input_activity_during_snapshot"], false);
+            assert_eq!(data["fresh_semantic_snapshot_required_for_input"], true);
+            assert_eq!(data["elements"][0]["text_excerpt"], "Menge >= 5");
+            assert_eq!(data["elements"][0]["handle_id"], Value::Null);
+            assert_eq!(data["elements"][0]["parent_handle_id"], Value::Null);
+            assert_eq!(
+                data["elements"][0]["capabilities"],
+                json!({"set_value":false,"click":false})
+            );
+            assert!(state.semantic_targets.lock().unwrap().is_empty());
+            assert_eq!(state.epoch.load(Ordering::SeqCst), 77);
+            assert!(!state.takeover.load(Ordering::SeqCst));
+            assert_eq!(state.input_policy.generation(), generation);
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn semantic_readiness_changed_generation_keeps_tree_but_stale_handle_act_has_zero_effects() {
+        let (state, dir) = cooperative_fixture("semantic-changed-generation");
+        let prior = result_data(
+            &semantic_snapshot_result(
+                &state,
+                &json!({}),
+                semantic_readiness_window(),
+                semantic_readiness_snapshot(true),
+                77,
+                0,
+                Instant::now(),
+            )
+            .unwrap(),
+        );
+        let old_handle = prior["elements"][0]["handle_id"].as_str().unwrap();
+        physical_activity(&state, false, false);
+        let data = result_data(
+            &semantic_snapshot_result(
+                &state,
+                &json!({}),
+                semantic_readiness_window(),
+                semantic_readiness_snapshot(true),
+                77,
+                0,
+                Instant::now(),
+            )
+            .unwrap(),
+        );
+        assert_eq!(data["elements"][0]["label"], "Filter Menge");
+        assert_eq!(
+            data["input_generation"], 0,
+            "never rebind a captured semantic tree"
+        );
+        assert_eq!(data["current_input_generation"], 1);
+        assert_eq!(data["input_activity_during_snapshot"], true);
+        assert_eq!(data["action_ready"], false);
+        assert_eq!(data["elements"][0]["handle_id"], Value::Null);
+        assert_eq!(
+            state.semantic_targets.lock().unwrap().len(),
+            1,
+            "no new handles"
+        );
+        let mut visual = obs(&dir);
+        visual.id = "fresh-visual-with-stale-semantic".into();
+        visual.input_generation = 1;
+        visual.focused_window = Some(semantic_readiness_window());
+        state
+            .observations
+            .lock()
+            .unwrap()
+            .insert(visual.id.clone(), visual.clone());
+        let event_bytes = state.log.lock().unwrap().metadata().unwrap().len();
+        let result = act(&state, &json!({"observation_id":visual.id,"actions":[{"kind":"semantic_click","handle_id":old_handle,"action_name":"click"}],"observe_after":false}), 77).unwrap();
+        let stopped = result_data(&result);
+        assert_eq!(stopped["status"], "input_conflict");
+        assert_eq!(stopped["completed_actions"], 0);
+        assert_eq!(stopped["effects"], json!([]));
+        let recorded = fs::read_to_string(dir.join("events.jsonl")).unwrap();
+        let rejected: Vec<Value> = recorded[event_bytes as usize..]
+            .lines()
+            .map(|line| serde_json::from_str(line).unwrap())
+            .collect();
+        assert_eq!(rejected.len(), 1, "only the rejection audit is emitted");
+        assert_eq!(rejected[0]["event"], "input_conflict");
+        assert!(state.active.lock().unwrap().is_null());
+        assert_eq!(state.queued.load(Ordering::SeqCst), 0);
+        assert!(state.actor.lock().unwrap().is_none());
+        assert!(state.keyboard.lock().unwrap().is_none());
+        assert!(state.global_keyboard.lock().unwrap().is_none());
+        assert_eq!(state.epoch.load(Ordering::SeqCst), 77);
+        assert!(!state.takeover.load(Ordering::SeqCst));
+        let fresh = result_data(
+            &semantic_snapshot_result(
+                &state,
+                &json!({}),
+                semantic_readiness_window(),
+                semantic_readiness_snapshot(true),
+                77,
+                1,
+                Instant::now(),
+            )
+            .unwrap(),
+        );
+        assert_eq!(fresh["action_ready"], true);
+        assert_ne!(fresh["elements"][0]["handle_id"], old_handle);
+        assert!(semantic_target(
+            &state,
+            &visual,
+            fresh["elements"][0]["handle_id"].as_str().unwrap()
+        )
+        .is_ok());
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn semantic_readiness_physical_escape_local_cancel_and_deadline_remain_errors() {
+        let (state, dir) = cooperative_fixture("semantic-stop");
+        CURRENT_CANCEL_FLAG.with(|f| *f.borrow_mut() = Some(Arc::new(AtomicBool::new(true))));
+        let canceled = semantic_snapshot_result(
+            &state,
+            &json!({}),
+            semantic_readiness_window(),
+            semantic_readiness_snapshot(true),
+            77,
+            0,
+            Instant::now(),
+        );
+        CURRENT_CANCEL_FLAG.with(|f| *f.borrow_mut() = None);
+        assert!(canceled
+            .unwrap_err()
+            .contains("client request was canceled"));
+        assert!(state.semantic_targets.lock().unwrap().is_empty());
+        {
+            let _deadline = DeadlineGuard::set(Some(Instant::now() - Duration::from_millis(1)));
+            assert!(semantic_snapshot_result(
+                &state,
+                &json!({}),
+                semantic_readiness_window(),
+                semantic_readiness_snapshot(true),
+                77,
+                0,
+                Instant::now()
+            )
+            .unwrap_err()
+            .contains("deadline"));
+        }
+        physical_activity(&state, true, false);
+        assert!(semantic_snapshot_result(
+            &state,
+            &json!({}),
+            semantic_readiness_window(),
+            semantic_readiness_snapshot(true),
+            77,
+            0,
+            Instant::now()
+        )
+        .unwrap_err()
+        .contains("taken over"));
+        assert!(state.takeover.load(Ordering::SeqCst));
+        assert_eq!(
+            state.takeover_marker.lock().unwrap().reason.source,
+            "physical_escape"
+        );
+        assert!(state.semantic_targets.lock().unwrap().is_empty());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn semantic_readiness_final_boundary_scrubs_only_own_handles_on_conflict_or_stop() {
+        // Staged records come from the actual production publisher; the lower
+        // production boundary is invoked directly, without sleeps/test hooks.
+        for reason in ["activity", "held", "cancel", "escape", "initial_not_ready"] {
+            let (state, dir) = cooperative_fixture(&format!("semantic-final-{reason}"));
+            let data = result_data(
+                &semantic_snapshot_result(
+                    &state,
+                    &json!({}),
+                    semantic_readiness_window(),
+                    semantic_readiness_snapshot(true),
+                    77,
+                    0,
+                    Instant::now(),
+                )
+                .unwrap(),
+            );
+            let own = data["elements"][0]["handle_id"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+            let mut elements = data["elements"].as_array().unwrap().clone();
+            elements[0]["parent_handle_id"] = json!("parent-from-current-snapshot");
+            let mut cache = state.semantic_targets.lock().unwrap().clone();
+            let target = cache[&own].clone();
+            cache.insert("foreign-kept".into(), target.clone());
+            let handles = HashMap::from([(target.object, own.clone())]);
+            match reason {
+                "activity" => {
+                    physical_activity(&state, false, false);
+                }
+                "held" => state.input_policy.update_holds(2, true),
+                "cancel" => CURRENT_CANCEL_FLAG
+                    .with(|f| *f.borrow_mut() = Some(Arc::new(AtomicBool::new(true)))),
+                "escape" => physical_activity(&state, true, false),
+                _ => {}
+            }
+            let result = finalize_semantic_handles(
+                &state,
+                77,
+                0,
+                true,
+                reason != "initial_not_ready",
+                &handles,
+                &mut cache,
+                &mut elements,
+            );
+            CURRENT_CANCEL_FLAG.with(|f| *f.borrow_mut() = None);
+            assert!(
+                !cache.contains_key(&own),
+                "own staged handle must be removed for {reason}"
+            );
+            assert!(
+                cache.contains_key("foreign-kept"),
+                "foreign cache entries are preserved for {reason}"
+            );
+            if matches!(reason, "cancel" | "escape") {
+                assert!(result.is_err(), "hard stop remains Err for {reason}");
+            } else {
+                let readiness = result.unwrap();
+                assert_eq!(readiness["action_ready"], false);
+                assert_eq!(
+                    readiness["fresh_semantic_snapshot_required_for_input"],
+                    true
+                );
+                assert_eq!(elements[0]["handle_id"], Value::Null);
+                assert_eq!(elements[0]["parent_handle_id"], Value::Null);
+                assert_eq!(
+                    elements[0]["capabilities"],
+                    json!({"set_value":false,"click":false})
+                );
+                assert_eq!(elements[0]["label"], "Filter Menge");
+                assert_eq!(elements[0]["text_excerpt"], "Menge >= 5");
+            }
+            assert!(state.active.lock().unwrap().is_null());
+            assert_eq!(state.queued.load(Ordering::SeqCst), 0);
+            assert!(state.actor.lock().unwrap().is_none());
+            fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
     #[test]
     fn observation_readiness_returns_metadata_for_ready_held_unknown_and_latched_states() {
         let (state, dir) = cooperative_fixture("observation-readiness");
@@ -5597,5 +6032,286 @@ mod release_recovery_tests {
             "waiting Resume must recheck scoped cancellation before marker clear"
         );
         assert!(retained,"confirmed cancellation before marker transition must preserve exact active Escape cause");
+    }
+}
+
+#[cfg(test)]
+mod reference_decode_regression {
+    use super::*;
+    fn write_png(path: &Path, bytes: &[u8]) {
+        let mut encoder = png::Encoder::new(fs::File::create(path).unwrap(), 40, 40);
+        encoder.set_color(png::ColorType::Rgb);
+        encoder.set_depth(png::BitDepth::Eight);
+        encoder
+            .write_header()
+            .unwrap()
+            .write_image_data(bytes)
+            .unwrap();
+    }
+    #[test]
+    fn warm_reference_pointer_act_refuses_conflicts_and_stops_before_input_or_devices() {
+        // Every exercised refusal precedes Niri, fresh capture and device setup.
+        // This proves the cache cannot substitute for action readiness.
+        for reason in ["ordinary", "held", "scoped_cancel", "explicit_takeover"] {
+            let (state, dir) =
+                release_recovery_tests::cooperative_fixture(&format!("cache-pointer-{reason}"));
+            let mut obs = release_recovery_tests::obs(&dir);
+            obs.image = dir.join("reference.png");
+            obs.view_image = obs.image.clone();
+            obs.image_width = 40;
+            obs.image_height = 40;
+            obs.view = Crop {
+                x: 0,
+                y: 0,
+                width: 20,
+                height: 20,
+            };
+            write_png(&obs.image, &vec![57; 40 * 40 * 3]);
+            state
+                .observations
+                .lock()
+                .unwrap()
+                .insert(obs.id.clone(), obs.clone());
+            reference_pixels(&state, &obs.id, &obs.image, 77, obs.input_generation).unwrap();
+            assert!(state.reference_cache.retained_bytes() > 0);
+            assert_eq!(state.reference_cache.decodes(), 1);
+            match reason {
+                "ordinary" => physical_activity(&state, false, false),
+                "held" => state.input_policy.update_holds(2, true),
+                "scoped_cancel" => CURRENT_CANCEL_FLAG
+                    .with(|f| *f.borrow_mut() = Some(Arc::new(AtomicBool::new(true)))),
+                "explicit_takeover" => {
+                    handle(&state, "desktop_takeover", &json!({}), 77).unwrap();
+                }
+                _ => unreachable!(),
+            }
+            let epoch = state.epoch.load(Ordering::SeqCst);
+            let result = act(
+                &state,
+                &json!({"task_id":format!("offline-warm-pointer-{reason}"),"observation_id":obs.id,"actions":[{"kind":"click","x":5.0,"y":5.0}],"observe_after":false}),
+                epoch,
+            );
+            CURRENT_CANCEL_FLAG.with(|f| *f.borrow_mut() = None);
+            if matches!(reason, "ordinary" | "held") {
+                let data: Value =
+                    serde_json::from_str(result.unwrap()["content"][0]["text"].as_str().unwrap())
+                        .unwrap();
+                assert_eq!(data["status"], "input_conflict");
+                assert_eq!(data["completed_actions"], 0);
+                assert_eq!(data["effects"], json!([]));
+                assert_eq!(data["actor_release_confirmed"], true);
+                assert_eq!(data["automatic_replay"], false);
+            } else {
+                let error = result.unwrap_err();
+                assert!(if reason == "scoped_cancel" {
+                    error.contains("client request was canceled")
+                } else {
+                    error.contains("takeover is latched")
+                });
+            }
+            assert!(state.active.lock().unwrap().is_null());
+            assert_eq!(state.queued.load(Ordering::SeqCst), 0);
+            assert!(state.release_confirmed.load(Ordering::SeqCst));
+            assert!(state.actor.lock().unwrap().is_none());
+            assert!(state.keyboard.lock().unwrap().is_none());
+            assert!(state.global_keyboard.lock().unwrap().is_none());
+            assert_eq!(state.capture_attempts.load(Ordering::SeqCst), 0);
+            assert_eq!(
+                state.reference_cache.decodes(),
+                1,
+                "no guard/reference replay after refusal"
+            );
+            if reason == "held" {
+                assert!(
+                    state.reference_cache.retained_bytes() > 0,
+                    "held-state retention is no input permission"
+                );
+            } else {
+                assert_eq!(state.reference_cache.retained_bytes(), 0);
+            }
+            if reason == "explicit_takeover" {
+                assert!(state.takeover.load(Ordering::SeqCst));
+                assert_eq!(
+                    state.takeover_marker.lock().unwrap().reason.source,
+                    "explicit_desktop_takeover"
+                );
+            } else {
+                assert!(!state.takeover.load(Ordering::SeqCst));
+            }
+            fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    #[test]
+    fn crop_to_pointer_guard_decodes_prior_once_but_captures_current_every_time() {
+        let (state, dir) = release_recovery_tests::cooperative_fixture("cache-crop-pointer");
+        let mut obs = release_recovery_tests::obs(&dir);
+        obs.image = dir.join("reference.png");
+        obs.image_width = 40;
+        obs.image_height = 40;
+        obs.view = Crop {
+            x: 8,
+            y: 9,
+            width: 20,
+            height: 20,
+        };
+        let data: Vec<u8> = (0..40 * 40 * 3).map(|n| (n % 239) as u8).collect();
+        write_png(&obs.image, &data);
+        let prior =
+            reference_pixels(&state, &obs.id, &obs.image, 77, obs.input_generation).unwrap();
+        let cropped = dir.join("crop.png");
+        crop_png(&prior, &cropped, &obs.view).unwrap();
+        let actual = png_pixels(&cropped).unwrap();
+        assert_eq!((actual.width, actual.height), (20, 20));
+        for y in 0..20 {
+            let start = ((y + 9) * 40 + 8) * 3;
+            assert_eq!(
+                &actual.bytes[y * 20 * 3..(y + 1) * 20 * 3],
+                &data[start..start + 20 * 3]
+            );
+        }
+        let mut captures = 0;
+        for _ in 0..2 {
+            let result = visual_guard_with_capture(
+                &state,
+                &obs,
+                &Action::Click {
+                    x: 5.0,
+                    y: 5.0,
+                    button: None,
+                    count: None,
+                },
+                77,
+                |path| {
+                    captures += 1;
+                    write_png(path, &data);
+                    Ok(())
+                },
+            )
+            .unwrap();
+            assert_eq!(result["applied"], true);
+        }
+        let error = visual_guard_with_capture(
+            &state,
+            &obs,
+            &Action::Click {
+                x: 5.0,
+                y: 5.0,
+                button: None,
+                count: None,
+            },
+            77,
+            |path| {
+                captures += 1;
+                write_png(path, &vec![255; 40 * 40 * 3]);
+                Ok(())
+            },
+        )
+        .unwrap_err();
+        assert!(error.contains("Visual target changed"));
+        assert_eq!(captures, 3);
+        assert_eq!(
+            state.reference_cache.decodes(),
+            1,
+            "crop and three guards share one prior inflate, never current frames"
+        );
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn actor_lifecycle_clears_cache_and_keeps_original_input_guards() {
+        let (state, dir) = release_recovery_tests::cooperative_fixture("cache-lifecycle");
+        let mut obs = release_recovery_tests::obs(&dir);
+        obs.image = dir.join("reference.png");
+        write_png(&obs.image, &vec![57; 40 * 40 * 3]);
+        let seed = || {
+            reference_pixels(
+                &state,
+                &obs.id,
+                &obs.image,
+                state.epoch.load(Ordering::SeqCst),
+                state.input_policy.generation(),
+            )
+            .unwrap()
+        };
+        seed();
+        assert!(state.reference_cache.retained_bytes() > 0);
+        physical_activity(&state, false, false);
+        assert_eq!(state.reference_cache.retained_bytes(), 0);
+        assert!(
+            validate_focus_state(&state, &obs).is_err(),
+            "ordinary activity still invalidates old generation"
+        );
+        obs.input_generation = state.input_policy.generation();
+        reference_pixels(&state, &obs.id, &obs.image, 77, obs.input_generation).unwrap();
+        handle(&state, "desktop_cancel", &json!({}), 77).unwrap();
+        assert_eq!(state.reference_cache.retained_bytes(), 0);
+        assert!(
+            validate_focus_state(&state, &obs).is_err(),
+            "cancel still rejects old epoch"
+        );
+        reference_pixels(
+            &state,
+            &obs.id,
+            &obs.image,
+            state.epoch.load(Ordering::SeqCst),
+            obs.input_generation,
+        )
+        .unwrap();
+        capture_unavailable(
+            &state,
+            state.epoch.load(Ordering::SeqCst),
+            "offline-cache-test",
+        );
+        assert_eq!(state.reference_cache.retained_bytes(), 0);
+        assert!(!state.capture_available.load(Ordering::SeqCst));
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn scoped_cancelled_wait_releases_actor_and_reference_cache() {
+        let (state, dir) = release_recovery_tests::cooperative_fixture("cache-scoped-cancel");
+        let mut obs = release_recovery_tests::obs(&dir);
+        obs.image = dir.join("reference.png");
+        write_png(&obs.image, &vec![57; 40 * 40 * 3]);
+        reference_pixels(&state, &obs.id, &obs.image, 77, 0).unwrap();
+        let canceled = Arc::new(AtomicBool::new(false));
+        let cancellation = canceled.clone();
+        let actor = state.clone();
+        let timer = thread::spawn(move || {
+            let until = Instant::now() + Duration::from_secs(2);
+            while actor.active.lock().unwrap().is_null() && Instant::now() < until {
+                thread::sleep(Duration::from_millis(1));
+            }
+            cancellation.store(true, Ordering::SeqCst);
+        });
+        CURRENT_CANCEL_FLAG.with(|f| *f.borrow_mut() = Some(canceled));
+        let result = act(
+            &state,
+            &json!({"observation_id":obs.id,"actions":[{"kind":"wait","ms":2000}],"observe_after":false}),
+            77,
+        );
+        CURRENT_CANCEL_FLAG.with(|f| *f.borrow_mut() = None);
+        timer.join().unwrap();
+        let result = result.unwrap();
+        let data: Value =
+            serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(data["status"], "canceled");
+        assert_eq!(data["actor_release_confirmed"], true);
+        assert_eq!(state.reference_cache.retained_bytes(), 0);
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn successful_release_recovery_invalidates_reference_decode() {
+        let (state, dir) = release_recovery_tests::fixture("cache-release-recovery");
+        let path = dir.join("reference.png");
+        write_png(&path, &vec![57; 40 * 40 * 3]);
+        reference_pixels(&state, "offline-reference", &path, 77, 0).unwrap();
+        assert!(state.reference_cache.retained_bytes() > 0);
+        let result = recover_release(&state, &json!({})).unwrap();
+        let data: Value =
+            serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap();
+        assert_eq!(data["actor_release_confirmed"], true);
+        assert_eq!(state.reference_cache.retained_bytes(), 0);
+        assert!(!state.capture_available.load(Ordering::SeqCst));
+        fs::remove_dir_all(dir).unwrap();
     }
 }

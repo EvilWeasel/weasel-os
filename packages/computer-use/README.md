@@ -72,6 +72,26 @@ unique session/observation ID, monotonic timing, actual PNG/crop dimensions,
 Niri identity, fractional output geometry and capabilities. Coordinates are local
 to the returned screenshot or crop. Cua bounds are not screenshot coordinates.
 
+Direct AT-SPI labels remain readable during ordinary input or held controls.
+`status: "available"` or `"limited"` describes the tree, while `input_ready`
+and `action_ready` describe the separate readiness snapshot. Incomplete or
+initially/finally non-actionable trees issue no new handles or mutation
+capabilities. A conflict removes only this read's newly staged handles;
+Escape, deadline and local cancellation remain errors. After controls are
+released, obtain a new complete semantic snapshot and a fresh visual observation
+before input. Native MCP cancellation of this read remains limited by its
+existing `Other` request classification; the action cancellation path is separate.
+
+The visual guard keeps one bounded decoded reference image: at most 16 MiB of
+pixels and 4 MiB of original PNG bytes. A hit still rereads and compares the exact
+reference bytes and checks the observation, session, epoch and input generation.
+Click, scroll and drag still capture and decode fresh current pixels before
+dispatch. Move retains its existing absence of a current-pixel comparison.
+Decode and file I/O do not hold the cache mutex; stop and recovery invalidate
+the reference. These storage limits describe retained payload, not process RSS.
+The cache is an implementation optimization; live timing and successful task
+outcomes are required before claiming a speed improvement.
+
 Startup status distinguishes `capture_state: "not_attempted"` from a failed
 capture. `capture_available: false` by itself does not establish a failure or
 prevent an authorized startup resume. Inspect the current latch, actor release,

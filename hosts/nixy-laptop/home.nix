@@ -8,6 +8,12 @@
 let
   hermesDesktop = inputs.hermes-agent.packages.${pkgs.stdenv.hostPlatform.system}.desktop;
   codexLatest = pkgsUnstable.callPackage ../../packages/codex-source { };
+  codexPathInit = ''
+    case ":$PATH:" in
+      ":${lib.getBin codexLatest}/bin:"*) ;;
+      *) export PATH="${lib.getBin codexLatest}/bin:$PATH" ;;
+    esac
+  '';
   cuaDriver = pkgs.callPackage ../../packages/cua-driver-bin.nix { };
   laptopExecutor = pkgs.callPackage ../../scripts/weasel-laptop-executor.nix {
     codexPackage = codexLatest;
@@ -56,12 +62,9 @@ in
   # Select verified Codex while keeping the user's other npm commands.
   home.sessionPath = lib.mkBefore [ "${lib.getBin codexLatest}/bin" ];
   # An existing desktop can pass an old, already-sourced HM environment.
-  programs.bash.initExtra = lib.mkAfter ''
-    case ":$PATH:" in
-      ":${lib.getBin codexLatest}/bin:"*) ;;
-      *) export PATH="${lib.getBin codexLatest}/bin:$PATH" ;;
-    esac
-  '';
+  # Login shells also need selection before .bashrc's interactive-only guard.
+  programs.bash.profileExtra = lib.mkAfter codexPathInit;
+  programs.bash.initExtra = lib.mkAfter codexPathInit;
 
   home.sessionVariables.PROTON_PASS_LINUX_KEYRING = "dbus";
   weasel.uiDecisions = {
