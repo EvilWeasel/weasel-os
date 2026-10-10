@@ -53,6 +53,36 @@ pub struct Snapshot {
     pub max_depth: usize,
     #[serde(default)]
     pub visibility_traversal: VisibilityTraversal,
+    /// None means the older producer supplied no diagnostic evidence.
+    #[serde(default)]
+    pub traversal_diagnostics: Option<TraversalDiagnostics>,
+}
+
+const OBSERVE_DEADLINE: Duration = Duration::from_secs(3);
+#[derive(Clone, Debug, Default, Deserialize, Serialize)]
+pub struct IncompleteReasons {
+    pub window_discovery_deadline_cutoffs: usize,
+    pub window_discovery_read_errors: usize,
+    pub traversal_deadline_cutoffs: usize,
+    pub repeated_object_references: usize,
+    pub node_read_or_state_errors: usize,
+    pub child_enumeration_errors: usize,
+    pub child_visibility_probe_errors: usize,
+    pub showing_child_under_hidden_parent: usize,
+    pub selected_root_not_showing: usize,
+    pub max_nodes_cutoffs: usize,
+    pub max_depth_cutoffs: usize,
+}
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct TraversalDiagnostics {
+    pub revision: u32,
+    pub effective_max_nodes: usize,
+    pub effective_max_depth: usize,
+    /// Elapsed-time checks at existing discovery/traversal checkpoints;
+    /// individual D-Bus calls can finish after this soft boundary.
+    pub effective_deadline_ms: u64,
+    /// Counts observed refusal/cutoff checks, not omitted nodes or descendants.
+    pub incomplete_reasons: IncompleteReasons,
 }
 const VISIBLE_TRAVERSAL: &str = "selected-window-showing-ancestor-chain-v1";
 #[derive(Clone, Debug, Default, Deserialize, Serialize)]
@@ -413,6 +443,7 @@ struct VisibleWalk {
     nodes: Vec<Node>,
     complete: bool,
     statistics: VisibilityTraversal,
+    incomplete_reasons: IncompleteReasons,
 }
 /// Capture only the selected root and SHOWING paths below it. Hidden branches
 /// are deliberately outside this scope, not a claim about the whole application.
@@ -433,6 +464,7 @@ fn walk_visible_window(
     let mut result = VisibleWalk {
         nodes: Vec::new(),
         complete: true,
+        incomplete_reasons: IncompleteReasons::default(),
         statistics: VisibilityTraversal {
             definition: VISIBLE_TRAVERSAL.into(),
             ..VisibilityTraversal::default()
@@ -440,16 +472,19 @@ fn walk_visible_window(
     };
     while let Some((obj, parent, depth)) = stack.pop() {
         if expired() {
+            result.incomplete_reasons.traversal_deadline_cutoffs += 1;
             result.complete = false;
             break;
         }
         if !visited.insert(obj.clone()) {
+            result.incomplete_reasons.repeated_object_references += 1;
             result.complete = false;
             continue;
         }
         let node = match read(obj.clone(), parent, depth) {
             Ok(node) if !node.states.is_empty() => node,
             _ => {
+                result.incomplete_reasons.node_read_or_state_errors += 1;
                 result.complete = false;
                 result.statistics.visibility_probe_errors += 1;
                 continue;
@@ -471,6 +506,7 @@ fn walk_visible_window(
                 Ok(children) => {
                     for child in children {
                         if expired() {
+                            result.incomplete_reasons.traversal_deadline_cutoffs += 1;
                             result.complete = false;
                             break;
                         }
@@ -478,11 +514,14 @@ fn walk_visible_window(
                         match get_states(&child) {
                             Ok(states) if !states.is_empty() => {
                                 if state(&states, 25) {
+                                    result.incomplete_reasons.showing_child_under_hidden_parent +=
+                                        1;
                                     result.complete = false;
                                     result.statistics.showing_child_under_hidden_parent += 1;
                                 }
                             }
                             _ => {
+                                result.incomplete_reasons.child_visibility_probe_errors += 1;
                                 result.complete = false;
                                 result.statistics.visibility_probe_errors += 1;
                             }
@@ -490,6 +529,7 @@ fn walk_visible_window(
                     }
                 }
                 Err(_) => {
+                    result.incomplete_reasons.child_enumeration_errors += 1;
                     result.complete = false;
                     result.statistics.visibility_probe_errors += 1;
                 }
@@ -497,6 +537,7 @@ fn walk_visible_window(
             continue;
         }
         if result.nodes.len() >= max_nodes {
+            result.incomplete_reasons.max_nodes_cutoffs += 1;
             result.complete = false;
             break;
         }
@@ -505,6 +546,7 @@ fn walk_visible_window(
         if !showing {
             // Keep the requested root for diagnosis, but never issue mutation
             // handles when the selected window's bridge denies visibility.
+            result.incomplete_reasons.selected_root_not_showing += 1;
             result.complete = false;
             continue;
         }
@@ -516,6 +558,7 @@ fn walk_visible_window(
             Ok(children) => {
                 if depth >= max_depth {
                     if !children.is_empty() {
+                        result.incomplete_reasons.max_depth_cutoffs += 1;
                         result.complete = false;
                     }
                     continue;
@@ -524,7 +567,10 @@ fn walk_visible_window(
                     stack.push((child, Some(obj.clone()), depth + 1));
                 }
             }
-            Err(_) => result.complete = false,
+            Err(_) => {
+                result.incomplete_reasons.child_enumeration_errors += 1;
+                result.complete = false;
+            }
         }
     }
     result
@@ -557,8 +603,10 @@ fn observe(
     let application = apps.remove(0);
     let mut windows = Vec::new();
     let mut discovery_complete = true;
+    let mut discovery_reasons = IncompleteReasons::default();
     for obj in children(conn, &application)? {
-        if started.elapsed() > Duration::from_secs(3) {
+        if started.elapsed() > OBSERVE_DEADLINE {
+            discovery_reasons.window_discovery_deadline_cutoffs += 1;
             discovery_complete = false;
             break;
         }
@@ -568,7 +616,10 @@ fn observe(
                     windows.push(node);
                 }
             }
-            Err(_) => discovery_complete = false,
+            Err(_) => {
+                discovery_reasons.window_discovery_read_errors += 1;
+                discovery_complete = false;
+            }
         }
     }
     let matches: Vec<&Node> = windows.iter().filter(|node| node.name == title).collect();
@@ -587,10 +638,22 @@ fn observe(
         |object, parent, depth| read_node(conn, object, parent, depth),
         |object| children(conn, object),
         |object| node_states(conn, object),
-        || started.elapsed() > Duration::from_secs(3),
+        || started.elapsed() > OBSERVE_DEADLINE,
     );
     let nodes = walked.nodes;
     let complete = discovery_complete && walked.complete;
+    let mut incomplete_reasons = walked.incomplete_reasons;
+    incomplete_reasons.window_discovery_deadline_cutoffs =
+        discovery_reasons.window_discovery_deadline_cutoffs;
+    incomplete_reasons.window_discovery_read_errors =
+        discovery_reasons.window_discovery_read_errors;
+    let traversal_diagnostics = Some(TraversalDiagnostics {
+        revision: 1,
+        effective_max_nodes: max_nodes,
+        effective_max_depth: max_depth,
+        effective_deadline_ms: OBSERVE_DEADLINE.as_millis() as u64,
+        incomplete_reasons,
+    });
     // A modal can be a sibling application top-level, outside the selected
     // window subtree. Include these too so background AX cannot bypass it.
     let mut visible_modals: Vec<Object> = windows
@@ -603,7 +666,7 @@ fn observe(
         .collect();
     visible_modals.sort_by(|a, b| (&a.bus, &a.path).cmp(&(&b.bus, &b.path)));
     visible_modals.dedup();
-    Ok(Snapshot{pid,requested_title:title.into(),application,window,nodes,complete,visible_modals,semantic_scope:"exact selected AT-SPI window root plus SHOWING descendants under SHOWING ancestors; non-SHOWING and protected branches excluded. Completeness covers only this defined visible scope, not omitted descendants, hidden tabs or the whole application. Correct bridge SHOWING ancestry is required; immediate contradictions fail closed. Sibling top-level showing modal guards remain. Targets use unique-owner D-Bus object references, never integer indices".into(),sole_window_fallback_allowed:single_window,bus_guid:conn.server_guid().into(),max_nodes,max_depth,visibility_traversal:walked.statistics})
+    Ok(Snapshot{pid,requested_title:title.into(),application,window,nodes,complete,visible_modals,semantic_scope:"exact selected AT-SPI window root plus SHOWING descendants under SHOWING ancestors; non-SHOWING and protected branches excluded. Completeness covers only this defined visible scope, not omitted descendants, hidden tabs or the whole application. Correct bridge SHOWING ancestry is required; immediate contradictions fail closed. Sibling top-level showing modal guards remain. Targets use unique-owner D-Bus object references, never integer indices".into(),sole_window_fallback_allowed:single_window,bus_guid:conn.server_guid().into(),max_nodes,max_depth,visibility_traversal:walked.statistics,traversal_diagnostics})
 }
 fn revalidate(
     conn: &Connection,
@@ -1034,6 +1097,7 @@ mod visible_scope_tests {
         );
         assert!(!r.complete);
         assert_eq!(r.statistics.showing_child_under_hidden_parent, 1);
+        assert_eq!(r.incomplete_reasons.showing_child_under_hidden_parent, 1);
         assert_eq!(r.nodes.len(), 1);
     }
     #[test]
@@ -1075,6 +1139,7 @@ mod visible_scope_tests {
         assert!(!r.complete);
         assert_eq!(r.nodes.len(), 1);
         assert!(!r.statistics.selected_root_showing);
+        assert_eq!(r.incomplete_reasons.selected_root_not_showing, 1);
         assert_eq!(reads, vec!["/test/root"]);
     }
     #[test]
@@ -1093,6 +1158,7 @@ mod visible_scope_tests {
         );
         assert!(!r.complete);
         assert_eq!(r.statistics.visibility_probe_errors, 1);
+        assert_eq!(r.incomplete_reasons.child_visibility_probe_errors, 1);
     }
     #[test]
     fn empty_state_words_are_unknown_visibility_not_a_pruning_success() {
@@ -1108,6 +1174,7 @@ mod visible_scope_tests {
         );
         assert!(!r.complete);
         assert_eq!(r.statistics.visibility_probe_errors, 1);
+        assert_eq!(r.incomplete_reasons.node_read_or_state_errors, 1);
     }
     #[test]
     fn visible_node_limit_depth_limit_and_deadline_are_incomplete() {
@@ -1121,6 +1188,19 @@ mod visible_scope_tests {
                 expired,
             );
             assert!(!r.complete);
+            assert_eq!(
+                r.incomplete_reasons.max_nodes_cutoffs,
+                usize::from(budget == 1)
+            );
+            assert_eq!(
+                r.incomplete_reasons.max_depth_cutoffs,
+                usize::from(depth == 0)
+            );
+            assert_eq!(
+                r.incomplete_reasons.traversal_deadline_cutoffs,
+                usize::from(expired)
+            );
+            assert_eq!(r.incomplete_reasons.node_read_or_state_errors, 0);
         }
     }
     #[test]
@@ -1134,7 +1214,134 @@ mod visible_scope_tests {
             false,
         );
         assert!(!r.complete);
+        assert_eq!(r.incomplete_reasons.repeated_object_references, 1);
     }
+    #[test]
+    fn diagnostics_report_node_and_child_errors_without_exporting_private_error_text() {
+        let (missing, _, _) = walk(
+            vec![node("root", true, false)],
+            &[("root", &["missing"])],
+            100,
+            40,
+            None,
+            false,
+        );
+        assert!(!missing.complete);
+        assert_eq!(missing.incomplete_reasons.node_read_or_state_errors, 1);
+        for hidden in [false, true] {
+            let result = walk_visible_window(
+                object("root"),
+                object("application"),
+                100,
+                40,
+                |obj, parent, depth| {
+                    let mut n = node(
+                        if obj == object("root") {
+                            "root"
+                        } else {
+                            "hidden"
+                        },
+                        obj == object("root"),
+                        false,
+                    );
+                    n.parent = parent;
+                    n.depth = depth;
+                    Ok(n)
+                },
+                |obj| {
+                    if hidden && *obj == object("root") {
+                        Ok(vec![object("hidden")])
+                    } else {
+                        Err("private D-Bus path and bridge exception must not be exported".into())
+                    }
+                },
+                |_| panic!("No children returned, no visibility probes needed"),
+                || false,
+            );
+            assert!(!result.complete);
+            assert_eq!(result.incomplete_reasons.child_enumeration_errors, 1);
+            assert_eq!(result.incomplete_reasons.node_read_or_state_errors, 0);
+            let diagnostics = serde_json::to_value(&result.incomplete_reasons).unwrap();
+            assert!(diagnostics.as_object().unwrap().values().all(Value::is_u64));
+            assert!(!diagnostics.to_string().contains("private"));
+        }
+    }
+
+    #[test]
+    fn deadline_inside_hidden_child_probe_preserves_scope_and_reports_actual_cutoff() {
+        let calls = std::cell::Cell::new(0);
+        let result = walk_visible_window(
+            object("root"),
+            object("application"),
+            100,
+            40,
+            |obj, parent, depth| {
+                let mut n = node(
+                    if obj == object("root") {
+                        "root"
+                    } else {
+                        "hidden"
+                    },
+                    obj == object("root"),
+                    false,
+                );
+                n.parent = parent;
+                n.depth = depth;
+                Ok(n)
+            },
+            |obj| {
+                Ok(vec![object(if *obj == object("root") {
+                    "hidden"
+                } else {
+                    "unread_child"
+                })])
+            },
+            |_| panic!("Deadline cutoff must precede the child state probe"),
+            || {
+                let n = calls.get() + 1;
+                calls.set(n);
+                n >= 3
+            },
+        );
+        assert!(!result.complete);
+        assert_eq!(result.incomplete_reasons.traversal_deadline_cutoffs, 1);
+        assert_eq!(result.statistics.pruned_not_showing_branches, 1);
+        assert_eq!(result.statistics.immediate_child_visibility_probes, 0);
+        assert_eq!(result.nodes.len(), 1);
+        assert_eq!(result.nodes[0].name, "root");
+    }
+
+    #[test]
+    fn legacy_snapshot_diagnostics_are_unknown_and_new_typed_evidence_roundtrips() {
+        let old = json!({"pid":42,"requested_title":"test","application":{"bus":":1.test","path":"/test/app"},"window":{"bus":":1.test","path":"/test/window"},"nodes":[],"complete":false,"visible_modals":[],"semantic_scope":"test","sole_window_fallback_allowed":false,"bus_guid":"no-connection"});
+        let mut snapshot: Snapshot = serde_json::from_value(old).unwrap();
+        assert!(snapshot.traversal_diagnostics.is_none());
+        assert_eq!(snapshot.max_nodes, 1000);
+        assert_eq!(snapshot.max_depth, 40);
+        snapshot.traversal_diagnostics = Some(TraversalDiagnostics {
+            revision: 1,
+            effective_max_nodes: 200,
+            effective_max_depth: 12,
+            effective_deadline_ms: OBSERVE_DEADLINE.as_millis() as u64,
+            incomplete_reasons: IncompleteReasons {
+                max_depth_cutoffs: 1,
+                ..IncompleteReasons::default()
+            },
+        });
+        let serialized = serde_json::to_value(&snapshot).unwrap();
+        let restored: Snapshot = serde_json::from_value(serialized.clone()).unwrap();
+        assert!(!restored.complete);
+        assert_eq!(
+            serialized["traversal_diagnostics"]["effective_deadline_ms"],
+            3000
+        );
+        assert_eq!(
+            serialized["traversal_diagnostics"]["incomplete_reasons"]["max_depth_cutoffs"],
+            1
+        );
+        assert_eq!(serde_json::to_value(restored).unwrap(), serialized);
+    }
+
     #[test]
     fn fresh_traversal_removes_a_target_that_becomes_hidden() {
         let (before, _, _) = walk(

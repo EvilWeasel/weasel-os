@@ -157,9 +157,11 @@ owned app instance. Never treat toolbar colour or click acknowledgement as
 proof that the text buffer has keyboard focus.
 Raw D-Bus paths, Cua indices and guessed coordinates are never direct semantic
 targets. After an edit changes the semantic window context, read fresh semantics
-before a dependent Save-button action. Incomplete or unsupported trees require
-a deliberate visual route and fresh result verification. A failed action may
-already have effects; inspect its report instead of replaying it.
+before a dependent Save-button action. Incomplete trees remain read-only; use
+the bounded diagnostic recovery below before declaring the bridge unusable.
+An unsupported or still-incomplete route requires a verified alternative and
+fresh result verification. A failed action may already have effects; inspect
+its report instead of replaying it.
 
 To narrow the returned direct elements, pass `query` as a string alongside
 its required actual `window_id`, for example `query: "Save"` when that label
@@ -169,6 +171,17 @@ It is not a label-only, role-selector, fuzzy or regex query. Omitted or empty
 `query` returns all nodes from the captured subtree. Default traversal limits
 are 1000 nodes and depth 40; `max_elements` and `max_depth` are capped at those
 values. Filtering narrows returned elements, not traversal or visibility scope.
+For `elements_complete=false`, inspect `traversal_diagnostics`, its effective
+bounds and `incomplete_reasons`; null/missing diagnostics mean the cause is
+unknown. If a lower requested bound was cut off (`max_depth_cutoffs` or
+`max_nodes_cutoffs`), make one fresh read of the same exact window with
+`max_depth:40,max_elements:1000`. On an older backend without diagnostics,
+one such full bounded read is also reasonable if the previous limits were
+lower; do not claim a proven cutoff. Keep `query` a literal string matching
+an observed target, or omit it when the intended field is not yet identified.
+Do not repeat an unchanged incomplete request or increase already capped
+bounds. Larger limits do not repair mapping, visibility or owner errors;
+preserve those refusals and choose a supported alternative deliberately.
 
 The daemon builds the full snapshot and retains its handles before filtering.
 Inspect `niri_window_id`, PID/title, `semantic_scope`, `visibility_traversal`,
@@ -194,6 +207,17 @@ is used to focus an entry, read fresh semantics and confirm its focused state
 before dependent typing. The adapter reads individual action names and bounded
 text ranges because Gecko's bulk action names and oversized ranges were faulty.
 Do not repeat an uncertain setter; inspect the actual result and change route.
+
+Before content typing, paste or buffer-wide editing shortcuts, prove the
+intended text buffer has focus separately from top-level window focus. Prefer
+a fresh complete semantic read showing `focused:true` on the exact intended
+text object, with its label/role and document or field identity. If that route
+remains unavailable, use an app-supported document/field-focus command or a
+fresh tightly grounded crop, then confirm a visible caret or selection in the
+identified buffer before editing. A blank area, placeholder link, toolbar
+colour or focus/click acknowledgement is not that proof. If focus remains
+uncertain, pause the content step and report the verified partial state;
+do not test it by typing. A new modal or focus change requires fresh proof.
 
 Focus the identified window with a separate action, then observe again.
 Focus requires an observation younger than 60 seconds and a fresh matching
@@ -238,7 +262,9 @@ abort. Ordinary local keyboard/mouse activity does not latch takeover: it
 invalidates stale observations and may interrupt a colliding action batch.
 For `input_conflict`, inspect completed/possible effects, confirm release,
 wait until `held_state_known=true` and `held_controls=0`, obtain a fresh
-observation and continue the remaining task after input is quiet. Held physical
+observation and recover only the unfinished step after input is quiet. Reprove
+text focus before dependent editing; never replay an already completed effect.
+This is recovery within the same task, not a task abort. Held physical
 modifiers/buttons refuse input temporarily; releasing them permits fresh
 continuation without `desktop_resume`.
 Ordinary input may leave a captured image non-actionable: inspect `input_ready`

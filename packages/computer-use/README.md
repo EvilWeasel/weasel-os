@@ -79,6 +79,17 @@ FOCUSED on the same object. A boolean acknowledgement alone is insufficient.
 Fresh visual and semantic observations must confirm the desired text focus
 before dependent keys; selection, clipboard and artifact checks remain separate.
 Duplicate window-title mappings retain their existing refusal.
+Direct snapshots also expose versioned `traversal_diagnostics`: effective node
+and depth bounds, the existing soft elapsed-time checkpoint budget, and counters
+for actually encountered cutoffs, read failures and visibility contradictions.
+Counters describe observed checks, not a count of omitted descendants. Legacy
+snapshots publish `null`, which means the producer supplied no diagnosis.
+These fields do not grant handles or change completeness or input readiness.
+If an explicitly lower bound caused truncation, one fresh read at the supported
+defaults (depth 40, 1000 nodes) can clarify the result. Persistent read errors,
+visibility contradictions or deadlines require a deliberate alternative route;
+increasing limits does not establish a valid semantic target. The 3000 ms value
+remains a soft checkpoint boundary, not a per-call or atomic timeout guarantee.
 `status: "available"` or `"limited"` describes the tree, while `input_ready`
 and `action_ready` describe the separate readiness snapshot. Incomplete or
 initially/finally non-actionable trees issue no new handles or mutation

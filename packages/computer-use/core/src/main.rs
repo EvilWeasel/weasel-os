@@ -2507,7 +2507,7 @@ fn semantic_snapshot_result(
         &mut elements,
     )?;
     Ok(text_result(
-        json!({"schema":1,"status":if snapshot.complete{"available"}else{"limited"},"niri_window_id":id,"epoch":epoch,"input_generation":input_generation,"current_input_generation":readiness["current_input_generation"],"input_ready":readiness["input_ready"],"action_ready":readiness["action_ready"],"input_activity_during_snapshot":readiness["input_activity_during_snapshot"],"fresh_observation_required_for_input":readiness["fresh_observation_required_for_input"],"fresh_semantic_snapshot_required_for_input":readiness["fresh_semantic_snapshot_required_for_input"],"takeover_latched":readiness["takeover_latched"],"input_readiness":readiness,"pid":pid,"title":title,"semantic_snapshot_id":snapshot_id,"elements_complete":snapshot.complete,"returned_element_count":elements.len(),"total_element_count":snapshot.nodes.len(),"elements":elements,"semantic_scope":snapshot.semantic_scope,"visibility_traversal":snapshot.visibility_traversal,"coordinate_frame":"No pixel bounds exported; direct typed actions use daemon-owned opaque handles only. Cua tokens and raw D-Bus paths are not accepted.","expires_after_ms":60000,"note":"Labels remain readable during ordinary input or held controls. Non-actionable or incomplete snapshots issue no handles; obtain a fresh complete semantic snapshot after controls are released. Mutations freshly validate original input generation, immutable bus generation/unique owner, object role/name/description/interfaces, observed ancestry, the defined SHOWING-ancestor-chain semantic context, enabled/showing state and modal set. set_value requires expected complete prior text or a complete matching512char excerpt; exact saved artifact remains independently verified.","latency_ms":started.elapsed().as_secs_f64()*1000.0}),
+        json!({"schema":1,"status":if snapshot.complete{"available"}else{"limited"},"niri_window_id":id,"epoch":epoch,"input_generation":input_generation,"current_input_generation":readiness["current_input_generation"],"input_ready":readiness["input_ready"],"action_ready":readiness["action_ready"],"input_activity_during_snapshot":readiness["input_activity_during_snapshot"],"fresh_observation_required_for_input":readiness["fresh_observation_required_for_input"],"fresh_semantic_snapshot_required_for_input":readiness["fresh_semantic_snapshot_required_for_input"],"takeover_latched":readiness["takeover_latched"],"input_readiness":readiness,"pid":pid,"title":title,"semantic_snapshot_id":snapshot_id,"elements_complete":snapshot.complete,"returned_element_count":elements.len(),"total_element_count":snapshot.nodes.len(),"elements":elements,"semantic_scope":snapshot.semantic_scope,"visibility_traversal":snapshot.visibility_traversal,"traversal_diagnostics":snapshot.traversal_diagnostics,"coordinate_frame":"No pixel bounds exported; direct typed actions use daemon-owned opaque handles only. Cua tokens and raw D-Bus paths are not accepted.","expires_after_ms":60000,"note":"Labels remain readable during ordinary input or held controls. Non-actionable or incomplete snapshots issue no handles; obtain a fresh complete semantic snapshot after controls are released. Mutations freshly validate original input generation, immutable bus generation/unique owner, object role/name/description/interfaces, observed ancestry, the defined SHOWING-ancestor-chain semantic context, enabled/showing state and modal set. set_value requires expected complete prior text or a complete matching512char excerpt; exact saved artifact remains independently verified.","latency_ms":started.elapsed().as_secs_f64()*1000.0}),
     ))
 }
 
@@ -5314,6 +5314,59 @@ mod release_recovery_tests {
     fn semantic_readiness_window() -> Value {
         json!({"id":1,"pid":42,"app_id":"offline-fixture","workspace_id":1})
     }
+    #[test]
+    fn semantic_truncation_diagnostics_publish_exactly_without_granting_handles() {
+        let (state, dir) = cooperative_fixture("semantic-truncation-diagnostics");
+        let generation = state.input_policy.generation();
+        let mut snapshot = semantic_readiness_snapshot(false);
+        assert!(snapshot.traversal_diagnostics.is_none());
+        snapshot.traversal_diagnostics = Some(atspi::TraversalDiagnostics {
+            revision: 1,
+            effective_max_nodes: 200,
+            effective_max_depth: 12,
+            effective_deadline_ms: 3000,
+            incomplete_reasons: atspi::IncompleteReasons {
+                max_depth_cutoffs: 1,
+                ..atspi::IncompleteReasons::default()
+            },
+        });
+        let expected = serde_json::to_value(&snapshot.traversal_diagnostics).unwrap();
+        let result = semantic_snapshot_result(
+            &state,
+            &json!({}),
+            semantic_readiness_window(),
+            snapshot,
+            77,
+            generation,
+            Instant::now(),
+        )
+        .unwrap();
+        let data = result_data(&result);
+        assert_eq!(data["traversal_diagnostics"], expected);
+        assert_eq!(data["elements_complete"], false);
+        assert_eq!(data["status"], "limited");
+        assert_eq!(data["action_ready"], false);
+        assert_eq!(data["elements"][0]["handle_id"], Value::Null);
+        assert_eq!(data["elements"][0]["capabilities"]["focus"], false);
+        assert!(state.semantic_targets.lock().unwrap().is_empty());
+        let legacy = semantic_snapshot_result(
+            &state,
+            &json!({}),
+            semantic_readiness_window(),
+            semantic_readiness_snapshot(false),
+            77,
+            generation,
+            Instant::now(),
+        )
+        .unwrap();
+        assert_eq!(result_data(&legacy)["traversal_diagnostics"], Value::Null);
+        assert_eq!(state.input_policy.generation(), generation);
+        assert_eq!(state.epoch.load(Ordering::SeqCst), 77);
+        assert_eq!(state.queued.load(Ordering::SeqCst), 0);
+        assert!(state.active.lock().unwrap().is_null());
+        fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn semantic_focus_is_standalone_and_rejects_mixed_batch_before_queue_or_device() {
         let (state, dir) = cooperative_fixture("semantic-focus-standalone");
