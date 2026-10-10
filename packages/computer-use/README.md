@@ -57,6 +57,14 @@ alone does not establish actor release.
 
 ## Operations and boundaries
 
+Pointer actions require a displayed view no larger than 1200 pixels on either
+axis. Larger screenshots remain available as overviews. The actor validates
+every move, click, scroll and drag before admitting the batch, so a later
+oversized pointer target cannot follow earlier typing or other batch effects.
+The error asks for a fresh target crop and crop-local coordinates. Smaller
+crowded targets still require appropriate tighter grounding by the planner;
+this size bound alone does not establish target identity or UI success.
+
 Protocol schema 1 exposes status, real window/output/workspace inventory,
 observations, Cua accessibility reads, direct AT-SPI reads, typed actions,
 priority cancel, latched takeover and explicit resume. Observations carry a

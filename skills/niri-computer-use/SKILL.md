@@ -21,7 +21,8 @@ report if the current client cannot provide the requested model separation.
 For the full workflow, keep the selected output visibly marked with the
 click-through blue indicator. Start `weasel-computer-use-indicator run
 --task-id ID --output OUTPUT --stdin-control` in the executing worker's owned
-foreground `exec_command` session with `tty=true`; retain the session ID and
+foreground `exec_command` session with `tty=true` and `yield_time_ms=1000`;
+read its actual ready event, retain the session ID and
 keep it alive across model-thinking gaps. End with `v1 end\n` through that
 session or the exact task helper's `end` command. End the exact
 task helper on completion or abort. Its monitor/epoch binding and bounded
@@ -92,7 +93,9 @@ Use a complete direct semantic snapshot and an exact showing, enabled node
 with the required typed-action capability before choosing a visual click.
 A returned action name alone does not make a disabled node actionable.
 For visual targeting, treat a full-output image larger than 1200 pixels in
-either dimension as an overview. Before pointer input, capture a fresh region
+either dimension as an overview. The actor refuses the whole batch before any
+input if any move, click, scroll or drag uses a view larger than 1200 pixels in
+either dimension. Before pointer input, capture a fresh region
 containing the target with both crop dimensions at most 1200 pixels; also crop
 small or crowded controls on smaller images. Select the region from visible
 pixels in the observation, not guessed absolute window bounds. If necessary,

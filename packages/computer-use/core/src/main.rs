@@ -35,6 +35,7 @@ use std::{
 type R<T> = Result<T, String>;
 const MAX_REQUEST: u64 = 262_144;
 const MAX_AGE: Duration = Duration::from_secs(60);
+const MAX_POINTER_VIEW_DIMENSION: u32 = 1200;
 const RESUME_BINDING_REVISION: u32 = 1;
 thread_local! {static CURRENT_CANCEL_FLAG: RefCell<Option<Arc<AtomicBool>>> = const { RefCell::new(None) };}
 thread_local! {static CURRENT_DEADLINE: RefCell<Option<Instant>> = const { RefCell::new(None) };}
@@ -851,7 +852,19 @@ fn view_point(obs: &Observation, x: f64, y: f64) -> R<()> {
     }
     Ok(())
 }
+fn preflight_pointer_view(obs: &Observation) -> R<()> {
+    if obs.view.width > MAX_POINTER_VIEW_DIMENSION || obs.view.height > MAX_POINTER_VIEW_DIMENSION {
+        return Err(format!(
+            "Pointer view is {}x{}; capture a fresh target crop at most {} pixels in each dimension, then use its crop-local coordinates. No input from this batch sent.",
+            obs.view.width, obs.view.height, MAX_POINTER_VIEW_DIMENSION
+        ));
+    }
+    Ok(())
+}
 fn preflight(obs: &Observation, action: &Action) -> R<()> {
+    if action.pointer() {
+        preflight_pointer_view(obs)?;
+    }
     match action {
         Action::Move { x, y } | Action::Click { x, y, .. } | Action::Scroll { x, y, .. } => {
             view_point(obs, *x, *y)?
@@ -1929,6 +1942,12 @@ fn act_inner(state: &State, args: &Value, epoch: u64) -> R<Value> {
         .ok_or("Observation missing; call desktop_observe first")?;
     let _input_guard = input_policy::Guard::bind(obs.input_generation);
     state.input_policy.check(obs.input_generation)?;
+    // Check the common pointer view before action-specific capability reads.
+    // A later oversized click must return the actionable crop error even when
+    // an earlier global shortcut cannot access a device on this host.
+    if parsed.actions.iter().any(Action::pointer) {
+        preflight_pointer_view(&obs)?;
+    }
     // Reject malformed later targets before any earlier batch effects occur.
     for action in &parsed.actions {
         preflight(&obs, action)?;
@@ -3065,7 +3084,7 @@ fn tools() -> Value {
       {"name":"desktop_observe","description":"Capture one actual laptop output via grim at scale1, plus Niri identities. Startup capture_not_attempted=true is expected and permits this first read-only observation. Input always requires accepted fresh observation and action_ready; prior successful capture is not a prerequisite for authorized startup resume. Optional crop uses full-output screenshot pixels x/y/width/height; action x/y then use local pixels of the displayed crop. Core translates crop origin; NEVER add compositor output origin. Actual PNG size can differ from Niri logical size by rounding. Observation expires in60seconds; identity/geometry and fresh target-region guards still run. Observe after focus/workspace/layout changes. include_image=false returns private PNG reference only.","inputSchema":{"type":"object","properties":{"output":{"type":"string"},"include_image":{"type":"boolean"},"crop":crop}}},
       {"name":"desktop_semantic","description":"Read fresh Cua AT-SPI elements for a Niri window. Maps only unique actual PID+title; synthetic Cua IDs are never guessed. Query filters returned elements. Accessibility bounds are app-local and NOT screenshot coordinates; do not directly click them without calibrated mapping. Limited/root-only trees require visual fallback.","inputSchema":{"type":"object","properties":{"window_id":{"type":"integer"},"query":{"type":"string"},"max_elements":{"type":"integer"},"max_depth":{"type":"integer"}},"required":["window_id"]}},
       {"name":"desktop_semantic_direct","description":"Read exact-window AT-SPI subtree with immutable direct object handles. Supplies role/label/description/parent/text excerpt/action_names. Only daemon-owned handles from complete snapshots may be used with desktop_act semantic_set_value or semantic_click. No raw object/index/Cua tokens and no pixel fallback. Native GTK candidates need live acceptance; missing/incomplete bridges use visual typed actions.","inputSchema":{"type":"object","properties":{"window_id":{"type":"integer"},"query":{"type":"string"},"max_elements":{"type":"integer"},"max_depth":{"type":"integer"}},"required":["window_id"]}},
-      {"name":"desktop_act","description":"Single-writer typed desktop actions against fresh observation. Rejects changed focus/geometry/scaling or changed pixels near pointer targets. x/y are local to displayed screenshot/crop. Focus must be standalone. Unknown or misplaced fields for an action kind reject the whole batch before input; restore_clipboard belongs only to paste, while type always preserves the prior selection. By default observe_after=true returns a new after_observation ID and image in this same response after dispatch/release and a bounded80ms defaultsettle wait; settle_ms=0..1000 can adjust. Use it for the next act and inspect expected result. A slow/unchanged frame needs another observation/semantic check, not repetition of toggle input. include_image=false omits its image. Acknowledgement is not UI success. Type text_method=auto uses clipboard for known Electron IDs (code/T3) and >1000-character text, keyboard for shorter text in other apps; explicit keyboard/clipboard are available. Electron wtype Unicode is unreliable on this laptop. Clipboard preserves supported text/rich app payloads and original Chromium provenance in bounded RAM from one offer, normalizes duplicate MIME names, omits SAVE_TARGETS and SAME_APP GTK_TEXT_BUFFER_CONTENTS transport markers, preserves serialized GTK rich text, and keeps a separate source holder across actor restarts. Unsupported/sensitive/oversized formats refuse before replacement. Own-source check runs after layout/keymap/window validation and before the first paste modifier press; ownership can still change between reply and input because Wayland has no atomic selection-check-and-paste. No restore after takeover/cancel/ownership loss. Scroll dx/dy are discrete wheel steps (integer -100..100), not pixels; positive dx moves right and positive dy moves down. Smooth-scroll animation needs another fresh observation/settle check before reusing visual targets. Keys are modifiers first e.g.[ctrl,l],[Return]. Explicit key_scope=compositor and Super/meta/logo chords use an owned persistent direct-uinput device because this Niri25.11 Wayland virtual keyboard bypasses compositor bindings; Ctrl/app chords retain the Wayland transport. A fresh proxy check requires backend routing_revision=2 and binds session/epoch/observation before forwarding a global batch; an older backend is refused. Missing permission/takeover monitor/compositor device-open evidence refuses the complete batch before input. Creating the own device is a capability side effect. A kernel input acknowledgement does not verify Niri/UI acceptance; inspect the fresh result. No automatic input fallback. Direct semantic_set_value(handle_id,text,expected_text optional) replaces exact editable contents; semantic_click(handle_id,action_name from direct tree) invokes only AT-SPI named action. Both freshly revalidate context and have no input fallback. Batch stable edits/shortcuts when intermediate states cannot invalidate later targets; changed-target actions need fresh observation.","inputSchema":{"type":"object","properties":{"observation_id":{"type":"string"},"window_id":{"type":"integer"},"task_id":{"type":"string"},"timeout_ms":{"type":"integer","minimum":100,"maximum":120000,"description":"Whole batch budget including queue, validation, capture, input and post-observe. Bounded release cleanup follows even after timeout."},"observe_after":{"type":"boolean","default":true},"include_image":{"type":"boolean","default":true},"settle_ms":{"type":"integer","default":80,"minimum":0,"maximum":1000,"description":"Bounded post-action settle wait before capture; not a proof of repaint. Slow conditions require fresh observations, never repeated blind input."},"actions":{"type":"array","items":action,"minItems":1,"maxItems":32}},"required":["observation_id","actions"]}},
+      {"name":"desktop_act","description":"Single-writer typed desktop actions against fresh observation. Rejects changed focus/geometry/scaling or changed pixels near pointer targets. x/y are local to displayed screenshot/crop. Every move/click/scroll/drag requires the displayed view to be at most1200 pixels on each axis; an oversized view rejects the whole batch before any input, queue admission or device preparation. Capture a fresh target crop and use its crop-local coordinates. Full images remain usable for overview, focus, keys and semantics. Focus must be standalone. Unknown or misplaced fields for an action kind reject the whole batch before input; restore_clipboard belongs only to paste, while type always preserves the prior selection. By default observe_after=true returns a new after_observation ID and image in this same response after dispatch/release and a bounded80ms defaultsettle wait; settle_ms=0..1000 can adjust. Use it for the next act and inspect expected result. A slow/unchanged frame needs another observation/semantic check, not repetition of toggle input. include_image=false omits its image. Acknowledgement is not UI success. Type text_method=auto uses clipboard for known Electron IDs (code/T3) and >1000-character text, keyboard for shorter text in other apps; explicit keyboard/clipboard are available. Electron wtype Unicode is unreliable on this laptop. Clipboard preserves supported text/rich app payloads and original Chromium provenance in bounded RAM from one offer, normalizes duplicate MIME names, omits SAVE_TARGETS and SAME_APP GTK_TEXT_BUFFER_CONTENTS transport markers, preserves serialized GTK rich text, and keeps a separate source holder across actor restarts. Unsupported/sensitive/oversized formats refuse before replacement. Own-source check runs after layout/keymap/window validation and before the first paste modifier press; ownership can still change between reply and input because Wayland has no atomic selection-check-and-paste. No restore after takeover/cancel/ownership loss. Scroll dx/dy are discrete wheel steps (integer -100..100), not pixels; positive dx moves right and positive dy moves down. Smooth-scroll animation needs another fresh observation/settle check before reusing visual targets. Keys are modifiers first e.g.[ctrl,l],[Return]. Explicit key_scope=compositor and Super/meta/logo chords use an owned persistent direct-uinput device because this Niri25.11 Wayland virtual keyboard bypasses compositor bindings; Ctrl/app chords retain the Wayland transport. A fresh proxy check requires backend routing_revision=2 and binds session/epoch/observation before forwarding a global batch; an older backend is refused. Missing permission/takeover monitor/compositor device-open evidence refuses the complete batch before input. Creating the own device is a capability side effect. A kernel input acknowledgement does not verify Niri/UI acceptance; inspect the fresh result. No automatic input fallback. Direct semantic_set_value(handle_id,text,expected_text optional) replaces exact editable contents; semantic_click(handle_id,action_name from direct tree) invokes only AT-SPI named action. Both freshly revalidate context and have no input fallback. Batch stable edits/shortcuts when intermediate states cannot invalidate later targets; changed-target actions need fresh observation.","inputSchema":{"type":"object","properties":{"observation_id":{"type":"string"},"window_id":{"type":"integer"},"task_id":{"type":"string"},"timeout_ms":{"type":"integer","minimum":100,"maximum":120000,"description":"Whole batch budget including queue, validation, capture, input and post-observe. Bounded release cleanup follows even after timeout."},"observe_after":{"type":"boolean","default":true},"include_image":{"type":"boolean","default":true},"settle_ms":{"type":"integer","default":80,"minimum":0,"maximum":1000,"description":"Bounded post-action settle wait before capture; not a proof of repaint. Slow conditions require fresh observations, never repeated blind input."},"actions":{"type":"array","items":action,"minItems":1,"maxItems":32}},"required":["observation_id","actions"]}},
       {"name":"desktop_cancel","description":"Priority epoch cancellation independent of actor lock. Pending batches stop; held buttons release. Already-dispatched effects remain. Wait for desktop_status active=null and actor_release_confirmed=true for full release.","inputSchema":{"type":"object","properties":{}}},
       {"name":"desktop_takeover","description":"Explicit human desktop takeover, persists its cause across backend restarts and latches refusal of future actions and cancels queued/active automation. Only a physical Escape press does this automatically when accessible; ordinary input invalidates stale observations and releases a conflicting batch without latching takeover. Wait active=null and actor_release_confirmed=true for full release. desktop_resume then fresh observation is required.","inputSchema":{"type":"object","properties":{}}},
       {"name":"desktop_recover_release","description":"Explicit bounded recovery of unconfirmed release/receipt on existing owned actuators only. Refuses if writer busy, active task or queue nonempty. Sends only releases of owned held buttons/keys and receipt sync, no press/move/device creation/action replay, no epoch/latch/cause reset, no automatic resume. May finalize effects of already-held input. Default1500ms, maximum2000ms shared budget. Failure remains unconfirmed; original last_result preserved. Success invalidates old observations/semantic handles and requires fresh capture; inspect status queue and follow human return-of-control policy before resume.","inputSchema":{"type":"object","properties":{"timeout_ms":{"type":"integer","minimum":200,"maximum":2000,"default":1500}},"additionalProperties":false}},
@@ -4313,6 +4332,108 @@ mod release_recovery_tests {
     }
     fn result_data(result: &Value) -> Value {
         serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap()
+    }
+    #[test]
+    fn oversized_pointer_views_refuse_every_pointer_kind_on_each_axis() {
+        let (_state, dir) = cooperative_fixture("pointer-view-boundaries");
+        let mut captured = obs(&dir);
+        let pointers = [
+            Action::Move { x: 3.0, y: 4.0 },
+            Action::Click {
+                x: 3.0,
+                y: 4.0,
+                button: None,
+                count: None,
+            },
+            Action::Scroll {
+                x: 3.0,
+                y: 4.0,
+                dx: 0,
+                dy: 1,
+            },
+            Action::Drag {
+                x: 3.0,
+                y: 4.0,
+                to_x: 20.0,
+                to_y: 20.0,
+                duration_ms: None,
+            },
+        ];
+        for (width, height) in [(2752, 1152), (1201, 1200), (1200, 1201)] {
+            captured.view.width = width;
+            captured.view.height = height;
+            for action in &pointers {
+                assert!(preflight(&captured, action)
+                    .unwrap_err()
+                    .contains("fresh target crop"));
+            }
+            assert!(preflight(&captured, &Action::Focus { window_id: 77 }).is_ok());
+            assert!(preflight(
+                &captured,
+                &Action::Type {
+                    text: "bounded edit".into(),
+                    text_method: TextMethod::Auto
+                }
+            )
+            .is_ok());
+            assert!(preflight(
+                &captured,
+                &Action::SemanticClick {
+                    handle_id: "fresh-handle".into(),
+                    action_name: "activate".into()
+                }
+            )
+            .is_ok());
+        }
+        captured.view.width = 1200;
+        captured.view.height = 1200;
+        for action in &pointers {
+            assert!(preflight(&captured, action).is_ok());
+        }
+        captured.image_width = 2752;
+        captured.image_height = 1152;
+        captured.view = Crop {
+            x: 1500,
+            y: 200,
+            width: 1000,
+            height: 400,
+        };
+        for action in &pointers {
+            assert!(preflight(&captured, action).is_ok());
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn oversized_later_pointer_refuses_batch_before_earlier_edit_or_actor_admission() {
+        let (state, dir) = cooperative_fixture("pointer-view-batch-refusal");
+        let mut captured = obs(&dir);
+        captured.image_width = 2752;
+        captured.image_height = 1152;
+        captured.view.width = 2752;
+        captured.view.height = 1152;
+        state
+            .observations
+            .lock()
+            .unwrap()
+            .insert(captured.id.clone(), captured.clone());
+        let before_result = state.last_result.lock().unwrap().clone();
+        for earlier in [
+            json!({"kind":"type","text":"must-not-be-typed"}),
+            json!({"kind":"key","keys":["Super","Right"],"key_scope":"compositor"}),
+        ] {
+            let error = act(&state, &json!({"observation_id":captured.id,"task_id":"must-not-enter-actor","observe_after":false,"actions":[earlier,{"kind":"click","x":2100,"y":300}]}), 77).unwrap_err();
+            assert!(error.contains("fresh target crop"));
+            assert!(state.active.lock().unwrap().is_null());
+            assert_eq!(state.queued.load(Ordering::SeqCst), 0);
+            assert!(state.release_confirmed.load(Ordering::SeqCst));
+            assert!(state.actor.lock().unwrap().is_none());
+            assert!(state.keyboard.lock().unwrap().is_none());
+            assert!(state.global_keyboard.lock().unwrap().is_none());
+            assert_eq!(*state.last_result.lock().unwrap(), before_result);
+            assert_eq!(fs::metadata(dir.join("events.jsonl")).unwrap().len(), 0);
+        }
+        fs::remove_dir_all(dir).unwrap();
     }
     fn activity_after_writer_active(
         state: Arc<State>,
