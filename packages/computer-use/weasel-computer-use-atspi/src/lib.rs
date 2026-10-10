@@ -34,7 +34,60 @@ pub struct Node {
     pub protected: bool,
     pub action_names: Vec<String>,
     pub text_excerpt: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub text_selection: Option<TextSelection>,
 }
+/// Selection evidence is a bounded readback, not an atomic text snapshot or input authority.
+#[derive(Clone, Debug, Deserialize, Serialize)]
+pub struct TextSelection {
+    pub status: String,
+    pub character_count: Option<i32>,
+    pub selection_count: Option<i32>,
+    pub ranges: Vec<SelectionRange>,
+    pub full_text_selected: Option<bool>,
+    pub stable_readback: bool,
+    pub offset_unit: String,
+    pub end_exclusive: bool,
+    pub text_identity_verified: bool,
+    pub reason: Option<String>,
+}
+#[derive(Clone, Debug, Deserialize, Serialize, PartialEq, Eq)]
+pub struct SelectionRange {
+    pub start: i32,
+    pub end: i32,
+}
+#[derive(Clone, Copy, Debug)]
+enum SelectionReadError {
+    Unsupported,
+    Failed,
+}
+type SelectionResult<T> = Result<T, SelectionReadError>;
+impl TextSelection {
+    fn unavailable(status: &str, reason: &str) -> Self {
+        Self {
+            status: status.into(),
+            character_count: None,
+            selection_count: None,
+            ranges: Vec::new(),
+            full_text_selected: None,
+            stable_readback: false,
+            offset_unit: "unicode_codepoints".into(),
+            end_exclusive: true,
+            text_identity_verified: false,
+            reason: Some(reason.into()),
+        }
+    }
+    fn read_error(error: SelectionReadError, stage: &str) -> Self {
+        Self::unavailable(
+            match error {
+                SelectionReadError::Unsupported => "unsupported",
+                SelectionReadError::Failed => "error",
+            },
+            stage,
+        )
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Serialize)]
 pub struct Snapshot {
     pub pid: u32,
@@ -365,6 +418,200 @@ fn read_text(
 fn read_full_text(conn: &Connection, object: &Object) -> R<String> {
     read_text(conn, object, MAX_TEXT_BYTES, true)
 }
+// At most six calls for one focused Text object: Count/NSelections/range,
+// then Count/NSelections/range again. No text content or caret inference.
+fn read_selection_bounded(
+    mut count: impl FnMut() -> SelectionResult<i32>,
+    mut selection_count: impl FnMut() -> SelectionResult<i32>,
+    mut selection: impl FnMut(i32) -> SelectionResult<(i32, i32)>,
+) -> TextSelection {
+    let before = match count() {
+        Ok(value) if value >= 0 => value,
+        Ok(_) => return TextSelection::unavailable("error", "invalid_character_count"),
+        Err(error) => return TextSelection::read_error(error, "character_count_unavailable"),
+    };
+    let n = match selection_count() {
+        Ok(value) if value >= 0 => value,
+        Ok(_) => return TextSelection::unavailable("error", "invalid_selection_count"),
+        Err(error) => return TextSelection::read_error(error, "selection_count_unavailable"),
+    };
+    let mut result = TextSelection::unavailable("available", "unverified_readback");
+    result.character_count = Some(before);
+    result.selection_count = Some(n);
+    if n > 1 {
+        result.status = "unsupported".into();
+        result.reason = Some("multiple_selections_exceed_single_range_bound".into());
+        return result;
+    }
+    let range = if n == 1 {
+        match selection(0) {
+            Ok((start, end)) if 0 <= start && start <= end && end <= before => {
+                Some(SelectionRange { start, end })
+            }
+            Ok(_) => return TextSelection::unavailable("error", "selection_range_out_of_bounds"),
+            Err(error) => return TextSelection::read_error(error, "selection_range_unavailable"),
+        }
+    } else {
+        None
+    };
+    let after = match count() {
+        Ok(value) => value,
+        Err(error) => {
+            return TextSelection::read_error(error, "character_count_readback_unavailable")
+        }
+    };
+    let after_n = match selection_count() {
+        Ok(value) => value,
+        Err(error) => {
+            return TextSelection::read_error(error, "selection_count_readback_unavailable")
+        }
+    };
+    if after != before || after_n != n {
+        return TextSelection::unavailable("error", "selection_changed_during_readback");
+    }
+    if let Some(range) = range {
+        match selection(0) {
+            Ok((start, end)) if start == range.start && end == range.end => {}
+            Ok(_) => {
+                return TextSelection::unavailable("error", "selection_changed_during_readback")
+            }
+            Err(error) => {
+                return TextSelection::read_error(error, "selection_range_readback_unavailable")
+            }
+        }
+        result.full_text_selected = Some(before > 0 && range.start == 0 && range.end == before);
+        result.ranges.push(range);
+    } else {
+        result.full_text_selected = Some(false);
+    }
+    result.stable_readback = true;
+    result.reason = None;
+    result
+}
+fn selection_bus_error(error: zbus::Error) -> SelectionReadError {
+    match error {
+        zbus::Error::MethodError(name, _, _)
+            if matches!(
+                name.as_str(),
+                "org.freedesktop.DBus.Error.UnknownMethod"
+                    | "org.freedesktop.DBus.Error.UnknownInterface"
+                    | "org.freedesktop.DBus.Error.NotSupported"
+                    | "org.a11y.atspi.Error.NotImplemented"
+            ) =>
+        {
+            SelectionReadError::Unsupported
+        }
+        _ => SelectionReadError::Failed,
+    }
+}
+fn selection_with_focus_readback(
+    mut focused: impl FnMut() -> R<bool>,
+    mut read: impl FnMut() -> TextSelection,
+) -> TextSelection {
+    match focused() {
+        Ok(true) => {}
+        Ok(false) => {
+            return TextSelection::unavailable("error", "text_focus_lost_before_selection")
+        }
+        Err(_) => {
+            return TextSelection::unavailable("error", "text_focus_before_selection_unknown")
+        }
+    }
+    let result = read();
+    match focused() {
+        Ok(true) => result,
+        Ok(false) => TextSelection::unavailable("error", "text_focus_changed_during_selection"),
+        Err(_) => TextSelection::unavailable("error", "text_focus_readback_unknown"),
+    }
+}
+fn read_selection(conn: &Connection, object: &Object) -> TextSelection {
+    selection_with_focus_readback(
+        || {
+            node_states(conn, object)
+                .map(|states| state(&states, 8) && state(&states, 12) && state(&states, 25))
+        },
+        || {
+            read_selection_bounded(
+                || {
+                    let value: OwnedValue = conn
+                        .call_method(
+                            Some(object.bus.as_str()),
+                            object.path.as_str(),
+                            Some("org.freedesktop.DBus.Properties"),
+                            "Get",
+                            &(TEXT, "CharacterCount"),
+                        )
+                        .map_err(selection_bus_error)?
+                        .body()
+                        .deserialize()
+                        .map_err(|_| SelectionReadError::Failed)?;
+                    i32::try_from(value).map_err(|_| SelectionReadError::Failed)
+                },
+                || {
+                    conn.call_method(
+                        Some(object.bus.as_str()),
+                        object.path.as_str(),
+                        Some(TEXT),
+                        "GetNSelections",
+                        &(),
+                    )
+                    .map_err(selection_bus_error)?
+                    .body()
+                    .deserialize()
+                    .map_err(|_| SelectionReadError::Failed)
+                },
+                |index| {
+                    conn.call_method(
+                        Some(object.bus.as_str()),
+                        object.path.as_str(),
+                        Some(TEXT),
+                        "GetSelection",
+                        &(index,),
+                    )
+                    .map_err(selection_bus_error)?
+                    .body()
+                    .deserialize::<(i32, i32)>()
+                    .map_err(|_| SelectionReadError::Failed)
+                },
+            )
+        },
+    )
+}
+// Enrichment never supplies handles or changes tree completeness. Protected
+// metadata has zero reads; ambiguous focused objects likewise have zero reads.
+fn add_selection_readback(
+    nodes: &mut [Node],
+    deadline_elapsed: bool,
+    mut read: impl FnMut(&Object) -> TextSelection,
+) {
+    let eligible = |node: &Node| {
+        !node.protected
+            && node.interfaces.iter().any(|s| s == TEXT)
+            && state(&node.states, 8)
+            && state(&node.states, 12)
+            && state(&node.states, 25)
+    };
+    let eligible_count = nodes.iter().filter(|node| eligible(node)).count();
+    for node in nodes {
+        if node.protected {
+            node.text_selection = Some(TextSelection::unavailable(
+                "unsupported",
+                "protected_metadata_not_read",
+            ));
+        } else if node.interfaces.iter().any(|s| s == TEXT) {
+            node.text_selection = Some(if !eligible(node) {
+                TextSelection::unavailable("unsupported", "requires_showing_enabled_focused_text")
+            } else if eligible_count != 1 {
+                TextSelection::unavailable("error", "focused_text_identity_ambiguous")
+            } else if deadline_elapsed {
+                TextSelection::unavailable("error", "observation_deadline_elapsed")
+            } else {
+                read(&node.object)
+            });
+        }
+    }
+}
+
 fn read_node(conn: &Connection, object: Object, parent: Option<Object>, depth: usize) -> R<Node> {
     let role_id: u32 = conn
         .call_method(
@@ -431,6 +678,7 @@ fn read_node(conn: &Connection, object: Object, parent: Option<Object>, depth: u
         protected,
         action_names,
         text_excerpt,
+        text_selection: None,
     })
 }
 fn is_window(node: &Node) -> bool {
@@ -582,6 +830,7 @@ fn observe(
     single_window: bool,
     max_nodes: usize,
     max_depth: usize,
+    include_text_selection: bool,
 ) -> R<Snapshot> {
     let started = Instant::now();
     let registry = Object {
@@ -640,7 +889,12 @@ fn observe(
         |object| node_states(conn, object),
         || started.elapsed() > OBSERVE_DEADLINE,
     );
-    let nodes = walked.nodes;
+    let mut nodes = walked.nodes;
+    if include_text_selection {
+        add_selection_readback(&mut nodes, started.elapsed() > OBSERVE_DEADLINE, |object| {
+            read_selection(conn, object)
+        });
+    }
     let complete = discovery_complete && walked.complete;
     let mut incomplete_reasons = walked.incomplete_reasons;
     incomplete_reasons.window_discovery_deadline_cutoffs =
@@ -768,6 +1022,7 @@ fn revalidate(
         snapshot.sole_window_fallback_allowed,
         snapshot.max_nodes.clamp(1, 1000),
         snapshot.max_depth.clamp(1, 40),
+        false,
     )?;
     if !fresh.complete {
         return Err("Fresh semantic traversal was incomplete; mutation refused because modal coverage is uncertain".into());
@@ -852,6 +1107,7 @@ pub fn run(request: Value) -> R<Value> {
                 request["single_window"].as_bool() == Some(true),
                 request["max_nodes"].as_u64().unwrap_or(1000).clamp(1, 1000) as usize,
                 request["max_depth"].as_u64().unwrap_or(40).clamp(1, 40) as usize,
+                request["include_text_selection"].as_bool() == Some(true),
             )?;
             Ok(
                 json!({"status":"observed","snapshot":snapshot,"latency_ms":started.elapsed().as_secs_f64()*1000.0}),
@@ -1009,6 +1265,7 @@ mod visible_scope_tests {
             protected,
             action_names: Vec::new(),
             text_excerpt: None,
+            text_selection: None,
         }
     }
     fn walk(
@@ -1480,6 +1737,7 @@ mod focus_tests {
             protected: false,
             action_names: vec![],
             text_excerpt: Some("owned source".into()),
+            text_selection: None,
         }
     }
     #[test]
@@ -1590,5 +1848,250 @@ mod focus_tests {
                     .contains("validation failed"));
             }
         }
+    }
+
+    #[test]
+    fn selection_offsets_use_unicode_characters_not_utf8_or_utf16_units() {
+        let text = "äß🙂e\u{301}\n";
+        let characters = text.chars().count() as i32;
+        assert_ne!(characters as usize, text.len());
+        assert_ne!(characters as usize, text.encode_utf16().count());
+        let value = read_selection_bounded(|| Ok(characters), || Ok(1), |_| Ok((0, characters)));
+        assert_eq!(value.status, "available");
+        assert_eq!(value.full_text_selected, Some(true));
+        assert_eq!(
+            value.ranges,
+            vec![SelectionRange {
+                start: 0,
+                end: characters
+            }]
+        );
+        assert_eq!(value.offset_unit, "unicode_codepoints");
+        assert!(value.end_exclusive && value.stable_readback);
+        assert!(!value.text_identity_verified);
+    }
+    #[test]
+    fn selection_absent_caret_partial_and_empty_do_not_prove_full_selection() {
+        for (characters, selections, range) in [
+            (5, 0, (0, 0)),
+            (5, 1, (2, 2)),
+            (5, 1, (1, 5)),
+            (0, 1, (0, 0)),
+        ] {
+            let calls = std::cell::Cell::new(0);
+            let value = read_selection_bounded(
+                || Ok(characters),
+                || Ok(selections),
+                |_| {
+                    calls.set(calls.get() + 1);
+                    Ok(range)
+                },
+            );
+            assert_eq!(value.status, "available");
+            assert_eq!(value.full_text_selected, Some(false));
+            assert_eq!(calls.get(), if selections == 0 { 0 } else { 2 });
+        }
+    }
+    #[test]
+    fn selection_bad_counts_and_ranges_and_multiple_ranges_cannot_supply_proof() {
+        for (characters, selections, range) in [
+            (-1, 1, (0, 1)),
+            (5, -1, (0, 5)),
+            (5, 1, (-1, 5)),
+            (5, 1, (3, 2)),
+            (5, 1, (0, 6)),
+            (5, 2, (0, 5)),
+        ] {
+            let calls = std::cell::Cell::new(0);
+            let value = read_selection_bounded(
+                || Ok(characters),
+                || Ok(selections),
+                |_| {
+                    calls.set(calls.get() + 1);
+                    Ok(range)
+                },
+            );
+            assert_eq!(value.full_text_selected, None);
+            assert!(!value.stable_readback);
+            assert!(value.ranges.is_empty());
+            if selections > 1 {
+                assert_eq!(calls.get(), 0);
+                assert_eq!(value.status, "unsupported");
+            } else {
+                assert_eq!(value.status, "error");
+            }
+        }
+    }
+    #[test]
+    fn selection_dbus_refusal_and_error_are_not_zero_selections() {
+        let unsupported = read_selection_bounded(
+            || Ok(5),
+            || Err(SelectionReadError::Unsupported),
+            |_| panic!("unsupported bridge range must not be queried"),
+        );
+        assert_eq!(unsupported.status, "unsupported");
+        assert_eq!(unsupported.full_text_selected, None);
+        let failed =
+            read_selection_bounded(|| Ok(5), || Ok(1), |_| Err(SelectionReadError::Failed));
+        assert_eq!(failed.status, "error");
+        assert_eq!(failed.full_text_selected, None);
+        assert_eq!(
+            failed.reason.as_deref(),
+            Some("selection_range_unavailable")
+        );
+    }
+    #[test]
+    fn selection_same_count_range_change_and_count_change_are_detected() {
+        for changed in ["characters", "count", "range"] {
+            let c = std::cell::Cell::new(0);
+            let n = std::cell::Cell::new(0);
+            let r = std::cell::Cell::new(0);
+            let value = read_selection_bounded(
+                || {
+                    c.set(c.get() + 1);
+                    Ok(if changed == "characters" && c.get() == 2 {
+                        6
+                    } else {
+                        5
+                    })
+                },
+                || {
+                    n.set(n.get() + 1);
+                    Ok(if changed == "count" && n.get() == 2 {
+                        0
+                    } else {
+                        1
+                    })
+                },
+                |_| {
+                    r.set(r.get() + 1);
+                    Ok(if changed == "range" && r.get() == 2 {
+                        (1, 5)
+                    } else {
+                        (0, 5)
+                    })
+                },
+            );
+            assert_eq!(value.status, "error");
+            assert_eq!(value.full_text_selected, None);
+            assert_eq!(
+                value.reason.as_deref(),
+                Some("selection_changed_during_readback")
+            );
+        }
+    }
+    #[test]
+    fn selection_requires_live_text_focus_before_and_after_readback() {
+        let reads = std::cell::Cell::new(0);
+        let rejected = selection_with_focus_readback(
+            || Ok(false),
+            || {
+                reads.set(reads.get() + 1);
+                panic!("unfocused metadata must not be read")
+            },
+        );
+        assert_eq!(reads.get(), 0);
+        assert_eq!(rejected.full_text_selected, None);
+        for mode in ["lost", "error", "retained"] {
+            let states = std::cell::Cell::new(0);
+            let value = selection_with_focus_readback(
+                || {
+                    states.set(states.get() + 1);
+                    if states.get() == 1 || mode == "retained" {
+                        Ok(true)
+                    } else if mode == "error" {
+                        Err("bridge unknown".into())
+                    } else {
+                        Ok(false)
+                    }
+                },
+                || read_selection_bounded(|| Ok(5), || Ok(1), |_| Ok((0, 5))),
+            );
+            assert_eq!(
+                value.full_text_selected,
+                if mode == "retained" { Some(true) } else { None }
+            );
+        }
+    }
+    #[test]
+    fn selection_enrichment_preserves_context_protected_no_reads_and_ambiguity_bound() {
+        let mut protected: Node = serde_json::from_value(json!({
+            "object":{"bus":":1.999","path":"/fixture/password"},"parent":null,"depth":0,
+            "name":"[protected field]","role":"password text","role_id":40,
+            "interfaces":[],"states":[],"protected":true,"action_names":[],"text_excerpt":null
+        }))
+        .unwrap();
+        protected.protected = true;
+        protected.interfaces = vec![TEXT.into()];
+        protected.states = vec![(1 << 8) | (1 << 12) | (1 << 25)];
+        let mut focused = protected.clone();
+        focused.protected = false;
+        focused.object.path = "/fixture/text".into();
+        let original = serde_json::to_value(&focused).unwrap();
+        let calls = std::cell::Cell::new(0);
+        let mut nodes = vec![protected.clone(), focused.clone()];
+        add_selection_readback(&mut nodes, false, |_| {
+            calls.set(calls.get() + 1);
+            read_selection_bounded(|| Ok(5), || Ok(1), |_| Ok((0, 5)))
+        });
+        assert_eq!(calls.get(), 1);
+        assert_eq!(
+            nodes[0].text_selection.as_ref().unwrap().status,
+            "unsupported"
+        );
+        let mut after = serde_json::to_value(&nodes[1]).unwrap();
+        after.as_object_mut().unwrap().remove("text_selection");
+        assert_eq!(after, original);
+        let mut ambiguous = vec![focused.clone(), focused.clone()];
+        add_selection_readback(&mut ambiguous, false, |_| {
+            panic!("ambiguous focused targets cannot be queried")
+        });
+        assert!(ambiguous.iter().all(|node| node
+            .text_selection
+            .as_ref()
+            .unwrap()
+            .reason
+            .as_deref()
+            == Some("focused_text_identity_ambiguous")));
+        let mut expired = vec![focused];
+        add_selection_readback(&mut expired, true, |_| {
+            panic!("no calls after soft observation deadline")
+        });
+        assert_eq!(
+            expired[0]
+                .text_selection
+                .as_ref()
+                .unwrap()
+                .full_text_selected,
+            None
+        );
+    }
+
+    #[test]
+    fn selection_dbus_body_has_two_int32_outputs_and_bounded_call_count() {
+        let message = zbus::message::Message::signal("/fixture", "org.fixture.Text", "Selection")
+            .unwrap()
+            .build(&(0i32, 5i32))
+            .unwrap();
+        assert_eq!(message.body().deserialize::<(i32, i32)>().unwrap(), (0, 5));
+        assert_eq!(message.body().len(), 8);
+        assert!(message.body().deserialize::<(String, i32)>().is_err());
+        let calls = std::cell::Cell::new(0);
+        let value = read_selection_bounded(
+            || {
+                calls.set(calls.get() + 1);
+                Ok(5)
+            },
+            || {
+                calls.set(calls.get() + 1);
+                Ok(1)
+            },
+            |_| {
+                calls.set(calls.get() + 1);
+                Ok((0, 5))
+            },
+        );
+        assert_eq!(calls.get(), 6);
+        assert_eq!(value.full_text_selected, Some(true));
     }
 }

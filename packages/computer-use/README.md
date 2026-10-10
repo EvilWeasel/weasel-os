@@ -79,6 +79,21 @@ FOCUSED on the same object. A boolean acknowledgement alone is insufficient.
 Fresh visual and semantic observations must confirm the desired text focus
 before dependent keys; selection, clipboard and artifact checks remain separate.
 Duplicate window-title mappings retain their existing refusal.
+
+When the live MCP schema exposes `include_text_selection`, direct semantics
+can opt into bounded selection metadata for one focused, showing, enabled,
+unprotected Text object. Its provider character count and Unicode-codepoint
+[start,end) range are sampled twice, with focus readback. Only
+`status: "available"`, `stable_readback: true` and
+`full_text_selected: true` attest a nonempty whole-object selection.
+These samples are not atomic and `text_identity_verified` remains false:
+check the exact document/content, complete tree, current generation and
+input readiness separately. Missing metadata, unsupported/error, multiple
+selections or stale state supply no proof. Default false adds no selection
+reads. This optional schema needs a fresh tool connection and actual
+GTK/Electron bridge qualification; it does not normalize a terminal LF or
+change input/cancel permissions.
+
 Direct snapshots also expose versioned `traversal_diagnostics`: effective node
 and depth bounds, the existing soft elapsed-time checkpoint budget, and counters
 for actually encountered cutoffs, read failures and visibility contradictions.

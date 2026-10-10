@@ -151,6 +151,23 @@ object/window/context, and separately checks fresh FOCUSED state. Acceptance
 alone does not prove focus. Before dependent keyboard input, observe and query
 semantics again to confirm the intended text object has `focused:true`.
 Selection, copied content and saved bytes still require their own checks.
+
+If the actual `desktop_semantic_direct` schema exposes
+`include_text_selection`, pass `include_text_selection:true` after a guarded
+selection action when whole-buffer replacement requires selection proof.
+Identify the same exact text object and require `elements_complete:true`,
+current matching input generation, released controls and `action_ready:true`.
+Its `text_selection` must be `status:"available"`, `stable_readback:true`,
+`full_text_selected:true` with one nonempty range [0,character_count).
+The provider count is in Unicode codepoints, not UTF-8 bytes or UTF-16 units.
+This proves sampled range coverage, not text identity or an atomic snapshot;
+verify the exact current document/content separately. Missing metadata or
+unsupported/error/multiple selections is no proof; use a freshly verified
+visual route or report the remaining capability gap. Keep raw text and terminal
+LF unchanged; do not trim or infer selection from focus/Ctrl+A acknowledgement.
+Default false adds no selection reads. Discover the new field through a fresh
+tool connection after activation; never assume an old server supports it.
+
 If exact-window mapping is ambiguous, this route stays unavailable; preserve
 the identity guard and use a verified visual route or an explicitly isolated
 owned app instance. Never treat toolbar colour or click acknowledgement as

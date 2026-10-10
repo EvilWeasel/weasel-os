@@ -2374,7 +2374,7 @@ fn semantic_direct(state: &State, args: &Value) -> R<Value> {
         .is_some_and(|ws| ws.iter().filter(|w| w["pid"].as_u64() == Some(pid)).count() == 1);
     let raw = atspi_helper(
         state,
-        json!({"operation":"observe","pid":pid,"title":title,"single_window":sole_window,"max_nodes":args["max_elements"].as_u64().unwrap_or(1000).clamp(1,1000),"max_depth":args["max_depth"].as_u64().unwrap_or(40).clamp(1,40)}),
+        json!({"operation":"observe","pid":pid,"title":title,"single_window":sole_window,"max_nodes":args["max_elements"].as_u64().unwrap_or(1000).clamp(1,1000),"max_depth":args["max_depth"].as_u64().unwrap_or(40).clamp(1,40),"include_text_selection":args["include_text_selection"].as_bool()==Some(true)}),
         epoch,
     )?;
     let snapshot: atspi::Snapshot = serde_json::from_value(raw["snapshot"].clone())
@@ -2490,7 +2490,11 @@ fn semantic_snapshot_result(
         let showing = has_state(25);
         let focusable = has_state(11);
         let focused = has_state(12);
-        elements.push(json!({"handle_id":handle,"parent_handle_id":node.parent.as_ref().and_then(|p|handles.get(p)),"depth":node.depth,"role":node.role,"label":node.name,"description":node.description,"interfaces":node.interfaces,"states":node.states,"protected":node.protected,"text_excerpt":node.text_excerpt,"action_names":node.action_names,"editable":editable,"enabled":enabled,"showing":showing,"focusable":focusable,"focused":focused,"capabilities":{"focus":handle.is_some()&&has("org.a11y.atspi.Component")&&focusable&&enabled&&showing,"set_value":handle.is_some()&&has("org.a11y.atspi.EditableText")&&editable&&enabled&&showing,"click":handle.is_some()&&!node.action_names.is_empty()&&enabled&&showing},"coordinates":"none; semantic object targeting only"}));
+        let mut element = json!({"handle_id":handle,"parent_handle_id":node.parent.as_ref().and_then(|p|handles.get(p)),"depth":node.depth,"role":node.role,"label":node.name,"description":node.description,"interfaces":node.interfaces,"states":node.states,"protected":node.protected,"text_excerpt":node.text_excerpt,"action_names":node.action_names,"editable":editable,"enabled":enabled,"showing":showing,"focusable":focusable,"focused":focused,"capabilities":{"focus":handle.is_some()&&has("org.a11y.atspi.Component")&&focusable&&enabled&&showing,"set_value":handle.is_some()&&has("org.a11y.atspi.EditableText")&&editable&&enabled&&showing,"click":handle.is_some()&&!node.action_names.is_empty()&&enabled&&showing},"coordinates":"none; semantic object targeting only"});
+        if let Some(selection) = &node.text_selection {
+            element["text_selection"] = json!(selection);
+        }
+        elements.push(element);
     }
     if let Some(query) = args["query"].as_str() {
         let query = query.to_lowercase();
@@ -3236,7 +3240,7 @@ fn tools() -> Value {
       {"name":"desktop_windows","description":"Read actual Niri windows, outputs and workspaces. Window layout may lack global app bounds; never invent bounds.","inputSchema":{"type":"object","properties":{}}},
       {"name":"desktop_observe","description":"Capture one actual laptop output via grim at scale1, plus Niri identities. Startup capture_not_attempted=true is expected and permits this first read-only observation. Input always requires accepted fresh observation and action_ready; prior successful capture is not a prerequisite for authorized startup resume. Optional crop uses full-output screenshot pixels x/y/width/height; action x/y then use local pixels of the displayed crop. Core translates crop origin; NEVER add compositor output origin. Actual PNG size can differ from Niri logical size by rounding. Observation expires in60seconds; identity/geometry and fresh target-region guards still run. Observe after focus/workspace/layout changes. include_image=false returns private PNG reference only.","inputSchema":{"type":"object","properties":{"output":{"type":"string"},"include_image":{"type":"boolean"},"crop":crop}}},
       {"name":"desktop_semantic","description":"Read fresh Cua AT-SPI elements for a Niri window. Maps only unique actual PID+title; synthetic Cua IDs are never guessed. Query filters returned elements. Accessibility bounds are app-local and NOT screenshot coordinates; do not directly click them without calibrated mapping. Limited/root-only trees require visual fallback.","inputSchema":{"type":"object","properties":{"window_id":{"type":"integer"},"query":{"type":"string"},"max_elements":{"type":"integer"},"max_depth":{"type":"integer"}},"required":["window_id"]}},
-      {"name":"desktop_semantic_direct","description":"Read exact-window AT-SPI labels/tree even during ordinary physical activity or held controls. Returns original/current input generation and explicit input/action readiness. Non-actionable or incomplete snapshots issue no handles (focus/click/set_value=false); obtain a fresh complete snapshot after controls release. Only daemon-owned handles from actionable complete snapshots may be used with desktop_act semantic_set_value, semantic_click or standalone semantic_focus. focusable/FOCUSED flags attest element keyboard focus separately from Niri window focus; semantic_focus requires fresh complete semantics and verifies FOCUSED on the same exact object before returning focus_verified. Reobserve and requery semantics before later keyboard input. No raw object/index/Cua tokens and no pixel fallback. Native GTK candidates need live acceptance; missing/incomplete bridges use visual typed actions.","inputSchema":{"type":"object","properties":{"window_id":{"type":"integer"},"query":{"type":"string"},"max_elements":{"type":"integer"},"max_depth":{"type":"integer"}},"required":["window_id"]}},
+      {"name":"desktop_semantic_direct","description":"Read exact-window AT-SPI labels/tree even during ordinary physical activity or held controls. Returns original/current input generation and explicit input/action readiness. Non-actionable or incomplete snapshots issue no handles (focus/click/set_value=false); obtain a fresh complete snapshot after controls release. Only daemon-owned handles from actionable complete snapshots may be used with desktop_act semantic_set_value, semantic_click or standalone semantic_focus. focusable/FOCUSED flags attest element keyboard focus separately from Niri window focus; semantic_focus requires fresh complete semantics and verifies FOCUSED on the same exact object before returning focus_verified. Reobserve and requery semantics before later keyboard input. No raw object/index/Cua tokens and no pixel fallback. Native GTK candidates need live acceptance; missing/incomplete bridges use visual typed actions.","inputSchema":{"type":"object","properties":{"window_id":{"type":"integer"},"query":{"type":"string"},"max_elements":{"type":"integer"},"max_depth":{"type":"integer"},"include_text_selection":{"type":"boolean","description":"Opt-in bounded selection readback for at most one showing enabled FOCUSED unprotected Text object; unicode codepoint [start,end). Explicit available/unsupported/error, no input authority; check fresh generation, complete tree and text identity separately."}},"required":["window_id"]}},
       {"name":"desktop_act","description":"Single-writer typed desktop actions against fresh observation. Rejects changed focus/geometry/scaling or changed pixels near pointer targets. x/y are local to displayed screenshot/crop. Every move/click/scroll/drag requires the displayed view to be at most1200 pixels on each axis; an oversized view rejects the whole batch before any input, queue admission or device preparation. Capture a fresh target crop and use its crop-local coordinates. Full images remain usable for overview, focus, keys and semantics. Focus must be standalone. Unknown or misplaced fields for an action kind reject the whole batch before input; restore_clipboard belongs only to paste, while type always preserves the prior selection. By default observe_after=true returns a new after_observation ID and image in this same response after dispatch/release and a bounded80ms defaultsettle wait; settle_ms=0..1000 can adjust. Use it for the next act and inspect expected result. A slow/unchanged frame needs another observation/semantic check, not repetition of toggle input. include_image=false omits its image. Acknowledgement is not UI success. Type text_method=auto uses clipboard for known Electron IDs (code/T3) and >1000-character text, keyboard for shorter text in other apps; explicit keyboard/clipboard are available. Electron wtype Unicode is unreliable on this laptop. Clipboard preserves supported text/rich app payloads and original Chromium provenance in bounded RAM from one offer, normalizes duplicate MIME names, omits SAVE_TARGETS and SAME_APP GTK_TEXT_BUFFER_CONTENTS transport markers, preserves serialized GTK rich text, and keeps a separate source holder across actor restarts. Unsupported/sensitive/oversized formats refuse before replacement. Own-source check runs after layout/keymap/window validation and before the first paste modifier press; ownership can still change between reply and input because Wayland has no atomic selection-check-and-paste. No restore after takeover/cancel/ownership loss. Scroll dx/dy are discrete wheel steps (integer -100..100), not pixels; positive dx moves right and positive dy moves down. Smooth-scroll animation needs another fresh observation/settle check before reusing visual targets. Keys are modifiers first e.g.[ctrl,l],[Return]. Explicit key_scope=compositor and Super/meta/logo chords use an owned persistent direct-uinput device because this Niri25.11 Wayland virtual keyboard bypasses compositor bindings; Ctrl/app chords retain the Wayland transport. A fresh proxy check requires backend routing_revision=2 and binds session/epoch/observation before forwarding a global batch; an older backend is refused. Missing permission/takeover monitor/compositor device-open evidence refuses the complete batch before input. Creating the own device is a capability side effect. A kernel input acknowledgement does not verify Niri/UI acceptance; inspect the fresh result. No automatic input fallback. Direct semantic_set_value(handle_id,text,expected_text optional) replaces exact editable contents; semantic_click(handle_id,action_name from direct tree) invokes only AT-SPI named action. Both freshly revalidate context and have no input fallback. Standalone semantic_focus(handle_id) uses Component.GrabFocus, then repeats exact object/window/context validation and freshly queries FOCUSED; acceptance alone is not focus_verified. It sends no keyboard input or fallback. Reobserve and requery the exact focused object before keyboard input. Batch stable edits/shortcuts when intermediate states cannot invalidate later targets; changed-target actions need fresh observation.","inputSchema":{"type":"object","properties":{"observation_id":{"type":"string"},"window_id":{"type":"integer"},"task_id":{"type":"string"},"timeout_ms":{"type":"integer","minimum":100,"maximum":120000,"description":"Whole batch budget including queue, validation, capture, input and post-observe. Bounded release cleanup follows even after timeout."},"observe_after":{"type":"boolean","default":true},"include_image":{"type":"boolean","default":true},"settle_ms":{"type":"integer","default":80,"minimum":0,"maximum":1000,"description":"Bounded post-action settle wait before capture; not a proof of repaint. Slow conditions require fresh observations, never repeated blind input."},"actions":{"type":"array","items":action,"minItems":1,"maxItems":32}},"required":["observation_id","actions"]}},
       {"name":"desktop_cancel","description":"Priority epoch cancellation independent of actor lock. Pending batches stop; held buttons release. Already-dispatched effects remain. Wait for desktop_status active=null and actor_release_confirmed=true for full release.","inputSchema":{"type":"object","properties":{}}},
       {"name":"desktop_takeover","description":"Explicit human desktop takeover, persists its cause across backend restarts and latches refusal of future actions and cancels queued/active automation. Only a physical Escape press does this automatically when accessible; ordinary input invalidates stale observations and releases a conflicting batch without latching takeover. Wait active=null and actor_release_confirmed=true for full release. desktop_resume then fresh observation is required.","inputSchema":{"type":"object","properties":{}}},
@@ -6279,6 +6283,109 @@ mod release_recovery_tests {
             "waiting Resume must recheck scoped cancellation before marker clear"
         );
         assert!(retained,"confirmed cancellation before marker transition must preserve exact active Escape cause");
+    }
+    #[test]
+    fn optional_selection_evidence_does_not_bypass_incomplete_or_held_guards() {
+        for (complete, holds) in [(true, 0), (true, 2), (false, 0)] {
+            let (state, dir) = cooperative_fixture("semantic-selection");
+            state.input_policy.update_holds(holds, true);
+            let generation = state.input_policy.generation();
+            let mut snapshot = semantic_readiness_snapshot(complete);
+            snapshot.nodes[0].text_selection = Some(
+                serde_json::from_value(json!({
+                    "status":"available","character_count":10,"selection_count":1,
+                    "ranges":[{"start":0,"end":10}],"full_text_selected":true,
+                    "stable_readback":true,"offset_unit":"unicode_codepoints","end_exclusive":true,
+                    "text_identity_verified":false,"reason":null
+                }))
+                .unwrap(),
+            );
+            let data = result_data(
+                &semantic_snapshot_result(
+                    &state,
+                    &json!({}),
+                    semantic_readiness_window(),
+                    snapshot,
+                    77,
+                    generation,
+                    Instant::now(),
+                )
+                .unwrap(),
+            );
+            assert_eq!(
+                data["elements"][0]["text_selection"]["full_text_selected"],
+                true
+            );
+            assert_eq!(
+                data["elements"][0]["text_selection"]["text_identity_verified"],
+                false
+            );
+            assert_eq!(data["action_ready"], complete && holds == 0);
+            assert_eq!(data["input_generation"], generation);
+            assert_eq!(data["current_input_generation"], generation);
+            assert_eq!(
+                data["elements"][0]["handle_id"].is_null(),
+                !complete || holds != 0
+            );
+            assert_eq!(
+                data["elements"][0]["capabilities"]["focus"],
+                complete && holds == 0
+            );
+            fs::remove_dir_all(dir).unwrap();
+        }
+    }
+    #[test]
+    fn selection_is_absent_by_default_and_error_never_becomes_full_selection() {
+        let (state, dir) = cooperative_fixture("semantic-selection-error");
+        let generation = state.input_policy.generation();
+        let snapshot = semantic_readiness_snapshot(true);
+        assert!(snapshot.nodes[0].text_selection.is_none());
+        let default = result_data(
+            &semantic_snapshot_result(
+                &state,
+                &json!({}),
+                semantic_readiness_window(),
+                snapshot.clone(),
+                77,
+                generation,
+                Instant::now(),
+            )
+            .unwrap(),
+        );
+        assert!(default["elements"][0].get("text_selection").is_none());
+        let mut snapshot = snapshot;
+        snapshot.nodes[0].text_selection=Some(serde_json::from_value(json!({
+            "status":"error","character_count":null,"selection_count":null,"ranges":[],
+            "full_text_selected":null,"stable_readback":false,"offset_unit":"unicode_codepoints",
+            "end_exclusive":true,"text_identity_verified":false,"reason":"selection_changed_during_readback"
+        })).unwrap());
+        let error = result_data(
+            &semantic_snapshot_result(
+                &state,
+                &json!({}),
+                semantic_readiness_window(),
+                snapshot,
+                77,
+                generation,
+                Instant::now(),
+            )
+            .unwrap(),
+        );
+        assert_eq!(error["elements"][0]["text_selection"]["status"], "error");
+        assert_eq!(
+            error["elements"][0]["text_selection"]["full_text_selected"],
+            Value::Null
+        );
+        assert_eq!(
+            error["elements"][0]["text_selection"]["reason"],
+            "selection_changed_during_readback"
+        );
+        assert_eq!(
+            default["elements"][0]["editable"],
+            error["elements"][0]["editable"]
+        );
+        assert_eq!(default["input_generation"], error["input_generation"]);
+        fs::remove_dir_all(dir).unwrap();
     }
 }
 
