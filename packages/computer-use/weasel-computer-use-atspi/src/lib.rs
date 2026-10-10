@@ -728,6 +728,50 @@ fn revalidate(
     current.parent = prior.parent.clone();
     Ok(current)
 }
+// Production focus boundary. Validation is repeated on the same immutable
+// object after GrabFocus; its boolean acceptance is never the FOCUSED proof.
+fn focus_with_revalidation(
+    mut validate: impl FnMut() -> R<Node>,
+    mut grab: impl FnMut() -> R<bool>,
+) -> R<Value> {
+    let capable = |node: &Node| {
+        !node.protected
+            && node
+                .interfaces
+                .iter()
+                .any(|s| s == "org.a11y.atspi.Component")
+            && state(&node.states, 11)
+            && state(&node.states, 8)
+            && state(&node.states, 24)
+            && state(&node.states, 25)
+            && !state(&node.states, 3)
+            && !state(&node.states, 6)
+    };
+    let before = validate()?;
+    if !capable(&before) {
+        return Err("Target lacks enabled/showing/focusable AT-SPI Component capability; no focus or fallback sent".into());
+    }
+    let accepted = grab()?;
+    if !accepted {
+        return Ok(
+            json!({"status":"failed","route":"direct_atspi_object","accepted":false,"focus_verified":false,"focused":null,"keyboard_input_dispatched":false,"ui_result_verified":false}),
+        );
+    }
+    let after = match validate() {
+        Ok(node) => node,
+        Err(error) => {
+            return Ok(
+                json!({"status":"uncertain","route":"direct_atspi_object","accepted":true,"focus_verified":false,"focused":null,"keyboard_input_dispatched":false,"ui_result_verified":false,"readback_error":error}),
+            )
+        }
+    };
+    let focused = state(&after.states, 12);
+    let verified = capable(&after) && focused;
+    Ok(
+        json!({"status":if verified{"focus_verified"}else{"uncertain"},"route":"direct_atspi_object","accepted":true,"focus_verified":verified,"focused":focused,"keyboard_input_dispatched":false,"ui_result_verified":false}),
+    )
+}
+
 pub fn run(request: Value) -> R<Value> {
     let started = Instant::now();
     let conn = connection()?;
@@ -749,6 +793,36 @@ pub fn run(request: Value) -> R<Value> {
             Ok(
                 json!({"status":"observed","snapshot":snapshot,"latency_ms":started.elapsed().as_secs_f64()*1000.0}),
             )
+        }
+        "focus" => {
+            let snapshot: Snapshot =
+                serde_json::from_value(request["snapshot"].clone()).map_err(|e| e.to_string())?;
+            let object: Object =
+                serde_json::from_value(request["object"].clone()).map_err(|e| e.to_string())?;
+            let mut result = focus_with_revalidation(
+                || {
+                    let mut node = revalidate(&conn, &snapshot, &object, false)?;
+                    // Query state after the complete identity/ancestry/modal
+                    // readback, not from the earlier validation's cached node.
+                    node.states = node_states(&conn, &object)?;
+                    Ok(node)
+                },
+                || {
+                    conn.call_method(
+                        Some(object.bus.as_str()),
+                        object.path.as_str(),
+                        Some("org.a11y.atspi.Component"),
+                        "GrabFocus",
+                        &(),
+                    )
+                    .map_err(|e| e.to_string())?
+                    .body()
+                    .deserialize()
+                    .map_err(|e| e.to_string())
+                },
+            )?;
+            result["latency_ms"] = json!(started.elapsed().as_secs_f64() * 1000.0);
+            Ok(result)
         }
         "set_value" | "click" => {
             let snapshot: Snapshot =
@@ -839,7 +913,7 @@ pub fn run(request: Value) -> R<Value> {
                 )
             }
         }
-        _ => Err("Supported operations: observe, set_value, click".into()),
+        _ => Err("Supported operations: observe, set_value, click, focus".into()),
     }
 }
 
@@ -1172,5 +1246,142 @@ mod bounded_bridge_read_tests {
             false
         )
         .is_err());
+    }
+}
+
+#[cfg(test)]
+mod focus_tests {
+    use super::*;
+    use std::cell::Cell;
+
+    fn target(focused: bool) -> Node {
+        Node {
+            object: Object {
+                bus: ":1.123".into(),
+                path: "/test/text".into(),
+            },
+            parent: None,
+            depth: 1,
+            name: "owned text".into(),
+            description: String::new(),
+            role: "text".into(),
+            role_id: 60,
+            interfaces: vec!["org.a11y.atspi.Component".into()],
+            states: vec![
+                (1 << 8) | (1 << 11) | (1 << 24) | (1 << 25) | if focused { 1 << 12 } else { 0 },
+            ],
+            protected: false,
+            action_names: vec![],
+            text_excerpt: Some("owned source".into()),
+        }
+    }
+    #[test]
+    fn focus_refuses_missing_capability_invalid_state_and_prevalidation_before_dispatch() {
+        for reason in [
+            "component",
+            "focusable",
+            "showing",
+            "enabled",
+            "sensitive",
+            "busy",
+            "defunct",
+            "protected",
+            "identity",
+            "modal",
+            "ancestor",
+            "owner",
+        ] {
+            let calls = Cell::new(0);
+            let mut node = target(false);
+            match reason {
+                "component" => node.interfaces.clear(),
+                "focusable" => node.states[0] &= !(1 << 11),
+                "showing" => node.states[0] &= !(1 << 25),
+                "enabled" => node.states[0] &= !(1 << 8),
+                "sensitive" => node.states[0] &= !(1 << 24),
+                "busy" => node.states[0] |= 1 << 3,
+                "defunct" => node.states[0] |= 1 << 6,
+                "protected" => node.protected = true,
+                _ => {}
+            }
+            let result = focus_with_revalidation(
+                || {
+                    if matches!(reason, "identity" | "modal" | "ancestor" | "owner") {
+                        Err(format!("existing revalidate {reason} guard"))
+                    } else {
+                        Ok(node.clone())
+                    }
+                },
+                || {
+                    calls.set(calls.get() + 1);
+                    Ok(true)
+                },
+            );
+            assert!(result.is_err(), "{reason}");
+            assert_eq!(calls.get(), 0, "{reason}: no GrabFocus or fallback");
+        }
+    }
+    #[test]
+    fn focus_acceptance_requires_fresh_same_object_state_and_postvalidation() {
+        for reason in [
+            "verified",
+            "accepted_without_focus",
+            "changed_context",
+            "no_longer_focusable",
+            "refused",
+        ] {
+            let reads = Cell::new(0);
+            let calls = Cell::new(0);
+            let result = focus_with_revalidation(
+                || {
+                    reads.set(reads.get() + 1);
+                    if reads.get() == 1 {
+                        return Ok(target(false));
+                    }
+                    if reason == "changed_context" {
+                        return Err("fresh exact object/window/modal validation failed".into());
+                    }
+                    let mut node = target(reason == "verified" || reason == "no_longer_focusable");
+                    if reason == "no_longer_focusable" {
+                        node.states[0] &= !(1 << 11);
+                    }
+                    Ok(node)
+                },
+                || {
+                    calls.set(calls.get() + 1);
+                    Ok(reason != "refused")
+                },
+            )
+            .unwrap();
+            assert_eq!(calls.get(), 1, "one dispatch, no repeat for {reason}");
+            assert_eq!(reads.get(), if reason == "refused" { 1 } else { 2 });
+            assert_eq!(result["focus_verified"], reason == "verified");
+            assert_eq!(result["accepted"], reason != "refused");
+            assert_eq!(result["keyboard_input_dispatched"], false);
+            assert_eq!(result["ui_result_verified"], false);
+            assert_eq!(
+                result["status"],
+                if reason == "verified" {
+                    "focus_verified"
+                } else if reason == "refused" {
+                    "failed"
+                } else {
+                    "uncertain"
+                }
+            );
+            if reason == "refused" {
+                assert_eq!(
+                    result["focused"],
+                    Value::Null,
+                    "refusal does not prove focus loss"
+                );
+            }
+            if reason == "changed_context" {
+                assert!(result["readback_error"]
+                    .as_str()
+                    .unwrap()
+                    .contains("validation failed"));
+            }
+        }
     }
 }

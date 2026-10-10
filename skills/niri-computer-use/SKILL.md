@@ -145,6 +145,16 @@ ordinary input does not require a resume. Escape and cancellation remain stops.
 Use only a complete snapshot and a showing, enabled node whose meaning matches the fresh
 UI. `semantic_set_value` replaces its complete editable buffer with a complete
 prior-text precondition; `semantic_click` invokes the node's exact named action.
+`semantic_focus` is standalone and uses an actionable opaque handle with
+`capabilities.focus`. It calls AT-SPI GrabFocus once, revalidates the exact
+object/window/context, and separately checks fresh FOCUSED state. Acceptance
+alone does not prove focus. Before dependent keyboard input, observe and query
+semantics again to confirm the intended text object has `focused:true`.
+Selection, copied content and saved bytes still require their own checks.
+If exact-window mapping is ambiguous, this route stays unavailable; preserve
+the identity guard and use a verified visual route or an explicitly isolated
+owned app instance. Never treat toolbar colour or click acknowledgement as
+proof that the text buffer has keyboard focus.
 Raw D-Bus paths, Cua indices and guessed coordinates are never direct semantic
 targets. After an edit changes the semantic window context, read fresh semantics
 before a dependent Save-button action. Incomplete or unsupported trees require

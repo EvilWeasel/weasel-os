@@ -73,6 +73,12 @@ Niri identity, fractional output geometry and capabilities. Coordinates are loca
 to the returned screenshot or crop. Cua bounds are not screenshot coordinates.
 
 Direct AT-SPI labels remain readable during ordinary input or held controls.
+The standalone `semantic_focus` action targets an actionable opaque handle.
+It invokes Component.GrabFocus once, repeats exact context validation and reads
+FOCUSED on the same object. A boolean acknowledgement alone is insufficient.
+Fresh visual and semantic observations must confirm the desired text focus
+before dependent keys; selection, clipboard and artifact checks remain separate.
+Duplicate window-title mappings retain their existing refusal.
 `status: "available"` or `"limited"` describes the tree, while `input_ready`
 and `action_ready` describe the separate readiness snapshot. Incomplete or
 initially/finally non-actionable trees issue no new handles or mutation
