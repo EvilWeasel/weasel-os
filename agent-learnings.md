@@ -1125,3 +1125,8 @@ Append-only log of implementation lessons for future agents working in this repo
 
 - Preserve the observed one-line runtime change: Default Applications now selects com.t3tools.T3Code.desktop for t3code; Added Associations still contains both MT and T3. The desktop-entry/MIME timestamps match the reported T3 restart; no syscall-writer audit is claimed. Linux DesktopLinuxUrlHandler.register invokes xdg-mime default separately from the MT OAuth guard. The live out-of-store target must retain its exact bytes, inode, mtime and symlink chain through index-only staging and a normal fast-forward.
 - Verification: git diff --check; both-host offline no-write-lock drvPath evaluations with IFD disabled and max-jobs=0. Desktop returns the existing mksdll1 deriver; laptop preserves the existing 4c8zs98-source.drv IFD-disabled failure, with no IFD override or fresh laptop PASS. Only MIME bytes and this log change; no Nix source, lock, build, activation or app restart.
+
+### 2026-10-11 (preserve MT Code URI registration)
+- Change: Preserve the observed MT Code t3code URI association in a focused signed metadata commit before the daily update baseline is sealed.
+- Pitfall/Root cause: The out-of-store MIME target is tracked in Main; later app registration can dirty it again. The writer was not proven. Preserve live bytes rather than restore another app association.
+- Verification: Exact one-line MIME diff, unchanged Nix blobs, git diff --check, direct-child signature and clean Main/origin equality; no app launch, build or activation.
