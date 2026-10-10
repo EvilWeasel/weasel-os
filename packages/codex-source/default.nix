@@ -79,12 +79,20 @@ toolchain.rustPlatform.buildRustPackage {
     CXX = "${clang}/bin/clang++";
     CARGO_BUILD_JOBS = "2";
     CARGO_PROFILE_RELEASE_DEBUG = "0";
+    CARGO_PROFILE_RELEASE_LTO = "off";
+    CARGO_PROFILE_RELEASE_CODEGEN_UNITS = "16";
   };
   doCheck = true;
   checkPhase = ''
     runHook preCheck
     cargo test --offline --release --target x86_64-unknown-linux-gnu -j2 \
       --package codex-rmcp-client --lib request_cancel_guard::tests
+    cargo test --offline --locked --release --target x86_64-unknown-linux-gnu -j2 \
+      --package codex-core --lib tools::code_mode::owner_cancellation::tests
+    cargo test --offline --locked --release --target x86_64-unknown-linux-gnu -j2 \
+      --package codex-core --lib tools::code_mode::callback_admission::tests
+    cargo test --offline --locked --release --target x86_64-unknown-linux-gnu -j2 \
+      --package codex-core --lib tools::code_mode::delegate::tests
     runHook postCheck
   '';
   postInstall = ''

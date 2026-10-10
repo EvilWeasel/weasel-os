@@ -140,3 +140,539 @@
 +        result
 +    }
 +}
+--- a/codex-rs/core/src/tools/code_mode/mod.rs
++++ b/codex-rs/core/src/tools/code_mode/mod.rs
+@@ -2,6 +2,7 @@
+ mod execute_handler;
+ pub(crate) mod execute_spec;
+ mod output;
++mod owner_cancellation;
+ mod response_adapter;
+ mod telemetry;
+ mod tool_definitions;
+@@ -131,6 +132,7 @@
+         &self,
+         mut request: codex_code_mode::ExecuteRequest,
+         step_context: Arc<StepContext>,
++        owner_cancellation_token: CancellationToken,
+     ) -> Result<codex_code_mode::StartedCell, String> {
+         request
+             .yield_time_ms
+@@ -139,6 +141,7 @@
+         let delegate = Arc::new(CodeModeCellDelegate {
+             broker: Arc::clone(&self.dispatch_broker),
+             step_context,
++            owner_cancellation_token,
+         });
+         self.session()
+             .await?
+--- a/codex-rs/core/src/tools/code_mode/execute_handler.rs
++++ b/codex-rs/core/src/tools/code_mode/execute_handler.rs
+@@ -10,6 +10,7 @@
+ use codex_tools::ToolSpec;
+ use std::borrow::Cow;
+ use std::sync::Arc;
++use tokio_util::sync::CancellationToken;
+
+ use super::ExecContext;
+ use super::PUBLIC_TOOL_NAME;
+@@ -42,6 +43,7 @@
+         call_id: String,
+         originating_call: Option<crate::tools::context::ToolCallOrigin>,
+         code: String,
++        cancellation_token: CancellationToken,
+         telemetry: &mut CodeModeToolCallGuard,
+     ) -> Result<CodeModeToolOutput, FunctionCallError> {
+         let args =
+@@ -90,6 +92,7 @@
+                     max_output_tokens: args.max_output_tokens,
+                 },
+                 Arc::clone(&step_context),
++                cancellation_token,
+             )
+             .await
+             .map_err(FunctionCallError::RespondToModel)?;
+@@ -211,6 +214,7 @@
+             call_id,
+             tool_name,
+             payload,
++            cancellation_token,
+             ..
+         } = invocation;
+
+@@ -230,6 +234,7 @@
+                     call_id,
+                     originating_call,
+                     input,
++                    cancellation_token,
+                     &mut telemetry,
+                 )
+                 .await
+--- a/codex-rs/core/src/tools/code_mode/delegate.rs
++++ b/codex-rs/core/src/tools/code_mode/delegate.rs
+@@ -45,6 +45,8 @@
+ pub(super) struct CodeModeCellDelegate {
+     pub(super) broker: Arc<CodeModeDispatchBroker>,
+     pub(super) step_context: Arc<StepContext>,
++    // The original exec task can stop callbacks even after the cell has yielded.
++    pub(super) owner_cancellation_token: CancellationToken,
+ }
+
+ struct CellDispatchGate {
+@@ -319,44 +321,50 @@
+         invocation: CodeModeNestedToolCall,
+         cancellation_token: CancellationToken,
+     ) -> ToolInvocationFuture<'a> {
+-        Box::pin(async move {
+-            let call_id = format!("{PUBLIC_TOOL_NAME}-{}", uuid::Uuid::new_v4());
+-            call_trace::received(
+-                self.broker.thread_id,
+-                &invocation.tool_name,
+-                &call_id,
+-                call_trace::Receipt::CodeModeBroker {
+-                    cell_id: trace_id(invocation.cell_id.as_str()),
+-                    runtime_tool_call_id: trace_id(&invocation.runtime_tool_call_id),
+-                },
+-            );
+-            let mut dispatch_trace =
+-                Box::new(NestedToolDispatchTrace::new(self.broker.thread_id, call_id));
+-            if cancellation_token.is_cancelled() {
+-                dispatch_trace.interruption = Some(DispatchInterruption::Cancelled);
+-                return Err("code mode nested tool call cancelled".to_string());
+-            }
+-            let (response_tx, response_rx) = oneshot::channel();
+-            // Only the worker can tell whether dispatch beats cancellation once the call is queued.
+-            self.broker
+-                .dispatch_tx
+-                .send(DispatchMessage::InvokeTool {
+-                    invocation,
+-                    step_context: Arc::downgrade(&self.step_context),
+-                    dispatch_trace,
+-                    cancellation_token: cancellation_token.clone(),
+-                    response_tx,
+-                })
+-                .await
+-                .map_err(|_| "code mode nested tool dispatcher is unavailable".to_string())?;
+-            tokio::select! {
+-                response = response_rx => response
+-                    .map_err(|_| "code mode nested tool dispatcher stopped".to_string())?,
+-                _ = cancellation_token.cancelled() => {
+-                    Err("code mode nested tool call cancelled".to_string())
++        let callback_cancellation_token = cancellation_token.clone();
++        Box::pin(super::owner_cancellation::with_owner_cancellation(
++            &self.owner_cancellation_token,
++            callback_cancellation_token,
++            "code mode nested tool call cancelled",
++            async move {
++                let call_id = format!("{PUBLIC_TOOL_NAME}-{}", uuid::Uuid::new_v4());
++                call_trace::received(
++                    self.broker.thread_id,
++                    &invocation.tool_name,
++                    &call_id,
++                    call_trace::Receipt::CodeModeBroker {
++                        cell_id: trace_id(invocation.cell_id.as_str()),
++                        runtime_tool_call_id: trace_id(&invocation.runtime_tool_call_id),
++                    },
++                );
++                let mut dispatch_trace =
++                    Box::new(NestedToolDispatchTrace::new(self.broker.thread_id, call_id));
++                if cancellation_token.is_cancelled() {
++                    dispatch_trace.interruption = Some(DispatchInterruption::Cancelled);
++                    return Err("code mode nested tool call cancelled".to_string());
+                 }
+-            }
+-        })
++                let (response_tx, response_rx) = oneshot::channel();
++                // Only the worker can tell whether dispatch beats cancellation once the call is queued.
++                self.broker
++                    .dispatch_tx
++                    .send(DispatchMessage::InvokeTool {
++                        invocation,
++                        step_context: Arc::downgrade(&self.step_context),
++                        dispatch_trace,
++                        cancellation_token: cancellation_token.clone(),
++                        response_tx,
++                    })
++                    .await
++                    .map_err(|_| "code mode nested tool dispatcher is unavailable".to_string())?;
++                tokio::select! {
++                    response = response_rx => response
++                        .map_err(|_| "code mode nested tool dispatcher stopped".to_string())?,
++                    _ = cancellation_token.cancelled() => {
++                        Err("code mode nested tool call cancelled".to_string())
++                    }
++                }
++            },
++        ))
+     }
+
+     fn notify<'a>(
+@@ -366,38 +374,44 @@
+         text: String,
+         cancellation_token: CancellationToken,
+     ) -> NotificationFuture<'a> {
+-        Box::pin(async move {
+-            if cancellation_token.is_cancelled() {
+-                return Err("code mode notification cancelled".to_string());
+-            }
+-            let (response_tx, response_rx) = oneshot::channel();
+-            self.broker
+-                .dispatch_tx
+-                .send(DispatchMessage::Notify {
+-                    call_id,
+-                    cell_id,
+-                    text,
+-                    output_token_limit: with_serialization_allowance(
+-                        self.step_context
+-                            .settings
+-                            .model_info
+-                            .truncation_policy
+-                            .into(),
+-                    )
+-                    .token_budget(),
+-                    cancellation_token: cancellation_token.clone(),
+-                    response_tx,
+-                })
+-                .await
+-                .map_err(|_| "code mode notification dispatcher is unavailable".to_string())?;
+-            tokio::select! {
+-                response = response_rx => response
+-                    .map_err(|_| "code mode notification dispatcher stopped".to_string())?,
+-                _ = cancellation_token.cancelled() => {
+-                    Err("code mode notification cancelled".to_string())
++        let callback_cancellation_token = cancellation_token.clone();
++        Box::pin(super::owner_cancellation::with_owner_cancellation(
++            &self.owner_cancellation_token,
++            callback_cancellation_token,
++            "code mode notification cancelled",
++            async move {
++                if cancellation_token.is_cancelled() {
++                    return Err("code mode notification cancelled".to_string());
+                 }
+-            }
+-        })
++                let (response_tx, response_rx) = oneshot::channel();
++                self.broker
++                    .dispatch_tx
++                    .send(DispatchMessage::Notify {
++                        call_id,
++                        cell_id,
++                        text,
++                        output_token_limit: with_serialization_allowance(
++                            self.step_context
++                                .settings
++                                .model_info
++                                .truncation_policy
++                                .into(),
++                        )
++                        .token_budget(),
++                        cancellation_token: cancellation_token.clone(),
++                        response_tx,
++                    })
++                    .await
++                    .map_err(|_| "code mode notification dispatcher is unavailable".to_string())?;
++                tokio::select! {
++                    response = response_rx => response
++                        .map_err(|_| "code mode notification dispatcher stopped".to_string())?,
++                    _ = cancellation_token.cancelled() => {
++                        Err("code mode notification cancelled".to_string())
++                    }
++                }
++            },
++        ))
+     }
+
+     fn cell_closed(&self, cell_id: &CellId) {
+--- /dev/null
++++ b/codex-rs/core/src/tools/code_mode/owner_cancellation.rs
+@@ -0,0 +1,32 @@
++use std::future::Future;
++
++use tokio_util::sync::CancellationToken;
++
++/// Retain the originating exec task's stop boundary after its first response yields.
++///
++/// The host owns independent callback tokens. Cancelling that exact token wakes the
++/// existing nested ToolCallRuntime and its request-scoped MCP drop guard. A yield
++/// or an ordinary successful response does not cancel anything. Host-cell
++/// termination remains the separate CodeModeInterrupt policy.
++pub(super) async fn with_owner_cancellation<T>(
++    owner: &CancellationToken,
++    callback: CancellationToken,
++    cancelled_error: &'static str,
++    operation: impl Future<Output = Result<T, String>>,
++) -> Result<T, String> {
++    if owner.is_cancelled() {
++        callback.cancel();
++        return Err(cancelled_error.to_string());
++    }
++    tokio::select! {
++        biased;
++        _ = owner.cancelled() => {
++            // Revoke the already admitted callback before dropping its waiter.
++            // Its worker may outlive this future and must see the same token.
++            callback.cancel();
++            Err(cancelled_error.to_string())
++        }
++        result = operation => result,
++    }
++}
++
+--- a/codex-rs/core/src/session/mod.rs
++++ b/codex-rs/core/src/session/mod.rs
+@@ -5003,6 +5003,8 @@
+     }
+
+     pub async fn interrupt_task(self: &Arc<Self>) {
++        // Stop callbacks from completed/yielded cells even while this session is idle.
++        let _callback_interrupt = self.services.code_mode_service.interrupt_callbacks();
+         info!("interrupt received: abort current task, if any");
+         let had_active_turn = self.active_turn.lock().await.is_some();
+         self.abort_all_tasks(TurnAbortReason::Interrupted).await;
+--- a/codex-rs/core/src/tasks/mod.rs
++++ b/codex-rs/core/src/tasks/mod.rs
+@@ -405,6 +405,8 @@
+             done_clone.notify_waiters();
+         }
+         .instrument(task_span);
++        // Open only the fresh task admission boundary; revoked old delegates stay revoked.
++        self.services.code_mode_service.begin_task_callbacks();
+         let handle = tokio::spawn(storage_originator.scope(task_future));
+         let timer = turn_context
+             .session_telemetry
+--- /dev/null
++++ b/codex-rs/core/src/tools/code_mode/callback_admission.rs
+@@ -0,0 +1,102 @@
++use std::sync::Mutex;
++
++use tokio_util::sync::CancellationToken;
++
++/// One CodeModeService's local admission boundary. No host RPC or global state.
++pub(super) struct CallbackAdmission {
++    state: Mutex<State>,
++}
++
++struct State {
++    token: CancellationToken,
++    interrupt_depth: usize,
++}
++
++/// Keeps admission closed across the explicit stop's awaits and concurrent starts.
++pub(super) struct CallbackInterrupt<'a> {
++    admission: &'a CallbackAdmission,
++    registered: bool,
++}
++
++impl Drop for CallbackInterrupt<'_> {
++    fn drop(&mut self) {
++        if !self.registered {
++            return;
++        }
++        match self.admission.state.lock() {
++            Ok(mut state) => {
++                state.interrupt_depth = state
++                    .interrupt_depth
++                    .checked_sub(1)
++                    .expect("registered callback interrupt must have a depth");
++                // Finishing the stop never itself reopens the revoked generation.
++            }
++            Err(poisoned) => poisoned.into_inner().token.cancel(),
++        }
++    }
++}
++
++impl Default for CallbackAdmission {
++    fn default() -> Self {
++        Self {
++            state: Mutex::new(State {
++                token: CancellationToken::new(),
++                interrupt_depth: 0,
++            }),
++        }
++    }
++}
++
++impl CallbackAdmission {
++    pub(super) fn snapshot(&self) -> CancellationToken {
++        match self.state.lock() {
++            Ok(state) => state.token.clone(),
++            Err(poisoned) => {
++                let state = poisoned.into_inner();
++                state.token.cancel();
++                state.token.clone()
++            }
++        }
++    }
++
++    pub(super) fn interrupt(&self) {
++        match self.state.lock() {
++            Ok(state) => state.token.cancel(),
++            Err(poisoned) => poisoned.into_inner().token.cancel(),
++        }
++    }
++
++    pub(super) fn begin_interrupt(&self) -> CallbackInterrupt<'_> {
++        let registered = match self.state.lock() {
++            Ok(mut state) => {
++                state.token.cancel();
++                state.interrupt_depth = state
++                    .interrupt_depth
++                    .checked_add(1)
++                    .expect("too many concurrent callback interrupts");
++                true
++            }
++            Err(poisoned) => {
++                poisoned.into_inner().token.cancel();
++                false
++            }
++        };
++        CallbackInterrupt {
++            admission: self,
++            registered,
++        }
++    }
++
++    pub(super) fn begin_task(&self) {
++        match self.state.lock() {
++            Ok(mut state) => {
++                if state.interrupt_depth == 0 && state.token.is_cancelled() {
++                    state.token = CancellationToken::new();
++                }
++            }
++            // Poison and an in-progress interrupt both keep admission closed.
++            Err(poisoned) => poisoned.into_inner().token.cancel(),
++        }
++    }
++}
++
+--- a/codex-rs/core/src/tools/code_mode/delegate.rs
++++ b/codex-rs/core/src/tools/code_mode/delegate.rs
+@@ -47,6 +47,7 @@
+     pub(super) step_context: Arc<StepContext>,
+     // The original exec task can stop callbacks even after the cell has yielded.
+     pub(super) owner_cancellation_token: CancellationToken,
++    pub(super) callback_cancellation_token: CancellationToken,
+ }
+
+ struct CellDispatchGate {
+@@ -324,6 +325,7 @@
+         let callback_cancellation_token = cancellation_token.clone();
+         Box::pin(super::owner_cancellation::with_owner_cancellation(
+             &self.owner_cancellation_token,
++            Some(&self.callback_cancellation_token),
+             callback_cancellation_token,
+             "code mode nested tool call cancelled",
+             async move {
+@@ -377,6 +379,7 @@
+         let callback_cancellation_token = cancellation_token.clone();
+         Box::pin(super::owner_cancellation::with_owner_cancellation(
+             &self.owner_cancellation_token,
++            Some(&self.callback_cancellation_token),
+             callback_cancellation_token,
+             "code mode notification cancelled",
+             async move {
+--- a/codex-rs/core/src/tools/code_mode/mod.rs
++++ b/codex-rs/core/src/tools/code_mode/mod.rs
+@@ -1,3 +1,4 @@
++mod callback_admission;
+ mod delegate;
+ mod execute_handler;
+ pub(crate) mod execute_spec;
+@@ -79,6 +80,7 @@
+     session_provider: Arc<dyn CodeModeSessionProvider>,
+     availability: Result<(), String>,
+     dispatch_broker: Arc<CodeModeDispatchBroker>,
++    callback_admission: callback_admission::CallbackAdmission,
+     default_exec_yield_time_ms: u64,
+     shutdown_token: CancellationToken,
+     unavailable_warning_emitted: AtomicBool,
+@@ -98,6 +100,7 @@
+             session_provider,
+             availability,
+             dispatch_broker,
++            callback_admission: callback_admission::CallbackAdmission::default(),
+             default_exec_yield_time_ms: config.default_exec_yield_time_ms,
+             shutdown_token: CancellationToken::new(),
+             unavailable_warning_emitted: AtomicBool::new(false),
+@@ -134,6 +137,10 @@
+         step_context: Arc<StepContext>,
+         owner_cancellation_token: CancellationToken,
+     ) -> Result<codex_code_mode::StartedCell, String> {
++        let callback_cancellation_token = self.callback_admission.snapshot();
++        if callback_cancellation_token.is_cancelled() || owner_cancellation_token.is_cancelled() {
++            return Err("code mode callbacks are interrupted".to_string());
++        }
+         request
+             .yield_time_ms
+             .get_or_insert(self.default_exec_yield_time_ms);
+@@ -142,11 +149,25 @@
+             broker: Arc::clone(&self.dispatch_broker),
+             step_context,
+             owner_cancellation_token,
++            callback_cancellation_token: callback_cancellation_token.clone(),
+         });
+-        self.session()
+-            .await?
+-            .execute(request, delegate, preempt)
+-            .await
++        let session = self.session().await?;
++        if callback_cancellation_token.is_cancelled()
++            || delegate.owner_cancellation_token.is_cancelled()
++        {
++            return Err("code mode callbacks are interrupted".to_string());
++        }
++        session.execute(request, delegate, preempt).await
++    }
++
++    /// Synchronous local stop; it does not wait for the optional host termination RPC.
++    pub(crate) fn interrupt_callbacks(&self) -> impl Drop + '_ {
++        self.callback_admission.begin_interrupt()
++    }
++
++    /// A genuinely new task may admit new cells; old delegates keep their revoked token.
++    pub(crate) fn begin_task_callbacks(&self) {
++        self.callback_admission.begin_task();
+     }
+
+     pub(crate) async fn wait(
+@@ -182,6 +203,7 @@
+     }
+
+     pub(crate) async fn shutdown(&self) -> Result<(), String> {
++        self.callback_admission.interrupt();
+         self.shutdown_token.cancel();
+         // Join any initialization already in progress without initializing an unused service.
+         match self
+--- a/codex-rs/core/src/tools/code_mode/owner_cancellation.rs
++++ b/codex-rs/core/src/tools/code_mode/owner_cancellation.rs
+@@ -10,11 +10,12 @@
+ /// termination remains the separate CodeModeInterrupt policy.
+ pub(super) async fn with_owner_cancellation<T>(
+     owner: &CancellationToken,
++    session_fence: Option<&CancellationToken>,
+     callback: CancellationToken,
+     cancelled_error: &'static str,
+     operation: impl Future<Output = Result<T, String>>,
+ ) -> Result<T, String> {
+-    if owner.is_cancelled() {
++    if owner.is_cancelled() || session_fence.is_some_and(CancellationToken::is_cancelled) {
+         callback.cancel();
+         return Err(cancelled_error.to_string());
+     }
+@@ -26,6 +27,16 @@
+             callback.cancel();
+             Err(cancelled_error.to_string())
+         }
++        _ = async {
++            if let Some(fence) = session_fence {
++                fence.cancelled().await;
++            } else {
++                std::future::pending::<()>().await;
++            }
++        } => {
++            callback.cancel();
++            Err(cancelled_error.to_string())
++        }
+         result = operation => result,
+     }
+ }

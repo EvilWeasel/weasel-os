@@ -156,3 +156,667 @@
 +}
 +
 +}
+--- a/codex-rs/core/src/tools/code_mode/owner_cancellation.rs
++++ b/codex-rs/core/src/tools/code_mode/owner_cancellation.rs
+@@ -30,3 +30,173 @@
+     }
+ }
+
++#[cfg(test)]
++mod tests {
++    use super::with_owner_cancellation;
++    use std::future::pending;
++    use std::sync::Arc;
++    use std::sync::atomic::AtomicBool;
++    use std::sync::atomic::AtomicUsize;
++    use std::sync::atomic::Ordering;
++    use std::time::Duration;
++    use tokio::sync::oneshot;
++    use tokio_util::sync::CancellationToken;
++
++    const CANCELLED: &str = "owned callback cancelled";
++
++    #[tokio::test]
++    async fn already_stopped_owner_refuses_before_operation_is_polled() {
++        let owner = CancellationToken::new();
++        let callback = CancellationToken::new();
++        let calls = AtomicUsize::new(0);
++        owner.cancel();
++        let result = with_owner_cancellation(&owner, callback.clone(), CANCELLED, async {
++            calls.fetch_add(1, Ordering::SeqCst);
++            Ok(())
++        })
++        .await;
++        assert_eq!(result, Err(CANCELLED.to_string()));
++        assert_eq!(calls.load(Ordering::SeqCst), 0);
++        assert!(callback.is_cancelled());
++    }
++
++    #[tokio::test]
++    async fn stop_after_initial_yield_revokes_pending_callback_and_drops_waiter() {
++        struct DropProbe(Arc<AtomicBool>);
++        impl Drop for DropProbe {
++            fn drop(&mut self) {
++                self.0.store(true, Ordering::SeqCst);
++            }
++        }
++        let owner = CancellationToken::new();
++        let callback = CancellationToken::new();
++        let dropped = Arc::new(AtomicBool::new(false));
++        let (admitted_tx, admitted_rx) = oneshot::channel();
++        let worker_owner = owner.clone();
++        let worker_callback = callback.clone();
++        let worker_dropped = Arc::clone(&dropped);
++        let callback_task = tokio::spawn(async move {
++            with_owner_cancellation(&worker_owner, worker_callback, CANCELLED, async {
++                let _waiter = DropProbe(worker_dropped);
++                admitted_tx.send(()).unwrap();
++                pending::<Result<(), String>>().await
++            })
++            .await
++        });
++        // Model the already-returned initial Yield: neither token is cancelled.
++        admitted_rx.await.unwrap();
++        assert!(!callback.is_cancelled());
++        assert!(!dropped.load(Ordering::SeqCst));
++        owner.cancel();
++        assert_eq!(
++            tokio::time::timeout(Duration::from_secs(1), callback_task)
++                .await
++                .unwrap()
++                .unwrap(),
++            Err(CANCELLED.to_string())
++        );
++        assert!(callback.is_cancelled());
++        assert!(dropped.load(Ordering::SeqCst));
++    }
++
++    #[tokio::test]
++    async fn queued_worker_receives_revocation_even_after_delegate_returns() {
++        let owner = CancellationToken::new();
++        let callback = CancellationToken::new();
++        let worker_callback = callback.clone();
++        let (admitted_tx, admitted_rx) = oneshot::channel();
++        let observer = tokio::spawn(async move {
++            worker_callback.cancelled().await;
++            "worker revoked"
++        });
++        let owner_for_operation = owner.clone();
++        let operation = async {
++            admitted_tx.send(()).unwrap();
++            owner_for_operation.cancel();
++            pending::<Result<(), String>>().await
++        };
++        assert_eq!(
++            with_owner_cancellation(&owner, callback, CANCELLED, operation).await,
++            Err(CANCELLED.to_string())
++        );
++        admitted_rx.await.unwrap();
++        assert_eq!(
++            tokio::time::timeout(Duration::from_secs(1), observer)
++                .await
++                .unwrap()
++                .unwrap(),
++            "worker revoked"
++        );
++    }
++
++    #[tokio::test]
++    async fn stopped_owner_does_not_cancel_another_owner_or_callback() {
++        let owner = CancellationToken::new();
++        let own_callback = CancellationToken::new();
++        let foreign_owner = CancellationToken::new();
++        let foreign_callback = CancellationToken::new();
++        owner.cancel();
++        assert!(
++            with_owner_cancellation(&owner, own_callback, CANCELLED, async { Ok(()) })
++                .await
++                .is_err()
++        );
++        assert_eq!(
++            with_owner_cancellation(&foreign_owner, foreign_callback.clone(), CANCELLED, async {
++                Ok("foreign result")
++            })
++            .await,
++            Ok("foreign result")
++        );
++        assert!(!foreign_owner.is_cancelled());
++        assert!(!foreign_callback.is_cancelled());
++    }
++
++    #[tokio::test]
++    async fn successful_callback_is_not_retroactively_cancelled_on_owner_stop() {
++        let owner = CancellationToken::new();
++        let callback = CancellationToken::new();
++        let result = with_owner_cancellation(&owner, callback.clone(), CANCELLED, async {
++            Ok("completed effect")
++        })
++        .await;
++        owner.cancel();
++        assert_eq!(result, Ok("completed effect"));
++        assert!(!callback.is_cancelled());
++    }
++
++    #[tokio::test]
++    async fn yield_preemption_is_not_owner_stop() {
++        let owner = CancellationToken::new();
++        let preempt = CancellationToken::new();
++        let callback = CancellationToken::new();
++        preempt.cancel();
++        assert_eq!(
++            with_owner_cancellation(&owner, callback.clone(), CANCELLED, async { Ok("yielded") })
++                .await,
++            Ok("yielded")
++        );
++        assert!(!owner.is_cancelled());
++        assert!(!callback.is_cancelled());
++    }
++
++    #[tokio::test]
++    async fn existing_callback_cancellation_remains_local_to_callback() {
++        let owner = CancellationToken::new();
++        let callback = CancellationToken::new();
++        callback.cancel();
++        let inner_callback = callback.clone();
++        assert_eq!(
++            with_owner_cancellation(&owner, callback, CANCELLED, async {
++                if inner_callback.is_cancelled() {
++                    Err("host callback cancelled".to_string())
++                } else {
++                    Ok(())
++                }
++            })
++            .await,
++            Err("host callback cancelled".to_string())
++        );
++        assert!(!owner.is_cancelled());
++    }
++}
+--- a/codex-rs/core/src/tools/code_mode/delegate_tests.rs
++++ b/codex-rs/core/src/tools/code_mode/delegate_tests.rs
+@@ -130,6 +130,7 @@
+     let delegate = CodeModeCellDelegate {
+         broker: Arc::clone(&broker),
+         step_context: Arc::clone(&step),
++        owner_cancellation_token: CancellationToken::new(),
+     };
+     let _worker = broker.start_turn_worker(
+         Arc::new(session),
+@@ -186,6 +187,7 @@
+     let delegate = CodeModeCellDelegate {
+         broker: Arc::clone(&broker),
+         step_context: StepContext::for_test(Arc::clone(&turn)),
++        owner_cancellation_token: CancellationToken::new(),
+     };
+     let origin = Arc::downgrade(&delegate.step_context);
+     let cell_id = CellId::new("queued-cell".to_string());
+@@ -233,3 +235,80 @@
+         Err("code mode nested tool call cancelled".to_string()),
+     );
+ }
++
++#[tokio::test]
++async fn original_owner_stop_revokes_a_queued_callback_after_yield() {
++    let (session, turn) = make_session_and_context().await;
++    let broker = Arc::new(CodeModeDispatchBroker::new(
++        session.thread_id,
++        Default::default(),
++    ));
++    let owner = CancellationToken::new();
++    let callback_token = CancellationToken::new();
++    let delegate = CodeModeCellDelegate {
++        broker: Arc::clone(&broker),
++        step_context: StepContext::for_test(Arc::new(turn)),
++        owner_cancellation_token: owner.clone(),
++    };
++    let mut callback = delegate.invoke_tool(
++        CodeModeNestedToolCall {
++            cell_id: CellId::new("yielded-owner-cell".to_string()),
++            runtime_tool_call_id: "owned-callback".to_string(),
++            tool_name: ToolName::plain("pending_probe"),
++            tool_kind: CodeModeToolKind::Function,
++            input: None,
++        },
++        callback_token.clone(),
++    );
++    assert!(futures::poll!(callback.as_mut()).is_pending());
++    let queued = broker.dispatch_rx.try_recv().unwrap();
++    let DispatchMessage::InvokeTool {
++        cancellation_token: worker_token,
++        ..
++    } = queued
++    else {
++        panic!("expected a queued nested invocation");
++    };
++    assert!(!worker_token.is_cancelled());
++    owner.cancel();
++    assert!(matches!(
++        futures::poll!(callback.as_mut()),
++        std::task::Poll::Ready(Err(_))
++    ));
++    assert!(worker_token.is_cancelled());
++    assert!(callback_token.is_cancelled());
++}
++
++#[tokio::test]
++async fn stopped_original_owner_refuses_new_callback_before_broker_admission() {
++    let (session, turn) = make_session_and_context().await;
++    let broker = Arc::new(CodeModeDispatchBroker::new(
++        session.thread_id,
++        Default::default(),
++    ));
++    let owner = CancellationToken::new();
++    owner.cancel();
++    let callback_token = CancellationToken::new();
++    let delegate = CodeModeCellDelegate {
++        broker: Arc::clone(&broker),
++        step_context: StepContext::for_test(Arc::new(turn)),
++        owner_cancellation_token: owner,
++    };
++    assert!(
++        delegate
++            .invoke_tool(
++                CodeModeNestedToolCall {
++                    cell_id: CellId::new("already-stopped-cell".to_string()),
++                    runtime_tool_call_id: "must-not-be-admitted".to_string(),
++                    tool_name: ToolName::plain("pending_probe"),
++                    tool_kind: CodeModeToolKind::Function,
++                    input: None,
++                },
++                callback_token.clone(),
++            )
++            .await
++            .is_err()
++    );
++    assert_eq!(broker.dispatch_rx.len(), 0);
++    assert!(callback_token.is_cancelled());
++}
+--- a/codex-rs/core/src/tools/code_mode/callback_admission.rs
++++ b/codex-rs/core/src/tools/code_mode/callback_admission.rs
+@@ -100,3 +100,192 @@
+     }
+ }
+
++#[cfg(test)]
++mod tests {
++    use super::super::owner_cancellation::with_owner_cancellation;
++    use super::CallbackAdmission;
++    use std::future::pending;
++    use std::sync::Arc;
++    use std::sync::atomic::AtomicBool;
++    use std::sync::atomic::AtomicUsize;
++    use std::sync::atomic::Ordering;
++    use std::time::Duration;
++    use tokio::sync::oneshot;
++    use tokio_util::sync::CancellationToken;
++
++    #[test]
++    fn normal_task_start_keeps_successful_prior_cells_admitted() {
++        let fence = CallbackAdmission::default();
++        let prior = fence.snapshot();
++        fence.begin_task();
++        let next = fence.snapshot();
++        assert!(!prior.is_cancelled());
++        assert!(!next.is_cancelled());
++        fence.interrupt();
++        assert!(prior.is_cancelled());
++        assert!(next.is_cancelled());
++    }
++
++    #[test]
++    fn idle_interrupt_latches_all_old_cells_and_future_admission() {
++        let fence = CallbackAdmission::default();
++        let first = fence.snapshot();
++        let second = fence.snapshot();
++        fence.interrupt();
++        assert!(first.is_cancelled());
++        assert!(second.is_cancelled());
++        assert!(fence.snapshot().is_cancelled());
++    }
++
++    #[test]
++    fn new_task_opens_only_new_generation_old_cells_stay_revoked() {
++        let fence = CallbackAdmission::default();
++        let old = fence.snapshot();
++        fence.interrupt();
++        fence.begin_task();
++        let fresh = fence.snapshot();
++        assert!(old.is_cancelled());
++        assert!(!fresh.is_cancelled());
++        fence.interrupt();
++        assert!(old.is_cancelled());
++        assert!(fresh.is_cancelled());
++    }
++
++    #[test]
++    fn interrupt_does_not_touch_a_different_service() {
++        let own = CallbackAdmission::default();
++        let foreign = CallbackAdmission::default();
++        let foreign_cell = foreign.snapshot();
++        own.interrupt();
++        assert!(!foreign_cell.is_cancelled());
++        assert!(!foreign.snapshot().is_cancelled());
++    }
++
++    #[test]
++    fn repeated_interrupt_never_reopens_admission() {
++        let fence = CallbackAdmission::default();
++        fence.interrupt();
++        fence.interrupt();
++        assert!(fence.snapshot().is_cancelled());
++    }
++
++    #[test]
++    fn poisoned_fence_refuses_read_and_restart() {
++        let fence = Arc::new(CallbackAdmission::default());
++        let poison = Arc::clone(&fence);
++        assert!(
++            std::thread::spawn(move || {
++                let _guard = poison.state.lock().unwrap();
++                panic!("controlled private lock poison");
++            })
++            .join()
++            .is_err()
++        );
++        assert!(fence.snapshot().is_cancelled());
++        fence.begin_task();
++        assert!(fence.snapshot().is_cancelled());
++    }
++
++    #[tokio::test]
++    async fn stopped_fence_refuses_old_completed_owner_before_operation_poll() {
++        let fence = CallbackAdmission::default();
++        let completed_owner = CancellationToken::new();
++        let old_cell = fence.snapshot();
++        let callback = CancellationToken::new();
++        let polls = AtomicUsize::new(0);
++        fence.interrupt();
++        let result = with_owner_cancellation(
++            &completed_owner,
++            Some(&old_cell),
++            callback.clone(),
++            "session interrupted",
++            async {
++                polls.fetch_add(1, Ordering::SeqCst);
++                Ok(())
++            },
++        )
++        .await;
++        assert_eq!(result, Err("session interrupted".to_string()));
++        assert_eq!(polls.load(Ordering::SeqCst), 0);
++        assert!(callback.is_cancelled());
++        assert!(!completed_owner.is_cancelled());
++    }
++
++    #[tokio::test]
++    async fn idle_stop_revokes_pending_completed_owner_before_any_host_reply() {
++        struct DropProbe(Arc<AtomicBool>);
++        impl Drop for DropProbe {
++            fn drop(&mut self) {
++                self.0.store(true, Ordering::SeqCst);
++            }
++        }
++        let fence = CallbackAdmission::default();
++        let old_cell = fence.snapshot();
++        let owner = CancellationToken::new();
++        let completed_owner = owner.child_token();
++        drop(owner); // ordinary successful turn completion must not cancel its children.
++        assert!(!completed_owner.is_cancelled());
++        let callback = CancellationToken::new();
++        let callback_readback = callback.clone();
++        let dropped = Arc::new(AtomicBool::new(false));
++        let worker_dropped = Arc::clone(&dropped);
++        let (admitted_tx, admitted_rx) = oneshot::channel();
++        let task = tokio::spawn(async move {
++            with_owner_cancellation(
++                &completed_owner,
++                Some(&old_cell),
++                callback,
++                "session interrupted",
++                async {
++                    let _waiter = DropProbe(worker_dropped);
++                    admitted_tx.send(()).unwrap();
++                    pending::<Result<(), String>>().await
++                },
++            )
++            .await
++        });
++        admitted_rx.await.unwrap();
++        // There is deliberately no host termination/response future to await.
++        fence.interrupt();
++        assert_eq!(
++            tokio::time::timeout(Duration::from_secs(1), task)
++                .await
++                .unwrap()
++                .unwrap(),
++            Err("session interrupted".to_string())
++        );
++        assert!(callback_readback.is_cancelled());
++        assert!(dropped.load(Ordering::SeqCst));
++    }
++    #[test]
++    fn start_holding_task_lock_cannot_reopen_while_interrupt_waits() {
++        let fence = CallbackAdmission::default();
++        let old = fence.snapshot();
++        // Deterministic actual source order: start holds active_turn lock;
++        // interrupt enters synchronously then awaits that lock; start hook runs.
++        let interrupt = fence.begin_interrupt();
++        fence.begin_task();
++        assert!(old.is_cancelled());
++        assert!(fence.snapshot().is_cancelled());
++        drop(interrupt);
++        assert!(fence.snapshot().is_cancelled());
++        // Only a task start after the interrupt lifetime may open a fresh token.
++        fence.begin_task();
++        assert!(old.is_cancelled());
++        assert!(!fence.snapshot().is_cancelled());
++    }
++
++    #[test]
++    fn overlapping_interrupts_and_dropped_interrupt_future_keep_fence_closed() {
++        let fence = CallbackAdmission::default();
++        let first = fence.begin_interrupt();
++        let second = fence.begin_interrupt();
++        drop(first);
++        fence.begin_task();
++        assert!(fence.snapshot().is_cancelled());
++        drop(second);
++        assert!(fence.snapshot().is_cancelled());
++        fence.begin_task();
++        assert!(!fence.snapshot().is_cancelled());
++    }
++}
+--- a/codex-rs/core/src/tools/code_mode/delegate_tests.rs
++++ b/codex-rs/core/src/tools/code_mode/delegate_tests.rs
+@@ -131,6 +131,7 @@
+         broker: Arc::clone(&broker),
+         step_context: Arc::clone(&step),
+         owner_cancellation_token: CancellationToken::new(),
++        callback_cancellation_token: CancellationToken::new(),
+     };
+     let _worker = broker.start_turn_worker(
+         Arc::new(session),
+@@ -188,6 +189,7 @@
+         broker: Arc::clone(&broker),
+         step_context: StepContext::for_test(Arc::clone(&turn)),
+         owner_cancellation_token: CancellationToken::new(),
++        callback_cancellation_token: CancellationToken::new(),
+     };
+     let origin = Arc::downgrade(&delegate.step_context);
+     let cell_id = CellId::new("queued-cell".to_string());
+@@ -249,6 +251,7 @@
+         broker: Arc::clone(&broker),
+         step_context: StepContext::for_test(Arc::new(turn)),
+         owner_cancellation_token: owner.clone(),
++        callback_cancellation_token: CancellationToken::new(),
+     };
+     let mut callback = delegate.invoke_tool(
+         CodeModeNestedToolCall {
+@@ -293,6 +296,7 @@
+         broker: Arc::clone(&broker),
+         step_context: StepContext::for_test(Arc::new(turn)),
+         owner_cancellation_token: owner,
++        callback_cancellation_token: CancellationToken::new(),
+     };
+     assert!(
+         delegate
+@@ -312,3 +316,76 @@
+     assert_eq!(broker.dispatch_rx.len(), 0);
+     assert!(callback_token.is_cancelled());
+ }
++
++#[tokio::test]
++async fn explicit_idle_session_interrupt_revokes_completed_owner_callback() {
++    let (session, turn) = make_session_and_context().await;
++    let session = Arc::new(session);
++    let broker = Arc::new(CodeModeDispatchBroker::new(
++        session.thread_id,
++        Default::default(),
++    ));
++    let callback_token = CancellationToken::new();
++    let completed_owner = CancellationToken::new();
++    let delegate = CodeModeCellDelegate {
++        broker: Arc::clone(&broker),
++        step_context: StepContext::for_test(Arc::new(turn)),
++        owner_cancellation_token: completed_owner.clone(),
++        callback_cancellation_token: session
++            .services
++            .code_mode_service
++            .callback_admission
++            .snapshot(),
++    };
++    let mut callback = delegate.invoke_tool(
++        CodeModeNestedToolCall {
++            cell_id: CellId::new("completed-owner-cell".to_string()),
++            runtime_tool_call_id: "idle-owner-callback".to_string(),
++            tool_name: ToolName::plain("pending_probe"),
++            tool_kind: CodeModeToolKind::Function,
++            input: None,
++        },
++        callback_token.clone(),
++    );
++    assert!(futures::poll!(callback.as_mut()).is_pending());
++    let queued = broker.dispatch_rx.try_recv().unwrap();
++    let DispatchMessage::InvokeTool {
++        cancellation_token: worker_token,
++        ..
++    } = queued
++    else {
++        panic!("expected a queued invocation");
++    };
++    // This test session has no RunningTask: the true Session idle-interrupt route is used.
++    session.interrupt_task().await;
++    assert!(matches!(
++        futures::poll!(callback.as_mut()),
++        std::task::Poll::Ready(Err(_))
++    ));
++    assert!(worker_token.is_cancelled());
++    assert!(callback_token.is_cancelled());
++    assert!(!completed_owner.is_cancelled());
++}
++
++#[tokio::test]
++async fn interrupted_service_refuses_execute_before_host_initialization() {
++    let (session, turn) = make_session_and_context().await;
++    let service = &session.services.code_mode_service;
++    assert!(service.session.get().is_none());
++    let _interrupt = service.interrupt_callbacks();
++    let result = service
++        .execute(
++            codex_code_mode::ExecuteRequest {
++                tool_call_id: "must-not-reach-host".to_string(),
++                enabled_tools: Vec::new(),
++                source: "throw new Error('must not execute')".to_string(),
++                yield_time_ms: None,
++                max_output_tokens: None,
++            },
++            StepContext::for_test(Arc::new(turn)),
++            CancellationToken::new(),
++        )
++        .await;
++    assert!(matches!(result, Err(e) if e == "code mode callbacks are interrupted"));
++    assert!(service.session.get().is_none());
++}
+--- a/codex-rs/core/src/tools/code_mode/owner_cancellation.rs
++++ b/codex-rs/core/src/tools/code_mode/owner_cancellation.rs
+@@ -61,7 +61,7 @@
+         let callback = CancellationToken::new();
+         let calls = AtomicUsize::new(0);
+         owner.cancel();
+-        let result = with_owner_cancellation(&owner, callback.clone(), CANCELLED, async {
++        let result = with_owner_cancellation(&owner, None, callback.clone(), CANCELLED, async {
+             calls.fetch_add(1, Ordering::SeqCst);
+             Ok(())
+         })
+@@ -87,7 +87,7 @@
+         let worker_callback = callback.clone();
+         let worker_dropped = Arc::clone(&dropped);
+         let callback_task = tokio::spawn(async move {
+-            with_owner_cancellation(&worker_owner, worker_callback, CANCELLED, async {
++            with_owner_cancellation(&worker_owner, None, worker_callback, CANCELLED, async {
+                 let _waiter = DropProbe(worker_dropped);
+                 admitted_tx.send(()).unwrap();
+                 pending::<Result<(), String>>().await
+@@ -127,7 +127,7 @@
+             pending::<Result<(), String>>().await
+         };
+         assert_eq!(
+-            with_owner_cancellation(&owner, callback, CANCELLED, operation).await,
++            with_owner_cancellation(&owner, None, callback, CANCELLED, operation).await,
+             Err(CANCELLED.to_string())
+         );
+         admitted_rx.await.unwrap();
+@@ -148,14 +148,18 @@
+         let foreign_callback = CancellationToken::new();
+         owner.cancel();
+         assert!(
+-            with_owner_cancellation(&owner, own_callback, CANCELLED, async { Ok(()) })
++            with_owner_cancellation(&owner, None, own_callback, CANCELLED, async { Ok(()) })
+                 .await
+                 .is_err()
+         );
+         assert_eq!(
+-            with_owner_cancellation(&foreign_owner, foreign_callback.clone(), CANCELLED, async {
+-                Ok("foreign result")
+-            })
++            with_owner_cancellation(
++                &foreign_owner,
++                None,
++                foreign_callback.clone(),
++                CANCELLED,
++                async { Ok("foreign result") }
++            )
+             .await,
+             Ok("foreign result")
+         );
+@@ -167,7 +171,7 @@
+     async fn successful_callback_is_not_retroactively_cancelled_on_owner_stop() {
+         let owner = CancellationToken::new();
+         let callback = CancellationToken::new();
+-        let result = with_owner_cancellation(&owner, callback.clone(), CANCELLED, async {
++        let result = with_owner_cancellation(&owner, None, callback.clone(), CANCELLED, async {
+             Ok("completed effect")
+         })
+         .await;
+@@ -183,8 +187,10 @@
+         let callback = CancellationToken::new();
+         preempt.cancel();
+         assert_eq!(
+-            with_owner_cancellation(&owner, callback.clone(), CANCELLED, async { Ok("yielded") })
+-                .await,
++            with_owner_cancellation(&owner, None, callback.clone(), CANCELLED, async {
++                Ok("yielded")
++            })
++            .await,
+             Ok("yielded")
+         );
+         assert!(!owner.is_cancelled());
+@@ -198,7 +204,7 @@
+         callback.cancel();
+         let inner_callback = callback.clone();
+         assert_eq!(
+-            with_owner_cancellation(&owner, callback, CANCELLED, async {
++            with_owner_cancellation(&owner, None, callback, CANCELLED, async {
+                 if inner_callback.is_cancelled() {
+                     Err("host callback cancelled".to_string())
+                 } else {

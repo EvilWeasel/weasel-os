@@ -18,6 +18,27 @@ input. Use the existing Codex authentication; do not extract OAuth tokens.
 Outside T3, use a supported Luna delegation path when available; explicitly
 report if the current client cannot provide the requested model separation.
 
+Keep a small task-owned app set. Before starting an app, inspect current windows
+and reuse an owned instance when its current document/profile and identity match;
+historical IDs or a shared process ID alone are insufficient. On this laptop,
+normally keep at most three task-owned top-level windows, including dialogs.
+Open additional windows only when the actual workflow requires them and retire
+them after their result is saved and checked. Track which windows/tabs this task
+created, and close its surplus windows through a freshly verified GUI target.
+Preserve user windows, tabs and unsaved data; never kill a shared app process to
+clean up a test. If ownership or unsaved state is uncertain, report it rather
+than closing it. Reuse the remaining owned app for the next test instead of
+accumulating a new app set for every trial. Pause heavy background builds when
+resource pressure makes desktop interaction unresponsive.
+
+When the live `desktop_act` schema exposes `close_window`, prefer that explicit
+window-ID request for a saved task-owned window. Focus it separately, observe
+freshly, and send only `close_window` with matching action and top-level IDs.
+The actor checks the UI identity, not task ownership or saved buffers. Inspect
+fresh `desktop_windows` and any save modal afterward; an ACK or an incomplete
+compact inventory does not prove closure. Preserve uncertain or user-owned
+windows and report them instead of applying process-level cleanup.
+
 For the full workflow, keep the selected output visibly marked with the
 click-through blue indicator. Start `weasel-computer-use-indicator run
 --task-id ID --output OUTPUT --stdin-control` in the executing worker's owned
@@ -122,6 +143,14 @@ pixel belongs to it when Niri supplies no absolute window bounds. A different
 focused window is a wrong-target failure: stop the batch, inspect possible
 effects, then focus the intended instance separately and ground it afresh.
 Reobserve after animation, layout, modal and focus changes.
+
+If the actual observation/action tool schema exposes `compact`, use
+`compact:true` for targeted work to avoid repeatedly returning unrelated
+window inventories. The reply keeps target/focus/dialog warnings and all guard,
+effect and timing data, with explicit omitted IDs and completeness metadata.
+Use `desktop_windows` when finding another app; absence from an incomplete
+subset does not mean a window is closed. `detailed:true` returns the full reply.
+This option does not alter screenshots, retained observations or action guards.
 
 `desktop_semantic` maps the Niri inventory identity to a fresh, unambiguous Cua
 entry and supports bounded queries. Its tree is application/PID scoped because

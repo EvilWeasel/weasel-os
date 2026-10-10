@@ -115,6 +115,232 @@ fn compact_observation(data: &mut Value) -> bool {
     true
 }
 
+// Opt-in inventory presentation only. Never omit an unfamiliar entry: a new
+// field, malformed identity/layout, urgency or floating dialog may carry a
+// warning or target state this presenter cannot safely classify.
+fn known_window_inventory_entry(window: &Value) -> bool {
+    fn pair(value: &Value, positive: bool) -> bool {
+        value.is_null()
+            || value.as_array().is_some_and(|values| {
+                values.len() == 2
+                    && values.iter().all(|value| {
+                        value
+                            .as_f64()
+                            .is_some_and(|n| n.is_finite() && (!positive || n > 0.0))
+                    })
+            })
+    }
+    let Some(object) = window.as_object() else {
+        return false;
+    };
+    if ![
+        "id",
+        "pid",
+        "app_id",
+        "title",
+        "workspace_id",
+        "is_focused",
+        "is_urgent",
+        "is_floating",
+        "focus_timestamp",
+        "layout",
+    ]
+    .iter()
+    .all(|key| object.contains_key(*key))
+        || !object.keys().all(|key| {
+            matches!(
+                key.as_str(),
+                "id" | "pid"
+                    | "app_id"
+                    | "title"
+                    | "workspace_id"
+                    | "is_focused"
+                    | "is_urgent"
+                    | "is_floating"
+                    | "focus_timestamp"
+                    | "layout"
+            )
+        })
+        || !["id", "workspace_id"]
+            .iter()
+            .all(|key| window[*key].as_u64().is_some_and(|n| n > 0))
+        // Niri's PID is Option<i32>. Unknown/null identity stays visible;
+        // a positive JSON integer still must fit the provider's signed type.
+        || !window["pid"]
+            .as_i64()
+            .is_some_and(|n| n > 0 && i32::try_from(n).is_ok())
+        || !["app_id", "title"]
+            .iter()
+            .all(|key| window[*key].is_string())
+        || !["is_focused", "is_urgent", "is_floating"]
+            .iter()
+            .all(|key| window[*key].is_boolean())
+    {
+        return false;
+    }
+    if !window["focus_timestamp"].is_null() {
+        let Some(stamp) = window["focus_timestamp"].as_object() else {
+            return false;
+        };
+        if stamp
+            .keys()
+            .any(|key| !matches!(key.as_str(), "secs" | "nanos"))
+            || window["focus_timestamp"]["secs"].as_u64().is_none()
+            || !window["focus_timestamp"]["nanos"]
+                .as_u64()
+                .is_some_and(|n| n < 1_000_000_000)
+        {
+            return false;
+        }
+    }
+    let Some(layout) = window["layout"].as_object() else {
+        return false;
+    };
+    [
+        "pos_in_scrolling_layout",
+        "tile_pos_in_workspace_view",
+        "tile_size",
+        "window_offset_in_tile",
+        "window_size",
+    ]
+    .iter()
+    .all(|key| layout.contains_key(*key))
+        && layout.keys().all(|key| {
+            matches!(
+                key.as_str(),
+                "pos_in_scrolling_layout"
+                    | "tile_pos_in_workspace_view"
+                    | "tile_size"
+                    | "window_offset_in_tile"
+                    | "window_size"
+            )
+        })
+        && (window["layout"]["pos_in_scrolling_layout"].is_null()
+            || window["layout"]["pos_in_scrolling_layout"]
+                .as_array()
+                .is_some_and(|indices| {
+                    indices.len() == 2
+                        && indices
+                            .iter()
+                            .all(|index| index.as_u64().is_some_and(|index| index > 0))
+                }))
+        && pair(&window["layout"]["tile_pos_in_workspace_view"], false)
+        // Only the workspace-view position is optional. Niri's offset and
+        // tile size are non-null f64 pairs; visual window size is an i32 pair.
+        && window["layout"]["window_offset_in_tile"].is_array()
+        && pair(&window["layout"]["window_offset_in_tile"], false)
+        && window["layout"]["tile_size"].is_array()
+        && pair(&window["layout"]["tile_size"], true)
+        && window["layout"]["window_size"]
+            .as_array()
+            .is_some_and(|sizes| {
+                sizes.len() == 2
+                    && sizes.iter().all(|size| {
+                        size.as_i64()
+                            .is_some_and(|n| n > 0 && i32::try_from(n).is_ok())
+                    })
+            })
+}
+
+fn compact_window_inventory(data: &mut Value, explicit_target: Option<u64>) -> bool {
+    if !data["observation_id"].is_string()
+        || data["capture"]["output"].as_str().is_none()
+        || data.get("_inventory_presentation").is_some()
+        || data.get("_presentation").is_some_and(|value| {
+            value["format"] != "compact-v1"
+                || value.as_object().is_none_or(|object| {
+                    object.keys().any(|key| {
+                        !matches!(
+                            key.as_str(),
+                            "format" | "capabilities_fingerprint" | "full_details" | "omissions"
+                        )
+                    })
+                })
+        })
+    {
+        return false;
+    }
+    let Some(focused_id) = data["focused_window"]["id"].as_u64() else {
+        return false;
+    };
+    let Some(workspaces) = data["workspaces"].as_array() else {
+        return false;
+    };
+    let active: Vec<&Value> = workspaces
+        .iter()
+        .filter(|workspace| {
+            workspace["output"] == data["capture"]["output"] && workspace["is_active"] == true
+        })
+        .collect();
+    if active.len() != 1 {
+        return false;
+    }
+    let Some(active_id) = active[0]["active_window_id"].as_u64() else {
+        return false;
+    };
+    let Some(windows) = data["windows"].as_array() else {
+        return false;
+    };
+    let ids: Vec<u64> = windows
+        .iter()
+        .filter_map(|window| window["id"].as_u64())
+        .collect();
+    // Invalid/duplicate IDs, a missing expected target or mismatched inventory
+    // may be meaningful state. Keep the whole inventory instead of guessing.
+    let mut unique = ids.clone();
+    unique.sort_unstable();
+    unique.dedup();
+    if ids.len() != windows.len()
+        || ids.contains(&0)
+        || unique.len() != ids.len()
+        || !ids.contains(&focused_id)
+        || !ids.contains(&active_id)
+        || explicit_target.is_some_and(|target| !ids.contains(&target))
+    {
+        return false;
+    }
+    let original_fingerprint = fingerprint(&data["windows"]);
+    let original_count = windows.len();
+    let workspace_ids: Vec<u64> = workspaces.iter().filter_map(|w| w["id"].as_u64()).collect();
+    let mut retained = Vec::new();
+    let mut omitted = Vec::new();
+    for window in windows {
+        let id = window["id"].as_u64().expect("Inventory IDs checked above");
+        if id == focused_id
+            || id == active_id
+            || Some(id) == explicit_target
+            || window["is_focused"] != false
+            || window["is_urgent"] != false
+            || window["is_floating"] != false
+            || !known_window_inventory_entry(window)
+            || !window["workspace_id"]
+                .as_u64()
+                .is_some_and(|id| workspace_ids.contains(&id))
+        {
+            retained.push(window.clone());
+        } else {
+            omitted.push(id);
+        }
+    }
+    if omitted.is_empty() {
+        return false;
+    }
+    data["_inventory_presentation"] = json!({
+        "format":"window-subset-v1",
+        "windows_complete":false,
+        "scope":"Full focused window, explicit act target, capture-output active window, focused/urgent/floating or unfamiliar entries; not a complete desktop/output/app inventory and not an input permission.",
+        "original_window_count":original_count,
+        "retained_window_count":retained.len(),
+        "omitted_window_ids":omitted,
+        "original_windows_fingerprint":original_fingerprint,
+        "fingerprint_scope":"Non-security change hint only; not a fresh observation, target proof or integrity hash.",
+        "full_inventory":"desktop_windows; detailed=true returns the full original MCP reply.",
+        "preserved":"All remaining fields unchanged from normal MCP presentation, including full focused/target identities/layouts, workspaces, outputs/geometry, capabilities, readiness/guards/timing/effects/errors and PNG blocks."
+    });
+    data["windows"] = json!(retained);
+    true
+}
+
 // Field order is presentation only. IDs, fresh readiness and action effects
 // precede bulky inventories; no keys, values or array order are removed.
 const FIRST: &[&str] = &[
@@ -230,13 +456,25 @@ pub(crate) fn present(tool: &str, args: &Value, mut result: Value) -> Value {
             let Ok(mut data) = serde_json::from_str::<Value>(text) else {
                 continue;
             };
-            let changed = if tool == "desktop_observe" {
+            let mut changed = if tool == "desktop_observe" {
                 compact_observation(&mut data)
             } else if data["after_observation"].is_object() {
                 compact_observation(&mut data["after_observation"])
             } else {
                 false
             };
+            if args["compact"] == true {
+                if tool == "desktop_observe" {
+                    changed |= compact_window_inventory(&mut data, None);
+                } else if let Some(target) = args["window_id"].as_u64() {
+                    // Without an explicit act target the old expected window
+                    // is unknown here, so do not scope the after-inventory.
+                    if let Some(after) = data.get_mut("after_observation").filter(|v| v.is_object())
+                    {
+                        changed |= compact_window_inventory(after, Some(target));
+                    }
+                }
+            }
             // Exact untouched text remains exact, including formatting on
             // unrecognized/failed responses without a fresh observation.
             if changed {
@@ -661,5 +899,336 @@ mod tests {
                 assert_eq!(present(tool, &json!({}), raw.clone()), raw);
             }
         }
+    }
+
+    fn inventory_window(id: u64, workspace: u64) -> Value {
+        json!({"id":id,"pid":1000+id,"app_id":"editor","title":format!("Fenster äöüß 🦦 {id}"),"workspace_id":workspace,
+          "is_focused":false,"is_urgent":false,"is_floating":false,"focus_timestamp":null,
+          "layout":{"pos_in_scrolling_layout":[1,1],"tile_pos_in_workspace_view":null,"tile_size":[800.0,600.0],"window_offset_in_tile":[0.0,0.0],"window_size":[800,600]}})
+    }
+    fn inventory_observation() -> Value {
+        let mut value = observation();
+        value["capture"]["output"] = json!("DP-6");
+        value["windows"] = json!([
+            inventory_window(11, 33),
+            inventory_window(12, 44),
+            inventory_window(13, 33),
+            inventory_window(14, 44),
+            inventory_window(15, 33)
+        ]);
+        value["focused_window"] = value["windows"][1].clone();
+        value["focused_window"]["is_focused"] = json!(true);
+        value["windows"][1]["is_focused"] = json!(true);
+        value["workspaces"] = json!([
+            {"id":33,"output":"DP-6","is_active":true,"active_window_id":11},
+            {"id":44,"output":"DP-5","is_active":true,"active_window_id":12}
+        ]);
+        value
+    }
+    #[test]
+    fn optin_retains_global_foreign_focus_and_capture_active_with_explicit_discovery() {
+        let raw = envelope(inventory_observation());
+        let normal = text(&present("desktop_observe", &json!({}), raw.clone()));
+        let projected = present("desktop_observe", &json!({"compact":true}), raw.clone());
+        let mut after = text(&projected);
+        assert_eq!(
+            after["windows"],
+            json!([normal["windows"][0], normal["windows"][1]])
+        );
+        assert_eq!(after["focused_window"], normal["focused_window"]);
+        let note = after
+            .as_object_mut()
+            .unwrap()
+            .remove("_inventory_presentation")
+            .unwrap();
+        assert_eq!(note["windows_complete"], false);
+        assert_eq!(note["original_window_count"], 5);
+        assert_eq!(note["omitted_window_ids"], json!([13, 14, 15]));
+        assert!(note["full_inventory"]
+            .as_str()
+            .unwrap()
+            .contains("desktop_windows"));
+        after["windows"] = normal["windows"].clone();
+        assert_eq!(after, normal); // All non-inventory parsed values remain exact.
+        assert_eq!(projected["content"][1], raw["content"][1]);
+        assert_eq!(projected["isError"], raw["isError"]);
+        assert_eq!(projected["_meta"], raw["_meta"]);
+    }
+    #[test]
+    fn optin_act_keeps_explicit_old_target_new_modal_and_all_partial_error_evidence() {
+        let mut observed = inventory_observation();
+        observed["windows"][4]["is_floating"] = json!(true);
+        let raw = envelope(
+            json!({"schema":1,"task_id":"task","status":"input_conflict","error":"human input / stale target",
+            "effects":[{"kind":"type","uncertain":true,"dispatch_started":true,"unknown_effect":{"x":null}}],
+            "completed_actions":2,"requested_actions":5,"actor_release_confirmed":false,"automatic_replay":false,
+            "input_generation":17,"expected_input_generation":16,"after_observation_error":null,
+            "future_stop":{"cause":"physical_escape","epoch":18446744073709551615u64},"after_observation":observed}),
+        );
+        let normal = text(&present("desktop_act", &json!({}), raw.clone()));
+        let projected = present("desktop_act", &json!({"compact":true,"window_id":13}), raw);
+        let mut after = text(&projected);
+        let ids: Vec<u64> = after["after_observation"]["windows"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|w| w["id"].as_u64().unwrap())
+            .collect();
+        assert_eq!(ids, vec![11, 12, 13, 15]);
+        after["after_observation"]
+            .as_object_mut()
+            .unwrap()
+            .remove("_inventory_presentation");
+        after["after_observation"]["windows"] = normal["after_observation"]["windows"].clone();
+        assert_eq!(after, normal);
+    }
+    #[test]
+    fn optin_unknown_warning_layout_urgency_floating_unmapped_and_incomplete_entries_pass_through()
+    {
+        for change in [
+            ("/warning", json!({"error":"new provider warning"})),
+            ("/layout/future_scaling", json!({"uncertain":true})),
+            ("/is_urgent", json!(true)),
+            ("/is_floating", json!(true)),
+            ("/workspace_id", json!(999)),
+            ("/pid", Value::Null),
+            ("/layout/window_size", json!([-1, 600])),
+        ] {
+            let mut value = inventory_observation();
+            let window = &mut value["windows"][2];
+            let parts: Vec<&str> = change.0.trim_start_matches('/').split('/').collect();
+            if parts.len() == 1 {
+                window[parts[0]] = change.1;
+            } else {
+                window[parts[0]][parts[1]] = change.1;
+            }
+            let original = window.clone();
+            assert!(compact_window_inventory(&mut value, None));
+            assert_eq!(value["windows"][2], original);
+            assert!(!value["_inventory_presentation"]["omitted_window_ids"]
+                .as_array()
+                .unwrap()
+                .contains(&json!(13)));
+        }
+        let mut value = inventory_observation();
+        value["windows"][2]["layout"]
+            .as_object_mut()
+            .unwrap()
+            .remove("window_size");
+        let original = value["windows"][2].clone();
+        assert!(compact_window_inventory(&mut value, None));
+        assert_eq!(value["windows"][2], original);
+    }
+    #[test]
+    fn optin_malformed_scrolling_indices_are_retained_but_logical_geometry_stays_fractional() {
+        // Niri indices are one-based integer pairs, not logical pixel coordinates.
+        // A malformed ordinary background entry must not vanish from presentation.
+        for position in [
+            json!([-1, 2]),
+            json!([1, -2]),
+            json!([1.5, 2]),
+            json!([1, 2.5]),
+            json!([0, 2]),
+            json!([1, 0]),
+            json!([1.0, 2.0]),
+            json!([1]),
+            json!([1, 2, 3]),
+            json!(["1", 2]),
+        ] {
+            let mut value = inventory_observation();
+            value["windows"][2]["layout"]["pos_in_scrolling_layout"] = position;
+            let original = value["windows"][2].clone();
+            assert!(compact_window_inventory(&mut value, None));
+            assert_eq!(value["windows"][2], original);
+            assert!(!value["_inventory_presentation"]["omitted_window_ids"]
+                .as_array()
+                .unwrap()
+                .contains(&json!(13)));
+        }
+        for position in [Value::Null, json!([1, 2]), json!([9, 100])] {
+            let mut value = inventory_observation();
+            value["windows"][2]["layout"]["pos_in_scrolling_layout"] = position;
+            value["windows"][2]["layout"]["tile_pos_in_workspace_view"] = json!([-1.5, 2.25]);
+            value["windows"][2]["layout"]["window_offset_in_tile"] = json!([-0.25, 1.6]);
+            assert!(compact_window_inventory(&mut value, None));
+            assert!(value["_inventory_presentation"]["omitted_window_ids"]
+                .as_array()
+                .unwrap()
+                .contains(&json!(13)));
+        }
+    }
+    #[test]
+    fn optin_provider_pid_size_types_and_nonnullable_offsets_are_not_omitted_on_invalid_values() {
+        for (path, malformed) in [
+            ("/pid", json!(2147483648u64)),
+            ("/pid", json!(18446744073709551615u64)),
+            ("/pid", json!(-1)),
+            ("/pid", json!(10.5)),
+            ("/pid", json!(10.0)),
+            ("/pid", Value::Null),
+            ("/layout/window_size", json!([2147483648u64, 600])),
+            ("/layout/window_size", json!([800, 18446744073709551615u64])),
+            ("/layout/window_size", json!([800.25, 600])),
+            ("/layout/window_size", json!([800, 600.0])),
+            ("/layout/window_size", json!([0, 600])),
+            ("/layout/window_size", json!([-1, 600])),
+            ("/layout/window_size", Value::Null),
+            ("/layout/window_offset_in_tile", Value::Null),
+            ("/layout/window_offset_in_tile", json!([0, null])),
+            ("/layout/window_offset_in_tile", json!([0])),
+            ("/layout/tile_size", Value::Null),
+        ] {
+            let mut value = inventory_observation();
+            *value["windows"][2].pointer_mut(path).unwrap() = malformed;
+            let original = value["windows"][2].clone();
+            assert!(compact_window_inventory(&mut value, None));
+            assert_eq!(value["windows"][2], original);
+            assert!(!value["_inventory_presentation"]["omitted_window_ids"]
+                .as_array()
+                .unwrap()
+                .contains(&json!(13)));
+        }
+        // Provider integer bounds and actual fractional logical pixel offsets
+        // are valid. An absent optional tile position does not change that.
+        let mut value = inventory_observation();
+        value["windows"][2]["pid"] = json!(2147483647);
+        value["windows"][2]["layout"]["window_size"] = json!([2147483647, 1]);
+        value["windows"][2]["layout"]["window_offset_in_tile"] = json!([-0.25, 1.6]);
+        value["windows"][2]["layout"]["tile_size"] = json!([800.25, 600.5]);
+        assert!(compact_window_inventory(&mut value, None));
+        assert!(value["_inventory_presentation"]["omitted_window_ids"]
+            .as_array()
+            .unwrap()
+            .contains(&json!(13)));
+    }
+    #[test]
+    fn optin_does_not_guess_on_missing_target_duplicate_ids_scope_or_future_metadata() {
+        for kind in 0..10 {
+            let mut value = inventory_observation();
+            let target = match kind {
+                0 => Some(99),
+                1 => {
+                    value["windows"][2]["id"] = json!(11);
+                    None
+                }
+                2 => {
+                    value["windows"][2]["id"] = Value::Null;
+                    None
+                }
+                3 => {
+                    value["windows"][2]["id"] = json!(0);
+                    None
+                }
+                4 => {
+                    value["focused_window"]["id"] = json!(999);
+                    None
+                }
+                5 => {
+                    value["workspaces"][0]["active_window_id"] = Value::Null;
+                    None
+                }
+                6 => {
+                    value["workspaces"][1]["output"] = json!("DP-6");
+                    None
+                }
+                7 => {
+                    value["_presentation"] = json!({"format":"future-v2","warning":"preserve"});
+                    None
+                }
+                8 => {
+                    value["_presentation"] =
+                        json!({"format":"compact-v1","future_warning":"keep catalog"});
+                    None
+                }
+                _ => {
+                    value["_inventory_presentation"] = json!({"unknown":true});
+                    None
+                }
+            };
+            let original = value.clone();
+            assert!(!compact_window_inventory(&mut value, target));
+            assert_eq!(value, original);
+        }
+    }
+    #[test]
+    fn optin_omitted_inventory_change_hint_changes_without_selected_window_mutation() {
+        let mut before = inventory_observation();
+        let mut after = before.clone();
+        after["windows"][3]["title"] = json!("Changed ä\n\t\" 🦦");
+        assert!(compact_window_inventory(&mut before, None));
+        assert!(compact_window_inventory(&mut after, None));
+        assert_eq!(before["windows"], after["windows"]);
+        assert_eq!(
+            before["_inventory_presentation"]["omitted_window_ids"],
+            after["_inventory_presentation"]["omitted_window_ids"]
+        );
+        assert_ne!(
+            before["_inventory_presentation"]["original_windows_fingerprint"],
+            after["_inventory_presentation"]["original_windows_fingerprint"]
+        );
+    }
+    #[test]
+    fn optin_absent_false_nonboolean_default_and_detailed_priority_are_exact() {
+        for tool in ["desktop_observe", "desktop_act"] {
+            let data = if tool == "desktop_observe" {
+                inventory_observation()
+            } else {
+                json!({"after_observation":inventory_observation(),"effects":[]})
+            };
+            let raw = envelope(data);
+            let default = present(tool, &json!({}), raw.clone());
+            for args in [
+                json!({"compact":false}),
+                json!({"compact":null}),
+                json!({"compact":"true"}),
+            ] {
+                assert_eq!(present(tool, &args, raw.clone()), default);
+            }
+            assert_eq!(
+                present(
+                    tool,
+                    &json!({"compact":true,"detailed":true,"window_id":13}),
+                    raw.clone()
+                ),
+                raw
+            );
+            if tool == "desktop_act" {
+                assert_eq!(present(tool, &json!({"compact":true}), raw), default);
+            }
+        }
+        let raw = envelope(inventory_observation());
+        assert_eq!(
+            present("desktop_windows", &json!({"compact":true}), raw.clone()),
+            raw
+        );
+    }
+    #[test]
+    fn optin_malformed_scalar_error_and_png_blocks_cannot_panic_or_change() {
+        for tool in ["desktop_observe", "desktop_act"] {
+            for contents in [
+                json!(null),
+                json!([]),
+                json!("unknown"),
+                json!({}),
+                json!({"error":"no capture"}),
+            ] {
+                let raw = json!({"content":[{"type":"text","text":format!(" {} ",contents)}],"isError":true});
+                assert_eq!(
+                    present(tool, &json!({"compact":true,"window_id":13}), raw.clone()),
+                    raw
+                );
+            }
+        }
+        let mut raw = envelope(inventory_observation());
+        raw["content"][1] = json!({"type":"image","mimeType":"image/png","data":"iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aF9kAAAAASUVORK5CYII=","_meta":{"codex/imageDetail":"original","future":[null,18446744073709551615u64]}});
+        raw["content"]
+            .as_array_mut()
+            .unwrap()
+            .push(json!({"type":"text","text":"not JSON"}));
+        let projected = present("desktop_observe", &json!({"compact":true}), raw.clone());
+        assert_eq!(
+            &projected["content"].as_array().unwrap()[1..],
+            &raw["content"].as_array().unwrap()[1..]
+        );
     }
 }

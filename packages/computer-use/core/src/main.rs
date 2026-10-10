@@ -154,6 +154,9 @@ enum Action {
     Focus {
         window_id: u64,
     },
+    CloseWindow {
+        window_id: u64,
+    },
     Move {
         x: f64,
         y: f64,
@@ -222,6 +225,7 @@ impl Action {
     fn name(&self) -> &'static str {
         match self {
             Self::Focus { .. } => "focus",
+            Self::CloseWindow { .. } => "close_window",
             Self::Move { .. } => "move",
             Self::Click { .. } => "click",
             Self::Scroll { .. } => "scroll",
@@ -244,6 +248,9 @@ impl Action {
 }
 
 const GLOBAL_ROUTING_REVISION: u32 = 2;
+fn close_window_capability() -> Value {
+    json!({"request_path_revision":1,"implemented":true,"focused_only":true,"standalone":true,"explicit_window_id":true,"caller_must_prove_task_ownership_and_saved_state":true,"live_compositor_support_attested":false,"request_ack_is_window_closed":false,"fresh_inventory_and_modal_verification_required":true})
+}
 fn global_keyboard_capability() -> Value {
     json!({"routing_revision":GLOBAL_ROUTING_REVISION,"key_scope":["app","compositor"],"super_implies_compositor":true,"transport":"owned_uinput","device_creation":"only during guarded action preparation","readiness":"authenticated Niri peer has own exact event node open; not proof of configured/UI acceptance","ui_success_requires_verification":true,"fallback":false})
 }
@@ -1158,7 +1165,7 @@ fn observe_inner(state: &State, args: &Value, actor_held: bool) -> R<Value> {
     } else {
         image.clone()
     };
-    let data = json!({"schema":1,"observation_id":id,"epoch":epoch,"input_generation":input_generation,"input_policy":state.input_policy.status(state.last_human_ms.load(Ordering::SeqCst)),"global_keyboard":global_keyboard_capability(),"observed_unix_ms":SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis(),"monotonic_ms":state.started.elapsed().as_secs_f64()*1000.0,"monotonic_system_ms":system_monotonic_ms(),"expires_after_ms":60000,"desktop":"niri-wayland","focused_window":focus,"windows":windows,"workspaces":workspaces,"outputs":outputs,"capture":{"output":name,"path":image,"mime_type":"image/png","image_width":width,"image_height":height,"scale":1,"coordinate_frame":"output-local screenshot pixels; origin top-left; dimensions are actual PNG dimensions and may differ by rounding from Niri logical size","output_logical":geometry},"capabilities":{"capture":true,"window_focus":true,"pointer":"wlr_virtual_pointer_v2","keyboard":{"shortcuts":"app shortcuts: persistent canonical German evdev Wayland keyboard; keymap refreshed before every chord. key_scope=compositor or chords containing Super/meta/logo use an owned Linux uinput device so Niri compositor bindings can process them; permission/monitor/device-open failures refuse before any batch input. Device creation is a capability side effect; open/write acknowledgement is not UI success","unicode_text":{"auto":"plain clipboard for known Electron app IDs or >1000characters; wtype for shorter text in other apps","keyboard_limit_characters":1000,"max_text_utf8_bytes":65536,"electron_keyboard":"known unreliable due physical DomCode and supplementary Unicode; explicit override requires app-specific proof"}},"clipboard":{"backend":"Rust wlr-data-control helper with an owned user scope","plain_text_restore":"best effort; source ownership checked, no atomic selection CAS; skipped after cancel/takeover","rich_or_nontext_restore":"supported bounded MIME payloads including HTML, COMPOUND_TEXT and original Chromium metadata; no portal handles/password hints","rich_preserve_request":"snapshot same offer before replacement; unknown/oversized/sensitive formats refuse","ignored_transport_mimes":["SAVE_TARGETS","GTK_TEXT_BUFFER_CONTENTS"],"holder_lifetime":"separate user scope; source replacement or graphical session shutdown","potential_change_reported_on_failure":true},"semantic_tree":"desktop_semantic: read-only Cua application/PID tree; unique window inventory mapping does not attest node window scope; Cua bounds are not screenshot coordinates","takeover":"physical Escape or explicit takeover latches; ordinary physical activity only invalidates targets and stops a conflicting batch without task cancellation; fresh observe then deliberate continuation"},"timing_ms":{"capture":capture_start.elapsed().as_secs_f64()*1000.0,"observe_total":start.elapsed().as_secs_f64()*1000.0}});
+    let data = json!({"schema":1,"observation_id":id,"epoch":epoch,"input_generation":input_generation,"input_policy":state.input_policy.status(state.last_human_ms.load(Ordering::SeqCst)),"global_keyboard":global_keyboard_capability(),"observed_unix_ms":SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis(),"monotonic_ms":state.started.elapsed().as_secs_f64()*1000.0,"monotonic_system_ms":system_monotonic_ms(),"expires_after_ms":60000,"desktop":"niri-wayland","focused_window":focus,"windows":windows,"workspaces":workspaces,"outputs":outputs,"capture":{"output":name,"path":image,"mime_type":"image/png","image_width":width,"image_height":height,"scale":1,"coordinate_frame":"output-local screenshot pixels; origin top-left; dimensions are actual PNG dimensions and may differ by rounding from Niri logical size","output_logical":geometry},"capabilities":{"capture":true,"window_focus":true,"window_close_request":close_window_capability(),"pointer":"wlr_virtual_pointer_v2","keyboard":{"shortcuts":"app shortcuts: persistent canonical German evdev Wayland keyboard; keymap refreshed before every chord. key_scope=compositor or chords containing Super/meta/logo use an owned Linux uinput device so Niri compositor bindings can process them; permission/monitor/device-open failures refuse before any batch input. Device creation is a capability side effect; open/write acknowledgement is not UI success","unicode_text":{"auto":"plain clipboard for known Electron app IDs or >1000characters; wtype for shorter text in other apps","keyboard_limit_characters":1000,"max_text_utf8_bytes":65536,"electron_keyboard":"known unreliable due physical DomCode and supplementary Unicode; explicit override requires app-specific proof"}},"clipboard":{"backend":"Rust wlr-data-control helper with an owned user scope","plain_text_restore":"best effort; source ownership checked, no atomic selection CAS; skipped after cancel/takeover","rich_or_nontext_restore":"supported bounded MIME payloads including HTML, COMPOUND_TEXT and original Chromium metadata; no portal handles/password hints","rich_preserve_request":"snapshot same offer before replacement; unknown/oversized/sensitive formats refuse","ignored_transport_mimes":["SAVE_TARGETS","GTK_TEXT_BUFFER_CONTENTS"],"holder_lifetime":"separate user scope; source replacement or graphical session shutdown","potential_change_reported_on_failure":true},"semantic_tree":"desktop_semantic: read-only Cua application/PID tree; unique window inventory mapping does not attest node window scope; Cua bounds are not screenshot coordinates","takeover":"physical Escape or explicit takeover latches; ordinary physical activity only invalidates targets and stops a conflicting batch without task cancellation; fresh observe then deliberate continuation"},"timing_ms":{"capture":capture_start.elapsed().as_secs_f64()*1000.0,"observe_total":start.elapsed().as_secs_f64()*1000.0}});
     check_epoch(state, Some(epoch))?;
     if focused(&niri_epoch(state, "windows", Some(epoch))?)
         .as_ref()
@@ -1372,6 +1379,57 @@ fn validate_focus_target(state: &State, obs: &Observation, window_id: u64) -> R<
     let current = niri_epoch(state, "windows", Some(obs.epoch))?;
     validate_focus_inventory(obs, window_id, &current)?;
     validate_focus_state(state, obs)
+}
+
+// Close is deliberately focused-only at first. The explicit IPC ID prevents
+// a focus change after validation from redirecting the close to another window.
+// This validates a UI target, not ownership or the document's saved state.
+fn validate_close_target(state: &State, obs: &Observation, window_id: u64) -> R<()> {
+    validate(state, obs, Some(window_id), false)?;
+    validate_focus_state(state, obs)?;
+    let windows = niri_epoch(state, "windows", Some(obs.epoch))?;
+    validate_focus_inventory(obs, window_id, &windows)?;
+    let actual = windows
+        .as_array()
+        .and_then(|items| {
+            items
+                .iter()
+                .find(|item| item["id"].as_u64() == Some(window_id))
+        })
+        .ok_or("Close target disappeared; no close sent")?;
+    let original = obs
+        .focused_window
+        .as_ref()
+        .ok_or("Close requires the exact observed focused window")?;
+    if actual["title"].as_str().is_none() || actual["title"] != original["title"] {
+        return Err("Close target title/document context changed; reobserve before closing".into());
+    }
+    let workspace_id = actual["workspace_id"]
+        .as_u64()
+        .ok_or("Close target has no workspace identity")?;
+    let workspaces = niri_epoch(state, "workspaces", Some(obs.epoch))?;
+    let workspace = workspaces
+        .as_array()
+        .and_then(|items| {
+            items
+                .iter()
+                .find(|item| item["id"].as_u64() == Some(workspace_id))
+        })
+        .ok_or("Close target workspace disappeared")?;
+    if workspace["output"].as_str() != Some(obs.output.as_str())
+        || workspace["is_active"] != true
+        || workspace["is_focused"] != true
+        || workspace["active_window_id"].as_u64() != Some(window_id)
+    {
+        return Err(
+            "Close target is not the exact active captured-output window; reobserve".into(),
+        );
+    }
+    if niri_epoch(state, "outputs", Some(obs.epoch))?[&obs.output]["logical"] != obs.output_geometry
+    {
+        return Err("Close target output geometry/scaling changed; reobserve".into());
+    }
+    validate(state, obs, Some(window_id), false)
 }
 
 fn delay(state: &State, epoch: u64, ms: u64) -> R<()> {
@@ -1639,6 +1697,25 @@ fn execute(
                 Duration::from_secs(3),
                 Some(epoch),
             )?;
+        }
+        Action::CloseWindow { window_id } => {
+            // Revalidate immediately before the bounded explicit-ID request.
+            validate_close_target(state, obs, *window_id)?;
+            bounded_command(
+                state,
+                "niri",
+                &[
+                    "msg".into(),
+                    "action".into(),
+                    "close-window".into(),
+                    "--id".into(),
+                    window_id.to_string(),
+                ],
+                None,
+                Duration::from_secs(3),
+                Some(epoch),
+            )?;
+            *details = json!({"window_id":window_id,"request":"close-window explicit ID","request_acknowledged":true,"window_closed":null,"saved_document_or_ownership_attested":false,"fresh_inventory_and_modal_verification_required":true});
         }
         Action::Move { x, y } => {
             move_to(pointer.as_mut().unwrap(), *x, *y)?;
@@ -1960,6 +2037,14 @@ fn act_inner(state: &State, args: &Value, epoch: u64) -> R<Value> {
                 .into(),
         );
     }
+    if let Some(window_id) = parsed.actions.iter().find_map(|action| match action {
+        Action::CloseWindow { window_id } => Some(*window_id),
+        _ => None,
+    }) {
+        if parsed.actions.len() != 1 || parsed.window_id != Some(window_id) {
+            return Err("CloseWindow must be standalone with the same explicit top-level window_id; no input sent".into());
+        }
+    }
     let obs = state
         .observations
         .lock()
@@ -2097,6 +2182,9 @@ fn act_inner(state: &State, args: &Value, epoch: u64) -> R<Value> {
             }
             if let Action::Focus { window_id } = action {
                 validate_focus_target(state, &obs, *window_id)?;
+            }
+            if let Action::CloseWindow { window_id } = action {
+                validate_close_target(state, &obs, *window_id)?;
             }
             if !matches!(action, Action::Focus { .. } | Action::Wait { .. }) {
                 validate(state, &obs, parsed.window_id, action.pointer())?;
@@ -2832,6 +2920,7 @@ fn handle(state: &State, tool: &str, args: &Value, epoch: u64) -> R<Value> {
                 data[key] = value.clone();
             }
             data["resume_input_readiness"] = readiness;
+            data["window_close_request"] = close_window_capability();
             Ok(text_result(data))
         }
         "desktop_windows" => Ok(text_result(
@@ -3006,6 +3095,7 @@ fn action_schema() -> Value {
     let string = json!({"type":"string"});
     json!({"anyOf":[
         variant("focus", json!({"window_id":{"type":"integer","minimum":0,"description":"Destination window ID belongs inside this standalone action."}}), &["window_id"]),
+        variant("close_window", json!({"window_id":{"type":"integer","minimum":0,"description":"Standalone; same top-level window_id."}}), &["window_id"]),
         variant("move", json!({"x":number,"y":number}), &["x","y"]),
         variant("click", json!({"x":number,"y":number,"button":{"type":["string","null"],"enum":["left","right","middle",null],"default":"left"},"count":{"type":["integer","null"],"minimum":1,"maximum":3,"default":1}}), &["x","y"]),
         variant("scroll", json!({"x":number,"y":number,"dx":{"type":"integer","minimum":-100,"maximum":100,"default":0},"dy":{"type":"integer","minimum":-100,"maximum":100,"default":0}}), &["x","y"]),
@@ -3038,6 +3128,10 @@ mod action_schema_contract_tests {
     fn variant_fields_and_required_members_match_actual_serde() {
         let samples = [
             (json!({"kind":"focus","window_id":261}), vec!["window_id"]),
+            (
+                json!({"kind":"close_window","window_id":261}),
+                vec!["window_id"],
+            ),
             (json!({"kind":"move","x":2.5,"y":3.0}), vec!["x", "y"]),
             (
                 json!({"kind":"click","x":2.0,"y":3.0,"button":"right","count":2}),
@@ -3241,7 +3335,7 @@ fn tools() -> Value {
       {"name":"desktop_observe","description":"Capture one actual laptop output via grim at scale1, plus Niri identities. Startup capture_not_attempted=true is expected and permits this first read-only observation. Input always requires accepted fresh observation and action_ready; prior successful capture is not a prerequisite for authorized startup resume. Optional crop uses full-output screenshot pixels x/y/width/height; action x/y then use local pixels of the displayed crop. Core translates crop origin; NEVER add compositor output origin. Actual PNG size can differ from Niri logical size by rounding. Observation expires in60seconds; identity/geometry and fresh target-region guards still run. Observe after focus/workspace/layout changes. include_image=false returns private PNG reference only.","inputSchema":{"type":"object","properties":{"output":{"type":"string"},"include_image":{"type":"boolean"},"crop":crop}}},
       {"name":"desktop_semantic","description":"Read fresh Cua AT-SPI elements for a Niri window. Maps only unique actual PID+title; synthetic Cua IDs are never guessed. Query filters returned elements. Accessibility bounds are app-local and NOT screenshot coordinates; do not directly click them without calibrated mapping. Limited/root-only trees require visual fallback.","inputSchema":{"type":"object","properties":{"window_id":{"type":"integer"},"query":{"type":"string"},"max_elements":{"type":"integer"},"max_depth":{"type":"integer"}},"required":["window_id"]}},
       {"name":"desktop_semantic_direct","description":"Read exact-window AT-SPI labels/tree even during ordinary physical activity or held controls. Returns original/current input generation and explicit input/action readiness. Non-actionable or incomplete snapshots issue no handles (focus/click/set_value=false); obtain a fresh complete snapshot after controls release. Only daemon-owned handles from actionable complete snapshots may be used with desktop_act semantic_set_value, semantic_click or standalone semantic_focus. focusable/FOCUSED flags attest element keyboard focus separately from Niri window focus; semantic_focus requires fresh complete semantics and verifies FOCUSED on the same exact object before returning focus_verified. Reobserve and requery semantics before later keyboard input. No raw object/index/Cua tokens and no pixel fallback. Native GTK candidates need live acceptance; missing/incomplete bridges use visual typed actions.","inputSchema":{"type":"object","properties":{"window_id":{"type":"integer"},"query":{"type":"string"},"max_elements":{"type":"integer"},"max_depth":{"type":"integer"},"include_text_selection":{"type":"boolean","description":"Opt-in bounded selection readback for at most one showing enabled FOCUSED unprotected Text object; unicode codepoint [start,end). Explicit available/unsupported/error, no input authority; check fresh generation, complete tree and text identity separately."}},"required":["window_id"]}},
-      {"name":"desktop_act","description":"Single-writer typed desktop actions against fresh observation. Rejects changed focus/geometry/scaling or changed pixels near pointer targets. x/y are local to displayed screenshot/crop. Every move/click/scroll/drag requires the displayed view to be at most1200 pixels on each axis; an oversized view rejects the whole batch before any input, queue admission or device preparation. Capture a fresh target crop and use its crop-local coordinates. Full images remain usable for overview, focus, keys and semantics. Focus must be standalone. Unknown or misplaced fields for an action kind reject the whole batch before input; restore_clipboard belongs only to paste, while type always preserves the prior selection. By default observe_after=true returns a new after_observation ID and image in this same response after dispatch/release and a bounded80ms defaultsettle wait; settle_ms=0..1000 can adjust. Use it for the next act and inspect expected result. A slow/unchanged frame needs another observation/semantic check, not repetition of toggle input. include_image=false omits its image. Acknowledgement is not UI success. Type text_method=auto uses clipboard for known Electron IDs (code/T3) and >1000-character text, keyboard for shorter text in other apps; explicit keyboard/clipboard are available. Electron wtype Unicode is unreliable on this laptop. Clipboard preserves supported text/rich app payloads and original Chromium provenance in bounded RAM from one offer, normalizes duplicate MIME names, omits SAVE_TARGETS and SAME_APP GTK_TEXT_BUFFER_CONTENTS transport markers, preserves serialized GTK rich text, and keeps a separate source holder across actor restarts. Unsupported/sensitive/oversized formats refuse before replacement. Own-source check runs after layout/keymap/window validation and before the first paste modifier press; ownership can still change between reply and input because Wayland has no atomic selection-check-and-paste. No restore after takeover/cancel/ownership loss. Scroll dx/dy are discrete wheel steps (integer -100..100), not pixels; positive dx moves right and positive dy moves down. Smooth-scroll animation needs another fresh observation/settle check before reusing visual targets. Keys are modifiers first e.g.[ctrl,l],[Return]. Explicit key_scope=compositor and Super/meta/logo chords use an owned persistent direct-uinput device because this Niri25.11 Wayland virtual keyboard bypasses compositor bindings; Ctrl/app chords retain the Wayland transport. A fresh proxy check requires backend routing_revision=2 and binds session/epoch/observation before forwarding a global batch; an older backend is refused. Missing permission/takeover monitor/compositor device-open evidence refuses the complete batch before input. Creating the own device is a capability side effect. A kernel input acknowledgement does not verify Niri/UI acceptance; inspect the fresh result. No automatic input fallback. Direct semantic_set_value(handle_id,text,expected_text optional) replaces exact editable contents; semantic_click(handle_id,action_name from direct tree) invokes only AT-SPI named action. Both freshly revalidate context and have no input fallback. Standalone semantic_focus(handle_id) uses Component.GrabFocus, then repeats exact object/window/context validation and freshly queries FOCUSED; acceptance alone is not focus_verified. It sends no keyboard input or fallback. Reobserve and requery the exact focused object before keyboard input. Batch stable edits/shortcuts when intermediate states cannot invalidate later targets; changed-target actions need fresh observation.","inputSchema":{"type":"object","properties":{"observation_id":{"type":"string"},"window_id":{"type":"integer"},"task_id":{"type":"string"},"timeout_ms":{"type":"integer","minimum":100,"maximum":120000,"description":"Whole batch budget including queue, validation, capture, input and post-observe. Bounded release cleanup follows even after timeout."},"observe_after":{"type":"boolean","default":true},"include_image":{"type":"boolean","default":true},"settle_ms":{"type":"integer","default":80,"minimum":0,"maximum":1000,"description":"Bounded post-action settle wait before capture; not a proof of repaint. Slow conditions require fresh observations, never repeated blind input."},"actions":{"type":"array","items":action,"minItems":1,"maxItems":32}},"required":["observation_id","actions"]}},
+      {"name":"desktop_act","description":"Single-writer typed desktop actions against fresh observation. Rejects changed focus/geometry/scaling or changed pixels near pointer targets. x/y are local to displayed screenshot/crop. Every move/click/scroll/drag requires the displayed view to be at most1200 pixels on each axis; an oversized view rejects the whole batch before any input, queue admission or device preparation. Capture a fresh target crop and use its crop-local coordinates. Full images remain usable for overview, focus, keys and semantics. Focus must be standalone. close_window(window_id) is standalone with the same top-level window_id, exact fresh focused target/title/output; caller proves task ownership and safe saved state. Explicit close request acknowledgement is not window disappearance; inspect fresh inventory and any save modal. No PID kill or blind cleanup. Unknown or misplaced fields for an action kind reject the whole batch before input; restore_clipboard belongs only to paste, while type always preserves the prior selection. By default observe_after=true returns a new after_observation ID and image in this same response after dispatch/release and a bounded80ms defaultsettle wait; settle_ms=0..1000 can adjust. Use it for the next act and inspect expected result. A slow/unchanged frame needs another observation/semantic check, not repetition of toggle input. include_image=false omits its image. Acknowledgement is not UI success. Type text_method=auto uses clipboard for known Electron IDs (code/T3) and >1000-character text, keyboard for shorter text in other apps; explicit keyboard/clipboard are available. Electron wtype Unicode is unreliable on this laptop. Clipboard preserves supported text/rich app payloads and original Chromium provenance in bounded RAM from one offer, normalizes duplicate MIME names, omits SAVE_TARGETS and SAME_APP GTK_TEXT_BUFFER_CONTENTS transport markers, preserves serialized GTK rich text, and keeps a separate source holder across actor restarts. Unsupported/sensitive/oversized formats refuse before replacement. Own-source check runs after layout/keymap/window validation and before the first paste modifier press; ownership can still change between reply and input because Wayland has no atomic selection-check-and-paste. No restore after takeover/cancel/ownership loss. Scroll dx/dy are discrete wheel steps (integer -100..100), not pixels; positive dx moves right and positive dy moves down. Smooth-scroll animation needs another fresh observation/settle check before reusing visual targets. Keys are modifiers first e.g.[ctrl,l],[Return]. Explicit key_scope=compositor and Super/meta/logo chords use an owned persistent direct-uinput device because this Niri25.11 Wayland virtual keyboard bypasses compositor bindings; Ctrl/app chords retain the Wayland transport. A fresh proxy check requires backend routing_revision=2 and binds session/epoch/observation before forwarding a global batch; an older backend is refused. Missing permission/takeover monitor/compositor device-open evidence refuses the complete batch before input. Creating the own device is a capability side effect. A kernel input acknowledgement does not verify Niri/UI acceptance; inspect the fresh result. No automatic input fallback. Direct semantic_set_value(handle_id,text,expected_text optional) replaces exact editable contents; semantic_click(handle_id,action_name from direct tree) invokes only AT-SPI named action. Both freshly revalidate context and have no input fallback. Standalone semantic_focus(handle_id) uses Component.GrabFocus, then repeats exact object/window/context validation and freshly queries FOCUSED; acceptance alone is not focus_verified. It sends no keyboard input or fallback. Reobserve and requery the exact focused object before keyboard input. Batch stable edits/shortcuts when intermediate states cannot invalidate later targets; changed-target actions need fresh observation.","inputSchema":{"type":"object","properties":{"observation_id":{"type":"string"},"window_id":{"type":"integer"},"task_id":{"type":"string"},"timeout_ms":{"type":"integer","minimum":100,"maximum":120000,"description":"Whole batch budget including queue, validation, capture, input and post-observe. Bounded release cleanup follows even after timeout."},"observe_after":{"type":"boolean","default":true},"include_image":{"type":"boolean","default":true},"settle_ms":{"type":"integer","default":80,"minimum":0,"maximum":1000,"description":"Bounded post-action settle wait before capture; not a proof of repaint. Slow conditions require fresh observations, never repeated blind input."},"actions":{"type":"array","items":action,"minItems":1,"maxItems":32}},"required":["observation_id","actions"]}},
       {"name":"desktop_cancel","description":"Priority epoch cancellation independent of actor lock. Pending batches stop; held buttons release. Already-dispatched effects remain. Wait for desktop_status active=null and actor_release_confirmed=true for full release.","inputSchema":{"type":"object","properties":{}}},
       {"name":"desktop_takeover","description":"Explicit human desktop takeover, persists its cause across backend restarts and latches refusal of future actions and cancels queued/active automation. Only a physical Escape press does this automatically when accessible; ordinary input invalidates stale observations and releases a conflicting batch without latching takeover. Wait active=null and actor_release_confirmed=true for full release. desktop_resume then fresh observation is required.","inputSchema":{"type":"object","properties":{}}},
       {"name":"desktop_recover_release","description":"Explicit bounded recovery of unconfirmed release/receipt on existing owned actuators only. Refuses if writer busy, active task or queue nonempty. Sends only releases of owned held buttons/keys and receipt sync, no press/move/device creation/action replay, no epoch/latch/cause reset, no automatic resume. May finalize effects of already-held input. Default1500ms, maximum2000ms shared budget. Failure remains unconfirmed; original last_result preserved. Success invalidates old observations/semantic handles and requires fresh capture; inspect status queue and follow human return-of-control policy before resume.","inputSchema":{"type":"object","properties":{"timeout_ms":{"type":"integer","minimum":200,"maximum":2000,"default":1500}},"additionalProperties":false}},
@@ -3257,6 +3351,7 @@ fn tools() -> Value {
             tool["name"].as_str(),
             Some("desktop_observe" | "desktop_act")
         ) {
+            tool["inputSchema"]["properties"]["compact"] = json!({"type":"boolean","default":false,"description":"Opt-in MCP window-inventory subset: retains full focused/capture-active/explicit act-target and urgent/floating/unfamiliar windows. Omissions/count/fingerprint explicit; desktop_windows or detailed=true for full inventory. All guards/effects/timing/images stay unchanged."});
             tool["inputSchema"]["properties"]["detailed"] = json!({"type":"boolean","default":false,"description":"MCP presentation only. True returns original full metadata; default abbreviates known static prose and display mode catalogs while retaining selected mode, all identities/layouts/capture/guards/effects/errors/timings. Images remain unchanged."});
             let description = tool["description"].as_str().unwrap_or("");
             tool["description"] = json!(format!("{description} MCP metadata is compact by default; detailed=true returns full original metadata. desktop_windows retains full display mode catalogs."));
@@ -6666,6 +6761,249 @@ mod reference_decode_regression {
         assert_eq!(data["actor_release_confirmed"], true);
         assert_eq!(state.reference_cache.retained_bytes(), 0);
         assert!(!state.capture_available.load(Ordering::SeqCst));
+        fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod close_window_contract_tests {
+    use super::*;
+    use release_recovery_tests::{cooperative_fixture, obs};
+
+    fn result_data(value: &Value) -> Value {
+        serde_json::from_str(value["content"][0]["text"].as_str().unwrap()).unwrap()
+    }
+
+    #[test]
+    fn tagged_close_request_roundtrip_keeps_exact_u64_id_and_refuses_implicit_or_foreign_fields() {
+        for id in [0, 77, u64::MAX] {
+            let request = json!({"kind":"close_window","window_id":id});
+            let wire = serde_json::to_vec(&request).unwrap();
+            let decoded: Value = serde_json::from_slice(&wire).unwrap();
+            assert_eq!(decoded, request);
+            assert!(
+                matches!(serde_json::from_value::<Action>(decoded).unwrap(), Action::CloseWindow { window_id } if window_id == id)
+            );
+        }
+        for request in [
+            json!({"kind":"close_window"}),
+            json!({"kind":"close_window","window_id":null}),
+            json!({"kind":"close_window","window_id":-1}),
+            json!({"kind":"close_window","window_id":77.0}),
+            json!({"kind":"close_window","window_id":77,"force":true}),
+            json!({"kind":"close_window","window_id":77,"pid":42}),
+        ] {
+            assert!(serde_json::from_value::<Action>(request).is_err());
+        }
+        let catalog = tools();
+        let schema = &catalog
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|t| t["name"] == "desktop_act")
+            .unwrap()["inputSchema"];
+        let variants = schema["properties"]["actions"]["items"]["anyOf"]
+            .as_array()
+            .unwrap();
+        assert_eq!(variants.len(), 13); // The baseline already has twelve operations.
+        let close = variants
+            .iter()
+            .find(|v| v["properties"]["kind"]["enum"] == json!(["close_window"]))
+            .unwrap();
+        assert_eq!(close["required"], json!(["kind", "window_id"]));
+        assert_eq!(close["additionalProperties"], false);
+        let bytes = serde_json::to_vec(schema).unwrap().len();
+        assert!(
+            bytes < 5000,
+            "Published Codex input schema exceeded budget: {bytes}"
+        );
+        eprintln!("close_schema_variants=13 input_schema_utf8_bytes={bytes} pinned_budget=5000");
+    }
+
+    #[test]
+    fn close_mixed_batch_or_mismatched_ids_refuse_before_queue_device_or_command() {
+        let (state, dir) = cooperative_fixture("close-zero-admission");
+        let initial = state.last_result.lock().unwrap().clone();
+        for (top, actions) in [
+            (
+                Some(77),
+                json!([{"kind":"wait","ms":1},{"kind":"close_window","window_id":77}]),
+            ),
+            (
+                Some(77),
+                json!([{"kind":"close_window","window_id":77},{"kind":"wait","ms":1}]),
+            ),
+            (Some(88), json!([{"kind":"close_window","window_id":77}])),
+            (None, json!([{"kind":"close_window","window_id":77}])),
+        ] {
+            let mut args = json!({"observation_id":"cloned-before-recovery","observe_after":false,"actions":actions});
+            if let Some(top) = top {
+                args["window_id"] = json!(top);
+            }
+            let error = act(&state, &args, 77).unwrap_err();
+            assert!(error.contains("standalone with the same explicit"));
+            assert!(state.active.lock().unwrap().is_null());
+            assert_eq!(state.queued.load(Ordering::SeqCst), 0);
+            assert!(state.release_confirmed.load(Ordering::SeqCst));
+            assert!(state.actor.lock().unwrap().is_none());
+            assert!(state.keyboard.lock().unwrap().is_none());
+            assert!(state.global_keyboard.lock().unwrap().is_none());
+            assert_eq!(*state.last_result.lock().unwrap(), initial);
+            assert_eq!(fs::metadata(dir.join("events.jsonl")).unwrap().len(), 0);
+        }
+        fs::remove_dir_all(dir).unwrap();
+    }
+
+    #[test]
+    fn close_focus_output_identity_title_and_generation_guards_never_dispatch_wrong_target_with_shim(
+    ) {
+        const FLAG: &str = "WEASEL_PRIVATE_CLOSE_PROBE_CHILD";
+        const TEST: &str = "close_window_contract_tests::close_focus_output_identity_title_and_generation_guards_never_dispatch_wrong_target_with_shim";
+        if env::var(FLAG).as_deref() != Ok("1") {
+            let child = Command::new(env::current_exe().unwrap())
+                .args(["--exact", TEST, "--test-threads=1"])
+                .env(FLAG, "1")
+                .output()
+                .unwrap();
+            assert!(
+                child.status.success(),
+                "Private close shim failed: {} {}",
+                String::from_utf8_lossy(&child.stdout),
+                String::from_utf8_lossy(&child.stderr)
+            );
+            assert!(String::from_utf8_lossy(&child.stdout).contains("1 passed; 0 failed"));
+            return;
+        }
+        // Private child fake-Niri-only PATH; no live Niri, capture or actuator.
+        let (state, dir) = cooperative_fixture("close-target-shim");
+        let shimdir = dir.join("fake-bin");
+        private_dir(&shimdir).unwrap();
+        let shim = shimdir.join("niri");
+        fs::write(&shim, b"#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$WEASEL_PRIVATE_CLOSE_CALLS\"\ncase \"$*\" in\n 'msg -j windows') printf '%s\\n' \"$WEASEL_PRIVATE_CLOSE_WINDOWS\" ;;\n 'msg -j workspaces') printf '%s\\n' \"$WEASEL_PRIVATE_CLOSE_WORKSPACES\" ;;\n 'msg -j outputs') printf '%s\\n' \"$WEASEL_PRIVATE_CLOSE_OUTPUTS\" ;;\n 'msg action close-window --id 77') printf '%s\\n' '{}' ;;\n *) exit 17 ;;\nesac\n").unwrap();
+        fs::set_permissions(&shim, fs::Permissions::from_mode(0o700)).unwrap();
+        let calls = dir.join("fake-calls.txt");
+        env::set_var("PATH", &shimdir);
+        env::set_var("WEASEL_PRIVATE_CLOSE_CALLS", &calls);
+        let target = json!({"id":77,"pid":42,"app_id":"private-fixture-editor","title":"Saved own fixture","workspace_id":33,"is_focused":true,"is_floating":false,"layout":{"fixture":1}});
+        let workspace = json!({"id":33,"output":"DP-6","is_active":true,"is_focused":true,"active_window_id":77});
+        let geometry = json!({"x":0,"y":0,"width":800,"height":600,"scale":1});
+        let mut captured = obs(&dir);
+        captured.output = "DP-6".into();
+        captured.output_geometry = geometry.clone();
+        captured.focused_window = Some(target.clone());
+        captured.windows = json!([target.clone()]);
+        captured.focus_output = Some("DP-6".into());
+        state
+            .observations
+            .lock()
+            .unwrap()
+            .insert(captured.id.clone(), captured.clone());
+        let args = json!({"observation_id":captured.id,"window_id":77,"actions":[{"kind":"close_window","window_id":77}],"observe_after":false});
+        for scenario in [
+            "focus",
+            "pid",
+            "app",
+            "layout",
+            "title",
+            "output",
+            "workspace_active",
+            "active_window",
+            "geometry",
+            "duplicate",
+            "missing",
+            "generation",
+        ] {
+            let mut actual = target.clone();
+            let mut ws = workspace.clone();
+            let mut geo = geometry.clone();
+            let mut windows = json!([actual.clone()]);
+            match scenario {
+                "focus" => {
+                    actual["is_focused"] = json!(false);
+                    windows = json!([actual.clone(),{"id":88,"pid":42,"app_id":"private-fixture-editor","workspace_id":33,"is_focused":true}]);
+                }
+                "pid" => actual["pid"] = json!(999),
+                "app" => actual["app_id"] = json!("other-app"),
+                "layout" => actual["layout"] = json!({"fixture":2}),
+                "title" => actual["title"] = json!("Other document"),
+                "output" => ws["output"] = json!("DP-5"),
+                "workspace_active" => ws["is_active"] = json!(false),
+                "active_window" => ws["active_window_id"] = json!(88),
+                "geometry" => geo["scale"] = json!(1.25),
+                "duplicate" => windows = json!([actual.clone(), actual.clone()]),
+                "missing" => windows = json!([]),
+                "generation" => {
+                    state.input_policy.update_holds(1, true);
+                    state.input_policy.update_holds(0, true);
+                }
+                _ => unreachable!(),
+            }
+            if !matches!(scenario, "focus" | "duplicate" | "missing") {
+                windows = json!([actual]);
+            }
+            env::set_var("WEASEL_PRIVATE_CLOSE_WINDOWS", windows.to_string());
+            env::set_var("WEASEL_PRIVATE_CLOSE_WORKSPACES", json!([ws]).to_string());
+            env::set_var(
+                "WEASEL_PRIVATE_CLOSE_OUTPUTS",
+                json!({"DP-6":{"logical":geo}}).to_string(),
+            );
+            fs::write(&calls, b"").unwrap();
+            let result = act(&state, &args, 77);
+            if let Ok(result) = result {
+                assert_eq!(
+                    result_data(&result)["completed_actions"],
+                    0,
+                    "scenario {scenario}"
+                );
+            }
+            let commands = fs::read_to_string(&calls).unwrap();
+            assert!(
+                !commands.contains("msg action"),
+                "Wrong target command sent: {scenario}: {commands}"
+            );
+            assert!(state.active.lock().unwrap().is_null());
+            assert_eq!(state.queued.load(Ordering::SeqCst), 0);
+            assert!(state.release_confirmed.load(Ordering::SeqCst));
+            assert!(state.actor.lock().unwrap().is_none());
+            assert!(state.keyboard.lock().unwrap().is_none());
+            assert!(state.global_keyboard.lock().unwrap().is_none());
+        }
+        state.input_policy.update_holds(0, true);
+        captured.input_generation = state.input_policy.generation();
+        state
+            .observations
+            .lock()
+            .unwrap()
+            .insert(captured.id.clone(), captured.clone());
+        env::set_var("WEASEL_PRIVATE_CLOSE_WINDOWS", json!([target]).to_string());
+        env::set_var(
+            "WEASEL_PRIVATE_CLOSE_WORKSPACES",
+            json!([workspace]).to_string(),
+        );
+        env::set_var(
+            "WEASEL_PRIVATE_CLOSE_OUTPUTS",
+            json!({"DP-6":{"logical":geometry}}).to_string(),
+        );
+        fs::write(&calls, b"").unwrap();
+        let result = result_data(&act(&state, &args, 77).unwrap());
+        assert_eq!(result["completed_actions"], 1);
+        assert_eq!(result["effects"][0]["details"]["window_id"], 77);
+        assert_eq!(
+            result["effects"][0]["details"]["window_closed"],
+            Value::Null
+        );
+        assert_eq!(
+            result["effects"][0]["details"]["saved_document_or_ownership_attested"],
+            false
+        );
+        let actual = fs::read_to_string(&calls).unwrap();
+        let dispatched: Vec<_> = actual
+            .lines()
+            .filter(|line| line.starts_with("msg action"))
+            .collect();
+        assert_eq!(dispatched, ["msg action close-window --id 77"]);
+        assert!(state.release_confirmed.load(Ordering::SeqCst));
+        assert!(state.actor.lock().unwrap().is_none());
         fs::remove_dir_all(dir).unwrap();
     }
 }

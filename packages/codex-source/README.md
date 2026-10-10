@@ -24,11 +24,47 @@ input has stopped. The desktop actor's released state, empty queue, fresh UI,
 and completed effects must still be checked. A separate desktop cancel and the
 Niri takeover shortcut remain available.
 
-The second patch adds seven focused memory-transport tests to the same locked
-`codex-rmcp-client` package. The Nix check phase runs those tests; installation
-checks both binaries. Full Nix checks and actual T3/Codex interruption tests are
-separate acceptance steps. A fresh client process is required to load a changed
-Codex executable; reconnecting only the desktop MCP does not replace Codex.
+The same production patch also connects each code-mode cell's nested tool
+callbacks to the original `functions.exec` invocation cancellation token.
+That token stays attached after a cell yields. An explicit stop cancels the
+callback token before its response waiter is dropped, reaching the existing
+request-scoped MCP cancellation guard. Later callbacks from that stopped owner
+are refused before dispatch. Normal yield, preemption and successful callbacks
+retain their existing behavior; other owners and sessions are unaffected.
+
+An explicit session interrupt also revokes the session's callback admission
+generation before its first await, including delegates from completed turns
+and an idle session. A guard keeps admission closed throughout overlapping
+interrupts; a task starting during an interrupt cannot reopen it. Only a
+subsequent task can obtain a fresh generation, and old delegates remain
+revoked. Normal yield and successful turn completion do not revoke admission.
+
+These guards do not terminate the host JavaScript cell. Its existing
+`code_mode_interrupt` feature policy is separate. Actual T3 delivery of a
+session interrupt after a turn has completed still needs a live check. The
+original live T3 test that exposed this gap remains a failed normal stop; its
+separate safety fallback prevented the subsequent canary input. A build or
+in-memory test cannot replace the repeated live cancellation check.
+
+The second patch retains seven focused memory-transport tests in the locked
+`codex-rmcp-client` package and adds seven owner-cancellation helper tests and
+ten admission tests, plus four delegate integration tests in `codex-core`.
+The Nix check phase runs the helper and admission tests and all six delegate
+tests, including the two existing tests, after the original MCP tests;
+installation checks both binaries. Full Nix
+checks and actual T3/Codex interruption tests are separate acceptance steps.
+A fresh client process is required to load a changed Codex executable;
+reconnecting only the desktop MCP does not replace Codex.
+
+The release build disables LTO explicitly with `CARGO_PROFILE_RELEASE_LTO=off`
+and uses 16 codegen units. Release optimization remains at level 3, debug
+information stays disabled, and Cargo still uses two build jobs. This avoids
+the previous whole-program LTO configuration after an observed build put severe
+pressure on the laptop's RAM and swap. It does not impose a memory limit on Nix
+builders or establish a measured speed improvement; build memory and runtime
+behavior still require verification. All four focused check groups remain
+enabled. Cargo's `false` value would retain local Thin-LTO, so `off` is
+intentional. See the [Cargo profile documentation](https://doc.rust-lang.org/cargo/reference/profiles.html).
 
 On a future upstream update, inspect the new SDK's waiter/drop cancellation
 behavior and both call paths before rebasing or removing the patch. Keep the

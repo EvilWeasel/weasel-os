@@ -2,6 +2,14 @@
 
 A persistent Rust desktop actor and stdio MCP bridge for the actual Wayland session.
 
+When the live tool schema exposes `close_window`, a caller can request closure
+of one freshly observed, focused, task-owned window by its explicit Niri ID.
+It is a standalone action with matching top-level and action IDs. Prove safe
+saved state before requesting it; the actor cannot attest document ownership
+or unsaved buffers. A request acknowledgement is not window disappearance:
+inspect a fresh full inventory and any save dialog. Never use shared process
+termination as window cleanup. This source path still needs live qualification.
+
 The cooperative desktop policy reserves physical Esc for explicit abort.
 Ordinary local keyboard/mouse activity advances an input generation without
 latching takeover. Old observations/semantic handles become stale; a collision
@@ -184,6 +192,15 @@ guards, effects, errors, timings and image bytes remain. Control fields precede
 large inventories in JSON text. `detailed: true` returns the original complete
 envelope; `desktop_windows` also retains full mode catalogs. Internal observations,
 actor state, event receipts and ordinary CLI replies are not projected.
+When the live MCP schema exposes `compact`, `compact:true` additionally narrows
+the window inventory in observation/action replies. It retains focused,
+capture-active, explicitly targeted, urgent, floating and unfamiliar windows,
+and reports omitted IDs, original count, an inventory fingerprint and
+`windows_complete:false`. All other state and PNG bytes remain unchanged.
+Use `desktop_windows` to discover the complete window set or `detailed:true`
+for the full reply. A missing window in this opt-in subset is not evidence
+that it is closed. This is a payload optimization, not a measured model-latency
+or reliability improvement; the actor continues using its full observations.
 Fields must match the selected action kind. An unknown or misplaced field
 rejects the complete batch before input. In particular, `restore_clipboard`
 belongs to `paste`; `type` always requests preservation of the prior selection.
