@@ -5,6 +5,10 @@ import copy
 import hashlib
 import importlib.util
 import json
+import os
+import re
+import struct
+from unittest.mock import patch
 from pathlib import Path
 import shutil
 import subprocess
@@ -94,6 +98,13 @@ def transitions(changes, mode="batch"):
 
 
 class BatchPolicyTests(unittest.TestCase):
+    def setUp(self):
+        # Existing session/source fixtures use temporary non-Store roots;
+        # independent NVIDIA fixtures below validate the actual new guard.
+        guard = patch.object(batch, "verify_nvidia_live_abi", return_value={"ok": True, "fixture": "graphical-session-only"})
+        guard.start()
+        self.addCleanup(guard.stop)
+
     def check(self, changes, mode="batch"):
         return batch.validate_changes(transitions(changes, mode), mode, IDENTIFIER)
 
@@ -344,6 +355,207 @@ class BatchPolicyTests(unittest.TestCase):
             self.assertFalse(result["checked"][0]["restart_on_change"])
 
 
+REAL_LOADED_NVIDIA_VERSION = batch._loaded_nvidia_version
+
+class NvidiaLiveAbiTests(unittest.TestCase):
+    """Real private artifact fixtures; mock only Store namespace/daemon and kernel metadata."""
+    def setUp(self):
+        temporary = tempfile.TemporaryDirectory(prefix="weasel-batch-nvidia-fixtures-")
+        self.addCleanup(temporary.cleanup)
+        self.base = Path(temporary.name)
+        self.roots = set()
+        namespace = re.compile(re.escape(str(self.base)) + r"/[0-9a-z]{32}-[A-Za-z0-9.+_?=-]+")
+        for mock in (patch.object(batch, "STORE", namespace),
+                     patch.object(batch, "_closure", side_effect=lambda root: set(self.roots)),
+                     patch.object(batch, "_loaded_nvidia_version", return_value="580.142")):
+            mock.start()
+            self.addCleanup(mock.stop)
+        self.old = self.fixture("a", "580.142")
+        self.new = self.fixture("b", "580.142")
+
+    def output(self, letter, name):
+        path = self.base / (letter * 32 + "-" + name)
+        path.mkdir()
+        self.roots.add(str(path))
+        return path
+
+    def fixture(self, letter, version):
+        system = self.output(letter, "nixos-system-test")
+        configs = system / "etc/tmpfiles.d"
+        configs.mkdir(parents=True)
+        graphics = self.output(letter.upper().lower().replace("a", "c").replace("b", "d"), "graphics-drivers")
+        (graphics / "lib").mkdir()
+        if version is not None:
+            vendor = self.output({"a": "e", "b": "f"}[letter], "nvidia-x11-" + version)
+            (vendor / "lib").mkdir()
+            library = vendor / "lib" / ("libnvidia-ml.so." + version)
+            data = bytearray(64)
+            data[:6] = b"\x7fELF\x02\x01"
+            struct.pack_into("<H", data, 16, 3)
+            library.write_bytes(data)
+            (graphics / "lib/libnvidia-ml.so.1").symlink_to(library)
+        (configs / "graphics-driver.conf").write_text(
+            "'L+' '/run/opengl-driver' '-' '-' '-' '-' " + str(graphics) + "\n")
+        self.immutable()
+        return system
+
+    def immutable(self):
+        for root in self.roots:
+            for path in sorted(Path(root).rglob("*"), reverse=True):
+                if not path.is_symlink():
+                    path.chmod(0o555 if path.is_dir() else 0o444)
+            Path(root).chmod(0o555)
+
+    def selected_library(self, system):
+        return Path(batch._nvidia_selection(system)["library"])
+
+    def change_library(self, version):
+        old = self.selected_library(self.new)
+        old.parent.chmod(0o755)
+        new = old.with_name("libnvidia-ml.so." + version)
+        old.rename(new)
+        graphics = self.base / ("d" * 32 + "-graphics-drivers")
+        (graphics / "lib").chmod(0o755)
+        link = graphics / "lib/libnvidia-ml.so.1"
+        link.unlink()
+        link.symlink_to(new)
+        self.immutable()
+
+    def test_same_driver_version_bound_to_actual_immutable_library_is_valid(self):
+        result = batch.verify_nvidia_live_abi(self.old, self.new)
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["new"]["version"], "580.142")
+        self.assertEqual(result["new"]["library_sha256"], hashlib.sha256(self.selected_library(self.new).read_bytes()).hexdigest())
+        self.assertIn("no GPU query", result["coverage"])
+
+    def test_upgraded_userspace_against_old_loaded_driver_is_blocked(self):
+        self.change_library("595.71.05")
+        with self.assertRaisesRegex(batch.BatchError, "does not match"):
+            batch.verify_nvidia_live_abi(self.old, self.new)
+
+    def test_missing_loaded_driver_is_not_inferred_from_active_generation(self):
+        with patch.object(batch, "_loaded_nvidia_version", return_value=None):
+            with self.assertRaisesRegex(batch.BatchError, "does not match"):
+                batch.verify_nvidia_live_abi(self.old, self.new)
+
+    def test_non_nvidia_system_remains_valid(self):
+        # Remove both actual selected libraries; immutable generated Mesa-style
+        # rules still exist, and fixed loaded-module metadata is absent.
+        for letter in ("c", "d"):
+            folder = self.base / (letter * 32 + "-graphics-drivers/lib")
+            folder.chmod(0o755)
+            (folder / "libnvidia-ml.so.1").unlink()
+            folder.chmod(0o555)
+        with patch.object(batch, "_loaded_nvidia_version", return_value=None):
+            self.assertTrue(batch.verify_nvidia_live_abi(self.old, self.new)["ok"])
+
+    def test_removal_of_existing_nvidia_userspace_is_blocked(self):
+        folder = self.base / ("d" * 32 + "-graphics-drivers/lib")
+        folder.chmod(0o755)
+        (folder / "libnvidia-ml.so.1").unlink()
+        folder.chmod(0o555)
+        with self.assertRaisesRegex(batch.BatchError, "removes"):
+            batch.verify_nvidia_live_abi(self.old, self.new)
+
+    def test_duplicate_graphics_rule_is_blocked(self):
+        folder = self.new / "etc/tmpfiles.d"
+        folder.chmod(0o755)
+        (folder / "other.conf").write_bytes((folder / "graphics-driver.conf").read_bytes())
+        self.immutable()
+        with self.assertRaisesRegex(batch.BatchError, "Ambiguous"):
+            batch.verify_nvidia_live_abi(self.old, self.new)
+
+    def test_writable_selected_library_is_blocked(self):
+        self.selected_library(self.new).chmod(0o644)
+        with self.assertRaisesRegex(batch.BatchError, "Writable"):
+            batch.verify_nvidia_live_abi(self.old, self.new)
+
+    def test_actual_library_missing_from_exact_closure_is_blocked(self):
+        self.roots.remove(str(self.selected_library(self.new).parent.parent))
+        with self.assertRaisesRegex(batch.BatchError, "exact immutable closure"):
+            batch.verify_nvidia_live_abi(self.old, self.new)
+
+    def test_broken_library_link_is_blocked(self):
+        path = self.selected_library(self.new)
+        path.parent.chmod(0o755)
+        path.unlink()
+        path.parent.chmod(0o555)
+        with self.assertRaisesRegex(batch.BatchError, "Broken selected"):
+            batch.verify_nvidia_live_abi(self.old, self.new)
+
+    def test_library_symlink_to_unmanaged_path_is_blocked(self):
+        target = self.base / "unmanaged.so"
+        target.write_bytes(self.selected_library(self.new).read_bytes())
+        target.chmod(0o444)
+        folder = self.base / ("d" * 32 + "-graphics-drivers/lib")
+        folder.chmod(0o755)
+        link = folder / "libnvidia-ml.so.1"
+        link.unlink()
+        link.symlink_to(target)
+        folder.chmod(0o555)
+        with self.assertRaisesRegex(batch.BatchError, "exact immutable closure"):
+            batch.verify_nvidia_live_abi(self.old, self.new)
+
+    def test_unknown_library_basename_cannot_waive_version_comparison(self):
+        self.change_library("unknown")
+        with self.assertRaisesRegex(batch.BatchError, "unknown exact version"):
+            batch.verify_nvidia_live_abi(self.old, self.new)
+
+    def test_non_elf_library_is_blocked(self):
+        library = self.selected_library(self.new)
+        library.chmod(0o644)
+        library.write_bytes(b"not a driver library")
+        library.chmod(0o444)
+        with self.assertRaisesRegex(batch.BatchError, "ELF64"):
+            batch.verify_nvidia_live_abi(self.old, self.new)
+
+    def test_loaded_module_race_is_blocked(self):
+        with patch.object(batch, "_loaded_nvidia_version", side_effect=["580.142", "595.71.05"]):
+            with self.assertRaisesRegex(batch.BatchError, "changed during"):
+                batch.verify_nvidia_live_abi(self.old, self.new)
+
+    def test_selection_race_is_blocked(self):
+        real = batch._nvidia_selection
+        calls = []
+        def racing(root):
+            result = real(root)
+            calls.append(root)
+            if len(calls) == 4:
+                result = dict(result, library_sha256="0" * 64)
+            return result
+        with patch.object(batch, "_nvidia_selection", side_effect=racing):
+            with self.assertRaisesRegex(batch.BatchError, "changed during"):
+                batch.verify_nvidia_live_abi(self.old, self.new)
+
+    def test_runtime_gate_invokes_nvidia_guard_without_caller_override(self):
+        with patch.object(batch, "verify_nvidia_live_abi", side_effect=batch.BatchError("NVIDIA blocked")) as guard:
+            with self.assertRaisesRegex(batch.BatchError, "NVIDIA blocked"):
+                batch.verify_runtime_units(self.old, self.new)
+            guard.assert_called_once_with(self.old, self.new)
+
+    def test_fixed_kernel_metadata_rejects_unknown_version_and_symlink(self):
+        # Exercise the real loader via an os.open seam; the requested path must
+        # always be the fixed sysfs file and include O_NOFOLLOW.
+        real_open = os.open
+        def redirected(path, flags):
+            self.assertEqual(str(path), "/sys/module/nvidia/version")
+            self.assertTrue(flags & os.O_NOFOLLOW)
+            return real_open(self.base / "kernel-version", flags)
+        kernel = self.base / "kernel-version"
+        kernel.write_bytes(b"580.142\n")
+        # setUp mocks metadata only; recover the original supplied below by the
+        # private test assembler, without adding a production bypass parameter.
+        with patch.object(batch.os, "open", side_effect=redirected):
+            self.assertEqual(REAL_LOADED_NVIDIA_VERSION(), "580.142")
+            kernel.write_bytes(b"unrecognized\n")
+            with self.assertRaisesRegex(batch.BatchError, "Unknown"):
+                REAL_LOADED_NVIDIA_VERSION()
+            kernel.unlink()
+            kernel.symlink_to(self.base / "unknown")
+            with self.assertRaisesRegex(batch.BatchError, "Cannot establish"):
+                REAL_LOADED_NVIDIA_VERSION()
+
+
 @unittest.skipUnless(shutil.which("nix"), "Semantic protection fixtures require local Nix")
 class SemanticBatchTests(unittest.TestCase):
     """Evaluate synthetic flakes locally; no real host secrets, builds or activation."""
@@ -436,8 +648,23 @@ class SemanticBatchTests(unittest.TestCase):
         # synthetic example user and no real package set. Source Codex ownership
         # is evaluated separately by the source adapter's private Nix fixture.
         from unittest.mock import patch
-        with patch.object(batch, "codex_ownership_predicate", return_value="true"):
-            return batch.verify_sensitive_state(self.before, self.after, self.evaluate, mode=mode)
+        from types import SimpleNamespace
+        # This existing synthetic fixture has no real stable package set.
+        # Preserve its real Nix auth/state proof while mocking only the new
+        # separate SSH proof; real SSH binding/negative fixtures are in the
+        # migration suite and the required private integration receipts.
+        def ssh_proof(expression, before, after, host, evaluator, executor):
+            self.assertIsNotNone(executor)
+            return {"old": evaluator(expression(before,host)).decode().strip(),
+                    "new": evaluator(expression(after,host)).decode().strip(),
+                    "coverage": "Synthetic auth fixture; SSH execution mocked"}
+        adapter=SimpleNamespace(verify_general=ssh_proof)
+        spec=SimpleNamespace(loader=SimpleNamespace(exec_module=lambda module:None))
+        with patch.object(batch, "codex_ownership_predicate", return_value="true"), \
+             patch.object(batch.importlib.util,"spec_from_file_location",return_value=spec), \
+             patch.object(batch.importlib.util,"module_from_spec",return_value=adapter):
+            return batch.verify_sensitive_state(self.before, self.after, self.evaluate, mode=mode,
+                                                 migration_executor=lambda *args:b"fixture-only")
 
     def candidate_agent(self, candidate):
         return candidate["home-manager"]["users"]["example"]["systemd"]["user"]["services"]["weasel-proton-infra-ssh-agent"]
@@ -533,6 +760,23 @@ class SemanticBatchTests(unittest.TestCase):
         candidate["environment"]["systemPackages"].pop(0)
         with self.assertRaises((batch.BatchError, subprocess.CalledProcessError)):
             self.verify(candidate)
+
+
+class SensitiveEvalArgumentTests(unittest.TestCase):
+    def test_cached_proof_read_forbids_local_remote_builds_and_substitution(self):
+        expression = 'builtins.readFile cachedContext'
+        self.assertEqual(batch.sensitive_eval_args(expression), [
+            'eval', '--raw', '--impure', '--no-write-lock-file', '--offline',
+            '--max-jobs', '0', '--builders', '', '--option', 'substitute', 'false',
+            '--option', 'allow-import-from-derivation', 'true', '--expr', expression])
+
+    def test_invalid_expression_is_refused_and_options_do_not_persist_mutation(self):
+        for value in [None, b'expr', '', ' \n', 'expr\0tail']:
+            with self.subTest(value=value), self.assertRaises(batch.BatchError):
+                batch.sensitive_eval_args(value)
+        arguments = batch.sensitive_eval_args('fixed-expression')
+        arguments[arguments.index('--max-jobs') + 1] = '9'
+        self.assertEqual(batch.sensitive_eval_args('fixed-expression')[6], '0')
 
 
 if __name__ == "__main__":

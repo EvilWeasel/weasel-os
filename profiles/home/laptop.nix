@@ -18,6 +18,7 @@ in
       pkgs.playwright-driver
       pkgs.sweethome3d.application
       pkgsUnstable.ratty
+      pkgsUnstable.dgop
     ];
     sessionPath = [
       "${config.home.homeDirectory}/.npm-global/bin"
@@ -31,7 +32,6 @@ in
   programs = {
     "dank-material-shell" = {
       enableSystemMonitoring = true;
-      dgop.package = pkgsUnstable.dgop;
       enableVPN = true;
       enableAudioWavelength = true;
       enableCalendarEvents = true;
@@ -39,38 +39,38 @@ in
         DockerManager.src = pkgs.fetchFromGitHub {
           owner = "LuckShiba";
           repo = "DmsDockerManager";
-          rev = "v1.2.0";
-          sha256 = "sha256-VoJCaygWnKpv0s0pqTOmzZnPM922qPDMHk4EPcgVnaU=";
+          rev = "f6f7d94c84510da098980a2bb733137e90f98fd8";
+          sha256 = "sha256-KEj0d1K0+ZOxbQ9FLzapWZ82i31hbpEHUAOZfJF8IGs=";
         };
         WebSearch.src = pkgs.fetchFromGitHub {
           owner = "devnullvoid";
           repo = "dms-web-search";
-          rev = "81ccd9f";
-          sha256 = "sha256-mKbmROijhYhy/IPbVxYbKyggXesqVGnS/AfAEyeQVhg=";
+          rev = "821f5b437ea96739ce1cbc85ce324fb55e8884bb";
+          sha256 = "sha256-UqFgAjW2A75dtlvOZkq4Vv/v/DROoc/ouCXBaVlksPI=";
         };
         CommandRunner.src = pkgs.fetchFromGitHub {
           owner = "devnullvoid";
           repo = "dms-command-runner";
-          rev = "d89a094";
-          sha256 = "sha256-tXqDRVp1VhyD1WylW83mO4aYFmVg/NV6Z/toHmb5Tn8=";
+          rev = "ea59490eede60d7dc87697b670f1eccc6ad54593";
+          sha256 = "sha256-EmYYvPvSwG7ELTgRS6tcVEqFgyk8uYiB491Gp7nkPvs=";
         };
         EmojiLauncher.src = pkgs.fetchFromGitHub {
           owner = "devnullvoid";
           repo = "dms-emoji-launcher";
-          rev = "2951ec7";
-          sha256 = "sha256-aub5pXRMlMs7dxiv5P+/Rz/dA4weojr+SGZAItmbOvo=";
+          rev = "8ff394e3ddfcb2fd755ed2e7b4c6f01f3e26e596";
+          sha256 = "sha256-fmIddCvACwO8wbAtLBMtDnEXXQJjb7+o2s4jW3f8VIU=";
         };
         Calculator.src = pkgs.fetchFromGitHub {
           owner = "rochacbruno";
           repo = "DankCalculator";
-          rev = "de6dbd5";
-          sha256 = "sha256-Vq+E2F2Ym5JdzjpCusRMDXd6uuAhhjAehyD/tO3omdY=";
+          rev = "c9fbbe921e9afeb92f4e92390e9fc05f006f0373";
+          sha256 = "sha256-dqFTvNogWsqK82EhgMIbJB70R5TgcRiA3Elx1LkSia8=";
         };
         NiriWindows.src = pkgs.fetchFromGitHub {
           owner = "rochacbruno";
           repo = "DankNiriWindows";
-          rev = "b845277";
-          sha256 = "sha256-rdZAnkRyfycI2a2wjSiepQwRI49zKbwoRzpz1+c6ZJA=";
+          rev = "411d5ee9f7707029f4c12c824ec3b24ca6756a0d";
+          sha256 = "sha256-+Ju8cbw1yWWW2K2Gpl7nTdkjINqXBD4ktl5g8OhuIEg=";
         };
       };
     };
@@ -99,6 +99,15 @@ in
       shader-log = "tail -f ~/.steam/root/logs/shader_log.txt";
       ssh-initkeys = sshInitKeysCmd;
     };
+  };
+
+  # Preserve the existing active paused actors across this release migration.
+  # sd-switch reads this policy from Unit, not Service. Review 2026-10-11;
+  # adopting new running actor binaries requires separate pause-safe coordination.
+  systemd.user.services = {
+    weasel-computer-use.Unit.X-SwitchMethod = "keep-old";
+    cua-driver.Unit.X-SwitchMethod = "keep-old";
+    weasel-ui-decisions.Unit.X-SwitchMethod = "keep-old";
   };
 
   xdg.configFile."ratty/ratty.toml" = {

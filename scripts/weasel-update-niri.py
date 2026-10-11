@@ -40,16 +40,19 @@ def absolute_path(value):
 
 def open_parent(path, *, create_missing=False):
     path = absolute_path(path)
-    fd = os.open("/", os.O_RDONLY | os.O_DIRECTORY)
+    if not hasattr(os, "O_PATH"):
+        raise NiriGateError("Search-only directory traversal is unavailable")
+    flags = os.O_PATH | os.O_DIRECTORY | os.O_NOFOLLOW | os.O_CLOEXEC
+    fd = os.open("/", flags)
     try:
         for component in path.parent.parts[1:]:
             try:
-                next_fd = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+                next_fd = os.open(component, flags, dir_fd=fd)
             except FileNotFoundError:
                 if not create_missing:
                     raise
                 os.mkdir(component, 0o700, dir_fd=fd)
-                next_fd = os.open(component, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW, dir_fd=fd)
+                next_fd = os.open(component, flags, dir_fd=fd)
             os.close(fd)
             fd = next_fd
         return fd

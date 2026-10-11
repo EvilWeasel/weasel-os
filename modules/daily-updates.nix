@@ -8,6 +8,7 @@ let
     cp ${../scripts/weasel-update-activate.py} "$out/weasel-update-activate.py"
     cp ${../scripts/weasel-update-bootstrap.py} "$out/weasel-update-bootstrap.py"
     cp ${../scripts/weasel-update-batch.py} "$out/weasel-update-batch.py"
+    cp ${../scripts/weasel-update-migration.py} "$out/weasel-update-migration.py"
     cp ${../scripts/weasel-update-niri.py} "$out/weasel-update-niri.py"
     cp ${../config/update-pins.json} "$out/update-pins.json"
   '';
@@ -100,6 +101,8 @@ in
     serviceConfig = {
       Type = "oneshot";
       User = "root";
+      # Preserve NixOS pre-switch checks even if the manager has this variable.
+      UnsetEnvironment = "NIXOS_NO_CHECK";
       UMask = "0077";
       ExecStart = "${activate}/bin/weasel-update-activate";
       TimeoutStartSec = "3h";

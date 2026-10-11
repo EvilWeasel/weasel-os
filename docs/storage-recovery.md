@@ -8,8 +8,8 @@ Stand: 10. Oktober 2026. Host: `nixy-laptop`. Die Konfiguration liegt in
 
 Die vorbereitete Erweiterung liegt in `modules/btrfs-reserve.nix`,
 `programs/storage-health.nix` und den beiden `scripts/weasel-*.py`-Helfern.
-Stand dieser Änderung: im eigenen Worktree vorbereitet; während der laufenden
-26.05-Updateprüfung weder integriert noch aktiviert. Die folgenden Dienste sind
+Stand dieser Änderung: nach abgeschlossenem 26.05-Update im eigenen Worktree
+an die neue Basis angepasst; noch nicht integriert oder aktiviert. Die folgenden Dienste sind
 erst nach der abgestimmten Integration und Aktivierung verfügbar.
 
 `weasel-btrfs-health` misst alle 15 Minuten getrennt Dateisystem-Freiraum,
@@ -22,8 +22,8 @@ Messungen lösen die gedrosselte Benutzerbenachrichtigung aus. Der bekannte alte
 Minuten-Timer wird bei Home-Manager-Aktivierung deaktiviert, seine Dateien und
 der pausierte Factorio-Companion-Code bleiben erhalten.
 
-`weasel-btrfs-reserve` prüft stündlich: unter 15 GiB unzugewiesenem Platz beginnt
-eine kleine, datenbezogene Balance; ab 25 GiB wird beendet. Dies sind lokale
+`weasel-btrfs-reserve` prüft stündlich: unter 40 GiB unzugewiesenem Platz beginnt
+eine kleine, datenbezogene Balance; ab 50 GiB wird beendet. Dies sind lokale
 Betriebswerte, keine Btrfs-Garantie. Zuerst werden leere Datenbereiche freigegeben,
 danach höchstens drei Durchläufe mit je acht schwach belegten Datenbereichen.
 Metadaten-DUP bleibt erhalten. Gerätefehler, weniger als 30 GiB freier Speicher,

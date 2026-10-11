@@ -30,6 +30,36 @@ def row(unallocated=7, errors=0, free=150):
 
 
 class SafetyTests(unittest.TestCase):
+    def test_latest_complete_status_cannot_hide_unresolved_journal(self):
+        import json
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            status = root / 'status.json'
+            status.write_text(json.dumps({'phase': 'complete'}))
+            for namespace in ('runs', 'bootstrap', 'manual-computer-use'):
+                entry = root / namespace / 'transaction'
+                entry.mkdir(parents=True)
+                journal = entry / 'journal.json'
+                self.assertIsNotNone(health.transaction_reason(root, status))
+                journal.write_text(json.dumps({'phase': 'recovery-required'}))
+                self.assertIsNotNone(health.transaction_reason(root, status))
+                journal.write_text(json.dumps({'phase': 'complete'}))
+                self.assertIsNone(health.transaction_reason(root, status))
+            (root / 'runs/transaction/journal.json').write_text(json.dumps({'phase': 'failed-before-integration'}))
+            self.assertIsNone(health.transaction_reason(root, status))
+
+    def test_generous_reserve_thresholds_and_bounded_target(self):
+        calls = []
+        measured = iter([row(39), row(40), row(50)])
+        with patch.object(health, 'transaction_reason', return_value=None), \
+             patch.object(health, 'active_build', return_value=None):
+            result = health.maintain('/home', lambda p: next(measured),
+                                    lambda *args: calls.append(args) or 'No balance found')
+        self.assertEqual(result['after_unallocated_bytes'], 50 * health.GIB)
+        self.assertEqual(len([args for args in calls if 'start' in args]), 2)
+        self.assertEqual(health.pressure(row(39))['level'], 'watch')
+        self.assertEqual(health.pressure(row(50))['level'], 'healthy')
+
     def test_migration_refuses_low_reserve_before_mutation(self):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp).resolve()
@@ -67,14 +97,14 @@ class SafetyTests(unittest.TestCase):
 
     def test_data_only_passes_stop_at_target_and_have_a_chunk_limit(self):
         calls = []
-        measured = iter([row(), row(9), row(25)])
+        measured = iter([row(), row(9), row(50)])
         with patch.object(health, 'transaction_reason', return_value=None), \
              patch.object(health, 'active_build', return_value=None):
             result = health.maintain('/home', lambda p: next(measured),
                                     lambda *args: calls.append(args) or 'No balance found')
         starts = [args for args in calls if 'start' in args]
         self.assertEqual([args[3] for args in starts], ['-dusage=0', '-dusage=5,limit=8'])
-        self.assertEqual(result['after_unallocated_bytes'], 25 * health.GIB)
+        self.assertEqual(result['after_unallocated_bytes'], 50 * health.GIB)
 
     def test_timeout_cancels_owned_kernel_balance(self):
         calls = []
@@ -90,7 +120,7 @@ class SafetyTests(unittest.TestCase):
         self.assertEqual(result['outcome'], 'cancelled')
 
     def test_errors_and_low_free_space_prevent_balance(self):
-        for sample in (row(errors=1), row(free=20), row(unallocated=26)):
+        for sample in (row(errors=1), row(free=20), row(unallocated=51)):
             calls = []
             health.maintain('/home', lambda p: sample, lambda *args: calls.append(args))
             self.assertEqual(calls, [])

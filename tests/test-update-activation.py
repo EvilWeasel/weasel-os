@@ -5,6 +5,7 @@ import json
 import os
 from pathlib import Path
 import shutil
+import stat
 import subprocess
 import sys
 import tempfile
@@ -383,6 +384,7 @@ class ActivationTests(unittest.TestCase):
         request.update(schema=2, mode="batch")
         policy_calls = []
         class BatchPolicy:
+            sensitive_eval_args = staticmethod(activation.import_peer("weasel-update-batch.py").sensitive_eval_args)
             @staticmethod
             def learning_suffix(identifier, mode, names):
                 self.assertEqual(identifier, request["id"])
@@ -536,9 +538,10 @@ class ActivationTests(unittest.TestCase):
             self.assertEqual(set(changes), {"packages/t3code/source.json", "agent-learnings.md"})
             return {"ok": True}
         policy.verify_closure = closure
-        def sensitive(old, new, evaluator, *, mode):
+        def sensitive(old, new, evaluator, *, mode, migration_executor):
             self.assertEqual((old.name, new.name), ("baseline", "candidate"))
             self.assertEqual(mode, request["mode"])
+            self.assertEqual(migration_executor("nix", ["fixture-fresh-ssh-build"]), b"a" * 64)
             self.assertEqual(evaluator("fixture-sensitive-expression"), b"a" * 64)
             events.append(("sensitive-state",))
             return {"ok": True, "auth_and_state_version_sha256": {"fixture": "a" * 64}}
@@ -548,8 +551,13 @@ class ActivationTests(unittest.TestCase):
             raise RuntimeError("Graphical session unit would restart")
         policy.verify_runtime_units = units
         with patch.object(activation, "import_peer", return_value=policy), patch.object(activation, "check_system"), patch.object(activation, "check_other_activation"), patch.object(activation, "check_remote"), patch.object(activation, "check_power"), patch.object(activation, "check_space"), patch.object(activation, "prune_owned"), patch.object(activation, "write_status"), patch.object(activation, "notify_outcome"), patch.object(activation, "nix_eval", side_effect=evaluate), patch.object(activation, "nix_check", side_effect=lambda *args: events.append(("flake-check",))), patch.object(activation, "nix_build", side_effect=lambda *args: events.append(("system-build",)) or candidate), patch.object(activation, "probe_applications", return_value=(pairs, {"t3": {"probed": True}})) as probes, patch.object(activation, "create_snapshot") as snapshot, patch.object(activation, "integrate_source") as integration, patch.object(activation, "activate_exact") as activate:
-            with self.assertRaisesRegex(RuntimeError, "Graphical session"):
-                activation.process_request(runner, request, state, repo)
+            previous_mask = os.umask(0o077)
+            try:
+                with self.assertRaisesRegex(RuntimeError, "Graphical session"):
+                    activation.process_request(runner, request, state, repo)
+                self.assertEqual(os.umask(0o077), 0o077)
+            finally:
+                os.umask(previous_mask)
         hosts = [event[2] for event in events if event[0] == "eval" and event[1] == "candidate"]
         self.assertEqual(hosts, ["nixosConfigurations." + host + ".config.system.build.toplevel.drvPath" for host in activation.BATCH_HOSTS])
         self.assertLess(events.index(("flake-check",)), next(i for i, e in enumerate(events) if e[0] == "closure"))
@@ -557,7 +565,7 @@ class ActivationTests(unittest.TestCase):
         self.assertLess(events.index(("published-pins",)), events.index(("flake-check",)))
         self.assertLess(events.index(("system-build",)), events.index(("niri-config",)))
         self.assertLess(events.index(("niri-config",)), next(i for i, e in enumerate(events) if e[0] == "closure"))
-        self.assertIn(("nix", ["eval", "--raw", "--impure", "--no-write-lock-file", "--expr", "fixture-sensitive-expression"]), user_calls)
+        self.assertIn(("nix", ["eval", "--raw", "--impure", "--no-write-lock-file", "--offline", "--max-jobs", "0", "--builders", "", "--option", "substitute", "false", "--option", "allow-import-from-derivation", "true", "--expr", "fixture-sensitive-expression"]), user_calls)
         self.assertEqual(probes.call_args.args[3], ["t3", "codex", "chatgpt"])
         self.assertTrue(probes.call_args.kwargs["changed_outputs_only"])
         snapshot.assert_not_called(); integration.assert_not_called(); activate.assert_not_called()
@@ -568,6 +576,97 @@ class ActivationTests(unittest.TestCase):
         self.assertTrue(journal["sensitive_state"]["ok"])
         self.assertTrue(journal["published_pins"]["ok"])
         self.assertTrue((state / "runs" / request["id"] / "probe-niri.json").exists())
+        namespace = state / "sources" / request["id"]
+        self.assertEqual(stat.S_IMODE(namespace.stat().st_mode), 0o711)
+        for name in ("baseline", "candidate"):
+            source = namespace / name
+            self.assertEqual((source / "packages/t3code/source.json").read_bytes(),
+                             b"old source\n" if name == "baseline" else b"new source\n")
+            for path in [source, *source.rglob("*")]:
+                self.assertEqual(stat.S_IMODE(path.stat().st_mode),
+                                 0o555 if path.is_dir() else 0o444)
+        self.assertEqual(stat.S_IMODE((state / "runs" / request["id"]).stat().st_mode), 0o700)
+        self.assertEqual(stat.S_IMODE((state / "runs" / request["id"] / "journal.json").stat().st_mode), 0o600)
+
+    @unittest.skipUnless(os.geteuid() == 0, "Cross-UID root archive fixture requires root")
+    def test_root_archive_under_private_umask_is_readable_but_not_writable_by_other_uid(self):
+        runner, repo, request, policy, _ = self.batch_fixture()
+        self.root.chmod(0o755)
+        state = self.root / "state"
+        state.mkdir(mode=0o711)
+        for name, mode in (("runs", 0o700), ("sources", 0o711), ("workers", 0o711)):
+            (state / name).mkdir(mode=mode)
+        namespace = state / "sources" / request["id"]
+        run = state / "runs" / request["id"]
+        workspace = state / "workers" / request["id"]
+        def user(name, args, **kwargs):
+            self.assertEqual(name, "python3")  # First user action is published-source validation.
+            self.assertEqual(namespace.stat().st_uid, 0)
+            probe = '''
+import os, sys
+from pathlib import Path
+namespace, run, workspace = map(Path, sys.argv[1:])
+assert os.geteuid() == 65534
+for label, expected in [('baseline', b'old source\\n'), ('candidate', b'new source\\n')]:
+    source = namespace / label
+    assert (source / 'packages/t3code/source.json').read_bytes() == expected
+    assert list(source.iterdir())
+    assert not os.access(source, os.W_OK)
+    assert not os.access(source / 'packages', os.W_OK)
+    assert not os.access(source / 'packages/t3code/source.json', os.W_OK)
+assert not os.access(namespace, os.R_OK | os.W_OK)
+assert os.access(namespace, os.X_OK)
+for private in [run, run / 'journal.json', workspace]:
+    assert not os.access(private, os.R_OK)
+'''
+            result = subprocess.run([sys.executable, "-I", "-B", "-c", probe,
+                                     str(namespace), str(run), str(workspace)],
+                                    user=65534, group=65534, extra_groups=[], env={},
+                                    capture_output=True, check=False)
+            self.assertEqual(result.returncode, 0, result.stderr.decode())
+            raise RuntimeError("Cross-UID archive fixture complete")
+        runner.user = user
+        with patch.object(activation, "import_peer", return_value=policy), patch.object(activation, "check_system"), patch.object(activation, "check_other_activation"), patch.object(activation, "check_remote"), patch.object(activation, "check_power"), patch.object(activation, "check_space"), patch.object(activation, "prune_owned"), patch.object(activation, "write_status"), patch.object(activation, "notify_outcome"), patch.object(activation, "nix_eval") as evaluate, patch.object(activation, "create_snapshot") as snapshot, patch.object(activation, "integrate_source") as integrate, patch.object(activation, "activate_exact") as activate:
+            previous_mask = os.umask(0o077)
+            try:
+                with self.assertRaisesRegex(RuntimeError, "Cross-UID archive fixture complete"):
+                    activation.process_request(runner, request, state, repo)
+                self.assertEqual(os.umask(0o077), 0o077)
+            finally:
+                os.umask(previous_mask)
+        evaluate.assert_not_called(); snapshot.assert_not_called()
+        integrate.assert_not_called(); activate.assert_not_called()
+        self.assertEqual(json.loads((run / "journal.json").read_text())["phase"],
+                         "failed-before-integration")
+
+    def test_missing_cached_sensitive_artifact_blocks_root_transaction_without_retry(self):
+        runner, repo, request, policy, _ = self.batch_fixture()
+        state = self.root / 'state'
+        state.mkdir()
+        for name in ('runs', 'sources', 'workers'):
+            (state / name).mkdir()
+        root_calls, eval_calls = [], []
+        runner.root = lambda *args, **kwargs: root_calls.append(args) or b''
+        def user(name, args, **kwargs):
+            if name == 'python3':
+                return json.dumps({'ok': True, 'coverage': 'fixture-parse'}).encode()
+            self.assertEqual(name, 'nix')
+            self.assertEqual(args, policy.sensitive_eval_args('fixture-sensitive-expression'))
+            eval_calls.append(args)
+            raise activation.ActivationError('Missing cached IFD artifact')
+        runner.user = user
+        policy.verify_sensitive_state = lambda old, new, evaluator, **kwargs: evaluator('fixture-sensitive-expression')
+        def evaluate(_runner, source, attribute, expression=None):
+            return request['baseline_system'] if source.name == 'baseline' else 'fixture-drv'
+        with patch.object(activation, 'import_peer', return_value=policy), patch.object(activation, 'check_system'), patch.object(activation, 'check_other_activation'), patch.object(activation, 'check_remote'), patch.object(activation, 'check_power'), patch.object(activation, 'check_space'), patch.object(activation, 'prune_owned'), patch.object(activation, 'write_status'), patch.object(activation, 'notify_outcome'), patch.object(activation, 'nix_eval', side_effect=evaluate), patch.object(activation, 'nix_check') as check, patch.object(activation, 'nix_build') as build, patch.object(activation, 'create_snapshot') as snapshot, patch.object(activation, 'integrate_source') as integrate, patch.object(activation, 'activate_exact') as activate:
+            with self.assertRaisesRegex(activation.ActivationError, 'Missing cached IFD artifact'):
+                activation.process_request(runner, request, state, repo)
+        self.assertEqual(len(eval_calls), 1)
+        self.assertEqual(root_calls, [])
+        check.assert_not_called(); build.assert_not_called(); snapshot.assert_not_called()
+        integrate.assert_not_called(); activate.assert_not_called()
+        journal = json.loads((state / 'runs' / request['id'] / 'journal.json').read_text())
+        self.assertEqual(journal['phase'], 'failed-before-integration')
 
     def test_batch_rechecks_session_after_real_cas_and_keeps_source_for_recovery(self):
         runner, repo, request, policy, calls = self.batch_fixture()

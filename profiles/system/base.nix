@@ -1,6 +1,7 @@
 {
   config,
   pkgs,
+  pkgsUnstable,
   host,
   lib,
   username,
@@ -8,6 +9,10 @@
   ...
 }:
 let
+  dankGreeterModule = builtins.fetchurl {
+    url = "https://raw.githubusercontent.com/AvengeMedia/dank-greeter/a91ca2ad486bfc25bd23f624c542d695c2dfb8b8/distro/nix/greeter.nix";
+    sha256 = "9055f860ab31aae88b9a71af6528f78dea4ca71364538e11a315c0aff78634a6";
+  };
   inherit (import ../../hosts/${host}/variables.nix) keyboardLayout;
   alarmClockApplet = pkgs.alarm-clock-applet.overrideAttrs (old: {
     nativeBuildInputs = (old.nativeBuildInputs or [ ]) ++ [ pkgs.makeWrapper ];
@@ -124,7 +129,17 @@ let
 in
 {
   imports = [
-    inputs.dms.nixosModules.greeter
+    (
+      args@{ pkgs, ... }:
+      import dankGreeterModule (
+        args
+        // {
+          greeterPkgs = {
+            dms-greeter = pkgsUnstable.dms-greeter;
+          };
+        }
+      )
+    )
     ../../modules/canbus.nix
     ../../modules/displaylink.nix
     ../../modules/overrides/linux-zen-preempt-fix.nix
@@ -170,7 +185,7 @@ in
   };
 
   programs = {
-    "dank-material-shell".greeter = {
+    dms-greeter = {
       enable = true;
       compositor.name = "niri";
       configHome = "/home/${username}";
@@ -347,6 +362,7 @@ in
   };
 
   systemd.services.greetd = {
+    restartIfChanged = false;
     after = [ "systemd-udev-settle.service" ];
     wants = [ "systemd-udev-settle.service" ];
   };

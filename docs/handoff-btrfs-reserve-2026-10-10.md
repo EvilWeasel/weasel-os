@@ -89,3 +89,26 @@ Die Validierungsreservierung ist ausdrücklich freigegeben. Es läuft kein eigen
 Compiler mehr, es wurde nichts aktiviert. Update-/Storage-Arbeit ist damit
 quellenmäßig vorbereitet und übergabefähig, aber noch nicht vollständig live
 abgeschlossen.
+
+## Fortschreibung am 11. Oktober nach dem Release-Update
+
+Das 26.05-Update ist tatsächlich aktiviert; freigegebene neue Basis ist
+`02b5d10d0d5058952d348bc5755e49dc6ca739c7`. Der alte 53d01c24-Checkpoint
+und alle alten Belege bleiben historisch erhalten. Der eigene Branch führt
+beide Quellen zusammen; die damaligen 25.11-Closures werden nicht aktiviert.
+Reservepflege beginnt nun unter 40 GiB Geräte-Reserve und stoppt ab 50 GiB;
+alle Run-/Bootstrap-/Manual-Journale werden auf offene Transaktionen geprüft.
+
+Frischer r1 Flake-Check Exit0/40.82s und Laptop26-Build Exit0/14.27s,
+Closure `93qir7szbqmm4yg96fwwk4s3rb8bqyyi`. Der Desktop-Build wurde nach
+unerwarteter NVIDIA-Kernelmodul-Kompilierung exakt selbst unterbrochen:
+Exit1/67.66s, kein PASS. Alle Storage-Imports sind laptop-only; der Desktop-
+Deriver `r83zjdjqa8qkrym96f70lslk050hc1ma` ist exakt derselbe wie auf
+signierter Main02b5. Keine weitere Desktop-Kompilierung erforderlich.
+
+Sieben neuere Main-Laufzeitdateien sind privat unter
+`/tmp/weasel-storage26-runtime-preservation-20261011` mit Hash/Inode/mtime
+bewahrt. T3-Liste bestätigt Update-/MT-Threads beendet; keine fremde aktive
+Quellarbeit beobachtet. Vor Integration müssen die aktuellen Bytes separat
+erhalten sein. Projektmigrationen bleiben ausdrücklich deferred; die Freigabe
+der Quellarbeit ist keine implizite Freigabe des Piloten.

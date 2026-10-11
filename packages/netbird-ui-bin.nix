@@ -17,11 +17,11 @@
 
 stdenv.mkDerivation (finalAttrs: {
   pname = "netbird-ui-bin";
-  version = "0.77.1";
+  version = "0.80.0";
 
   src = fetchurl {
     url = "https://github.com/netbirdio/netbird/releases/download/v${finalAttrs.version}/netbird-ui_${finalAttrs.version}_linux_amd64.rpm";
-    hash = "sha256-mwGioWtnR2CG3+u5e/CNZ7XXLXVDG6MKxFzLm/+2Muk=";
+    hash = "sha256-0wt9rNa7TeMZZWEyT8H17RHMJZNTXrQD2fSexIGUyn8=";
   };
 
   dontUnpack = true;
@@ -51,13 +51,19 @@ stdenv.mkDerivation (finalAttrs: {
       "$out/share/applications/netbird.desktop"
     install -Dm644 usr/share/pixmaps/netbird.png \
       "$out/share/pixmaps/netbird.png"
+    # Preserve the vendor icon at the fixed path used by NixOS client wrappers.
+    install -Dm644 usr/share/pixmaps/netbird.png \
+      "$out/share/icons/hicolor/256x256/apps/netbird.png"
+    # NixOS substitutes these exact base Name/Exec/Icon fields per client.
     substituteInPlace "$out/share/applications/netbird.desktop" \
-      --replace-fail "/usr/bin/netbird-ui" "$out/bin/netbird-ui"
+      --replace-fail "Name=NetBird" "Name=Netbird" \
+      --replace-fail "Exec=env WEBKIT_DISABLE_DMABUF_RENDERER=1 /usr/bin/netbird-ui" "Exec=netbird-ui"
     runHook postInstall
   '';
 
   preFixup = ''
     gappsWrapperArgs+=(
+      --set WEBKIT_DISABLE_DMABUF_RENDERER 1
       --set-default NB_DAEMON_ADDR ${lib.escapeShellArg daemonSocket}
     )
   '';

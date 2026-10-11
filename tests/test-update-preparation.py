@@ -5,6 +5,7 @@ import datetime as dt
 import json
 import os
 from pathlib import Path
+import stat
 import subprocess
 import tempfile
 import unittest
@@ -53,6 +54,18 @@ class PreparationTests(unittest.TestCase):
             link.symlink_to(real)
             with self.assertRaises(OSError):
                 p.read_json(link)
+
+    def test_candidate_writer_and_reader_keep_existing_one_mib_limit(self):
+        with tempfile.TemporaryDirectory() as folder:
+            candidate = Path(folder) / 'candidate.json'
+            candidate.write_bytes(b'{"phase":"tested"}\n')
+            oversized = {'phase': 'tested', 'evidence': 'x' * (1024 * 1024)}
+            with self.assertRaisesRegex(p.Blocked, 'Candidate document exceeds size bound'):
+                p.atomic_write(candidate, p.encoded_candidate(oversized))
+            self.assertEqual(candidate.read_bytes(), b'{"phase":"tested"}\n')
+            candidate.write_bytes(json.dumps(oversized).encode())
+            with self.assertRaisesRegex(p.Blocked, 'Input document exceeds size bound'):
+                p.read_json(candidate)
 
     def test_battery_and_power_failure_are_real_refusals(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -309,6 +322,18 @@ class BatchPreparationTests(unittest.TestCase):
         current.symlink_to(self.old_system)
         profile.symlink_to(self.old_system)
         self.batch, self.gates = p.peer('batch'), p.peer('gates')
+        from types import SimpleNamespace
+        def general_ssh_fixture(expression, before, after, host, evaluator, executor):
+            # This real-Git orchestration fixture declares no NixOS inputs.
+            # Real canonical SSH proof is covered by its separate suites and
+            # mandatory runtime evidence; verify the immutable executor is
+            # passed even when these source/package workloads are mocked.
+            self.assertEqual(executor('nix', ['eval', '--expr', 'fixture-fresh-ssh-proof']), b'f' * 64)
+            return {'old': evaluator(expression(before, host)).decode().strip(),
+                    'new': evaluator(expression(after, host)).decode().strip(),
+                    'coverage': 'Mocked SSH orchestration only; no daemon'}
+        self.ssh_adapter = SimpleNamespace(verify_general=general_ssh_fixture)
+        self.ssh_spec = SimpleNamespace(loader=SimpleNamespace(exec_module=lambda module: None))
         self.sign_requests, self.verified, self.workloads, self.probes = [], [], [], []
         self.profile_checks = []
         self.changed_apps = {'t3', 'codex', 'chatgpt', 'acp'}
@@ -322,8 +347,14 @@ class BatchPreparationTests(unittest.TestCase):
                 patch.object(p, 'command', side_effect=self.command),
                 patch.object(p, 'build', side_effect=self.build),
                 patch.object(p, 'peer', side_effect=lambda name: {'batch': self.batch, 'gates': self.gates}[name]),
+                patch.object(self.batch.importlib.util, 'spec_from_file_location', return_value=self.ssh_spec),
+                patch.object(self.batch.importlib.util, 'module_from_spec', return_value=self.ssh_adapter),
                 patch.object(self.batch, 'verify_published', return_value={'ok': True, 'published_pins': {}}),
                 patch.object(self.batch, 'verify_closure', side_effect=self.closure),
+                # The real-Git fake-closure fixture has no installed NVIDIA/store graph.
+                # Actual static file/ABI negatives live in test-update-batch.py.
+                patch.object(self.batch, 'verify_nvidia_live_abi', return_value={
+                    'ok': True, 'coverage': 'Mocked hardware boundary for preparation orchestration only'}),
                 patch.object(self.gates, 'probe', side_effect=self.probe),
                 patch.object(self.gates, 'verify_codex_profile', side_effect=self.profile_ownership)]:
             patcher.start()
@@ -398,9 +429,56 @@ class BatchPreparationTests(unittest.TestCase):
     def prepare(self, *, source=None, mode='batch'):
         return p.prepare_batch(self.repo, self.state, source or self.source, mode)
 
+    def test_nvidia_abi_failure_blocks_signing_and_tested_receipt(self):
+        with patch.object(self.batch,'verify_nvidia_live_abi',side_effect=self.batch.BatchError('NVIDIA loaded ABI mismatch')):
+            with self.assertRaisesRegex(self.batch.BatchError,'NVIDIA loaded ABI mismatch'):
+                self.prepare()
+        self.assert_not_committed()
+        self.assertFalse(self.sign_requests)
+        self.assertEqual(p.read_json(self.directory/'candidate.json')['phase'],'failed')
+
     def assert_not_committed(self):
         self.assertEqual(p.git(self.repo, 'rev-parse', self.record['candidate_ref']).decode().strip(), self.baseline_commit)
         self.assertEqual(self.sign_requests, [])
+
+    def test_fresh_ssh_proof_executor_uses_fixed_preparer_and_cannot_sign_after_failure(self):
+        calls = []
+        def sensitive(old, new, evaluator, *, mode, migration_executor):
+            self.assertEqual((old, new), (self.repo, self.source))
+            self.assertEqual(mode, 'batch')
+            self.assertEqual(evaluator('fixture-sensitive-expression'), b'f' * 64)
+            self.assertEqual(migration_executor('nix', ['eval', '--expr', 'fixture-fresh-ssh-proof']), b'f' * 64)
+            calls.append('fixed-executor')
+            raise self.batch.BatchError('Fresh built SSH proof failed')
+        with patch.object(self.batch, 'verify_sensitive_state', side_effect=sensitive):
+            with self.assertRaisesRegex(self.batch.BatchError, 'Fresh built SSH'):
+                self.prepare()
+        self.assertEqual(calls, ['fixed-executor'])
+        self.assertIn(['nix', 'eval', '--raw', '--impure', '--no-write-lock-file', '--offline',
+                       '--max-jobs', '0', '--builders', '', '--option', 'substitute', 'false',
+                       '--option', 'allow-import-from-derivation', 'true', '--expr',
+                       'fixture-sensitive-expression'], self.workloads)
+        self.assert_not_committed()
+        self.assertEqual(self.probes, [])
+        self.assertFalse(any(v[:3] == ['nix', 'flake', 'check'] for v in self.workloads))
+
+    def test_missing_cached_sensitive_artifact_has_no_retry_build_or_sign(self):
+        calls = []
+        def command(arguments, **kwargs):
+            arguments = list(map(str, arguments))
+            if arguments[:2] == ['nix', 'eval'] and '--expr' in arguments:
+                calls.append(arguments)
+                raise p.Blocked('Missing cached IFD artifact')
+            return self.command(arguments, **kwargs)
+        with patch.object(p, 'command', side_effect=command):
+            with self.assertRaisesRegex(p.Blocked, 'Missing cached IFD artifact'):
+                self.prepare()
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][1:-1], self.batch.sensitive_eval_args('ignored')[:-1])
+        self.assert_not_committed()
+        self.assertEqual(self.probes, [])
+        self.assertFalse(any(v[:3] == ['nix', 'flake', 'check'] or v[0] == 'build' for v in self.workloads))
+        self.assertEqual(p.read_json(self.directory / 'candidate.json')['phase'], 'failed')
 
     def test_foreign_worktree_path_and_source_symlink_are_refused(self):
         foreign = self.root / 'other-task' / self.directory.name / 'source'
@@ -556,6 +634,63 @@ class BatchPreparationTests(unittest.TestCase):
         self.assertEqual(inbox.stat().st_nlink, 1)
         self.assertEqual(p.read_json(self.directory / 'candidate.json')['phase'], 'submitted')
         self.assertEqual(p.git(self.repo, 'rev-parse', 'HEAD').decode().strip(), self.baseline_commit)
+
+    def test_large_full_candidate_roundtrips_preparation_submission_and_completion_losslessly(self):
+        inventory = [{'path': '/nix/store/' + f'{i:032x}' + '-fixture-package',
+                      'deriver': '/nix/store/' + f'{i:032x}' + '-fixture-package.drv',
+                      'nar_hash': 'sha256-' + 'a' * 44, 'references': []}
+                     for i in range(4000)]
+        closure = {'ok': True, 'policy': 'fixture-full-closure', 'inventory': inventory}
+        with patch.object(self.batch, 'verify_closure', return_value=closure):
+            record = self.prepare()
+        self.assertEqual(record['phase'], 'tested')
+        self.assertGreater(len(p.encoded(record)), 1024 * 1024)
+        candidate = self.directory / 'candidate.json'
+        self.assertLessEqual(candidate.stat().st_size, 1024 * 1024)
+        self.assertEqual(p.read_json(candidate), record)
+        self.assertEqual(stat.S_IMODE(candidate.stat().st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE(self.directory.stat().st_mode), 0o700)
+        inbox = self.root / 'inbox/request.json'
+        inbox.parent.mkdir(mode=0o700)
+        self.assertEqual(p.submit(self.repo, self.state, record['id'], inbox=inbox)['phase'], 'submitted')
+        status = self.root / 'root-status.json'
+        status.write_text(json.dumps({'id': record['id'], 'phase': 'complete'}))
+        for phase in ('submitted', 'complete'):
+            expected = dict(record, phase=phase)
+            if phase == 'complete':
+                with patch.object(p, 'STATUS', status):
+                    p.prune_candidates(self.repo, self.state)
+            self.assertEqual(p.read_json(candidate), expected)
+            self.assertLessEqual(candidate.stat().st_size, 1024 * 1024)
+            self.assertEqual(p.read_json(candidate)['closure']['inventory'], inventory)
+        for interrupted in ('preparing', 'building'):
+            p.atomic_write(candidate, p.encoded_candidate(dict(record, phase=interrupted)))
+            with patch.object(p, 'STATUS', status):
+                p.prune_candidates(self.repo, self.state)
+            expected = dict(record, phase='failed',
+                            error='Previous preparation interrupted before submission')
+            self.assertEqual(p.read_json(candidate), expected)
+            self.assertLessEqual(candidate.stat().st_size, 1024 * 1024)
+            self.assertEqual(p.read_json(candidate)['closure']['inventory'], inventory)
+
+    def test_submitted_record_size_refusal_cannot_publish_a_request(self):
+        record = self.prepare()
+        candidate = self.directory / 'candidate.json'
+        record['size_fixture'] = ''
+        remaining = 1024 * 1024 - 2 - len(p.encoded_candidate(record))
+        self.assertGreater(remaining, 0)
+        record['size_fixture'] = 'x' * remaining
+        p.atomic_write(candidate, p.encoded_candidate(record))
+        before = candidate.read_bytes()
+        self.assertEqual(len(before), 1048574)
+        self.assertEqual(p.read_json(candidate), record)
+        inbox = self.root / 'inbox/request.json'
+        inbox.parent.mkdir(mode=0o700)
+        with self.assertRaisesRegex(p.Blocked, 'Candidate document exceeds size bound'):
+            p.submit(self.repo, self.state, record['id'], inbox=inbox)
+        self.assertFalse(inbox.exists())
+        self.assertEqual(list(inbox.parent.iterdir()), [])
+        self.assertEqual(candidate.read_bytes(), before)
 
     def test_private_cli_umask_stages_a_preparable_batch_without_changing_main_modes(self):
         before = p.source_manifest(self.repo)

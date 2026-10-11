@@ -10,6 +10,8 @@ import subprocess
 import time
 
 GIB = 1024 ** 3
+RESERVE_TRIGGER = 40 * GIB
+RESERVE_TARGET = 50 * GIB
 STATE = Path('/var/lib/weasel-storage-health/last.json')
 PUBLIC = Path('/run/weasel-storage-health/status.json')
 
@@ -55,7 +57,7 @@ def pressure(row):
     tight = physical_fraction >= .90 or commitment_headroom < GIB
     critical = row['device_errors'] > 0 or row['free_bytes'] < 30 * GIB or (
         row['unallocated_bytes'] < 8 * GIB and tight)
-    return {'level': 'critical' if critical else ('watch' if row['unallocated_bytes'] < 15 * GIB else 'healthy'),
+    return {'level': 'critical' if critical else ('watch' if row['unallocated_bytes'] < RESERVE_TRIGGER else 'healthy'),
             'metadata_used_fraction': physical_fraction,
             'metadata_reservations_bytes': reservations,
             'metadata_readonly_bytes': m['bytes_readonly'],
@@ -87,13 +89,30 @@ def report(row, maintenance=None):
     return result
 
 
-def transaction_reason(root=Path('/var/lib/weasel-updates')):
-    status = Path('/var/lib/weasel-updates-status/status.json')
-    if status.exists() and json.loads(status.read_text()).get('phase') != 'complete':
+def transaction_reason(root=Path('/var/lib/weasel-updates'), status=None):
+    status = status or Path('/var/lib/weasel-updates-status/status.json')
+    terminal = {'complete', 'verified-only', 'blocked', 'failed-before-integration'}
+    if status.exists() and json.loads(status.read_text()).get('phase') not in terminal:
         return 'unresolved daily update'
-    for journal in (root / 'manual-computer-use').glob('*/journal.json'):
-        if json.loads(journal.read_text()).get('phase') != 'complete':
-            return 'unresolved manual activation'
+    # A terminal latest status cannot hide an older unresolved transaction.
+    # Match the installed updater's run/bootstrap terminal phases. Manual
+    # activation remains conservative and requires an explicit completion.
+    for namespace in ('runs', 'bootstrap', 'manual-computer-use'):
+        directory = root / namespace
+        if not directory.exists():
+            continue
+        if directory.is_symlink() or not directory.is_dir():
+            return 'unsafe transaction namespace'
+        for entry in directory.iterdir():
+            if entry.is_symlink() or not entry.is_dir():
+                return 'unsafe transaction entry'
+            journal = entry / 'journal.json'
+            if journal.is_symlink() or not journal.is_file():
+                return 'missing or unsafe transaction journal'
+            phases = {'complete'} if namespace == 'manual-computer-use' else (
+                {'complete', 'failed-before-integration'} if namespace == 'bootstrap' else terminal)
+            if json.loads(journal.read_text()).get('phase') not in phases:
+                return 'unresolved ' + namespace + ' transaction'
     return None
 
 
@@ -121,7 +140,7 @@ def maintain(target, measure_fn=measure, run_fn=run, deadline_seconds=300):
     before = measure_fn(target)
     steps = []
     result = {'time': time.time(), 'before_unallocated_bytes': before['unallocated_bytes'], 'steps': steps}
-    if before['unallocated_bytes'] >= 15 * GIB:
+    if before['unallocated_bytes'] >= RESERVE_TRIGGER:
         return {**result, 'outcome': 'not needed'}
     if before['device_errors'] or before['free_bytes'] < 30 * GIB:
         return {**result, 'outcome': 'deferred', 'reason': 'device errors or insufficient free space'}
@@ -136,7 +155,7 @@ def maintain(target, measure_fn=measure, run_fn=run, deadline_seconds=300):
     for filters in ('usage=0', 'usage=5,limit=8', 'usage=10,limit=8', 'usage=20,limit=8'):
         if time.monotonic() - started >= deadline_seconds:
             break
-        reason = active_build()
+        reason = transaction_reason() or active_build()
         if reason:
             return {**result, 'outcome': 'deferred', 'reason': reason}
         try:
@@ -152,7 +171,7 @@ def maintain(target, measure_fn=measure, run_fn=run, deadline_seconds=300):
         steps.append({'filter': filters, 'unallocated_bytes': after['unallocated_bytes']})
         if after['device_errors']:
             raise RuntimeError('Device errors observed after balance')
-        if after['unallocated_bytes'] >= 25 * GIB:
+        if after['unallocated_bytes'] >= RESERVE_TARGET:
             break
     return {**result, 'outcome': 'completed',
             'after_unallocated_bytes': after['unallocated_bytes'] if steps else before['unallocated_bytes']}
