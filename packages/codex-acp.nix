@@ -8,10 +8,10 @@
 }:
 stdenvNoCC.mkDerivation (finalAttrs: {
   pname = "codex-acp";
-  version = "2.1.1";
+  version = "2.2.2";
   src = fetchurl {
     url = "https://registry.npmjs.org/@agentclientprotocol/codex-acp/-/codex-acp-${finalAttrs.version}.tgz";
-    hash = "sha256-naDVgFGNAG0ldgmktkt8W9lqfzby2G21yPLLk4XeWHI=";
+    hash = "sha256-X0+jPJSVnJKNsRaHN2oFDppee3LbpRljtXH6Vd24YWg=";
   };
   nativeBuildInputs = [ makeWrapper ];
   installPhase = ''

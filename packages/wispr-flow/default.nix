@@ -12,11 +12,11 @@
 
 let
   pname = "wispr-flow";
-  version = "1.6.7-1.0.3";
+  version = "1.6.957-1.0.4";
 
   src = fetchurl {
-    url = "https://github.com/wispr-flow-linux/wispr-flow-linux/releases/download/v1.0.3%2Bwispr1.6.7/wispr-flow-1.6.7-1.0.3-x86_64.AppImage";
-    hash = "sha256-T9/evAykYnc20TVc7sX3Bwf8aTkTkxEtDr8FNavIMfA=";
+    url = "https://github.com/wispr-flow-linux/wispr-flow-linux/releases/download/v1.0.4%2Bwispr1.6.957/wispr-flow-1.6.957-1.0.4-x86_64.AppImage";
+    hash = "sha256-2jeeMDWVnkadE5lyjwb1ThKplYoxp5P/GgZ39OEtiMU=";
   };
 
   # Keep the proprietary AppImage pinned, but replace its helper with a small,

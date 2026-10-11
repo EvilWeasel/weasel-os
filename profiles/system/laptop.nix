@@ -61,7 +61,8 @@
       openssl
       openvpn
       proton-pass
-      azuredatastudio
+      # Azure Data Studio retired in February 2026. The existing VS Code
+      # installation and MSSQL extension remain; personal ADS data is retained.
       teams-for-linux
       slack
       protonmail-desktop

@@ -29,19 +29,19 @@ let
   # Fixed-output fallbacks keep Vencord available without changing user state.
   vencordDesktopMain = fetchurl {
     url = "https://github.com/Vendicated/Vencord/releases/download/devbuild/vencordDesktopMain.js";
-    hash = "sha256-sqfEGaNOoV5nZH1ihI5EtD3qXNQ6OitseFpnSkdXzAs=";
+    hash = "sha256-UcbheYz7qePlqs8LdJv3jDTrV411GrJRG7NUdNlA8kk=";
   };
   vencordDesktopPreload = fetchurl {
     url = "https://github.com/Vendicated/Vencord/releases/download/devbuild/vencordDesktopPreload.js";
-    hash = "sha256-nf9Wauh8inZFmChoZc3P1wjLVUoCRBbFs7fKQq2Qlmc=";
+    hash = "sha256-r65nEg/hpYInHS5VF+wa4Nqn3PkyzMk0MdbCwGfFd9I=";
   };
   vencordDesktopRenderer = fetchurl {
     url = "https://github.com/Vendicated/Vencord/releases/download/devbuild/vencordDesktopRenderer.js";
-    hash = "sha256-zLYWu9z8qYS1aaAntfuKK5YF63a9mV3ZDXilZdpjrW4=";
+    hash = "sha256-ANdDKsJP92G3AFnmI2DtpkW7L6EOnlCt9qKqqZZMzXU=";
   };
   vencordDesktopRendererCss = fetchurl {
     url = "https://github.com/Vendicated/Vencord/releases/download/devbuild/vencordDesktopRenderer.css";
-    hash = "sha256-h6qYaWjAiv0h6ps21OIE7gfiYItQoTcdSiD8j6wemU8=";
+    hash = "sha256-QyzAhNM62s4FDk5vfpSW6BzLBEYhfv8oEgzCSrRLpfU=";
   };
 
   vencordBootstrap = writeShellApplication {

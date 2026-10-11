@@ -19,7 +19,33 @@
     ./users.nix
   ];
 
-  hardware.nvidia.package = lib.mkForce config.boot.kernelPackages.nvidiaPackages.production;
+  # Preserve the loaded NVIDIA 580.142 ABI during this live release migration.
+  # Re-review the production-driver hold on 2026-10-11 and coordinate its boot.
+  hardware.nvidia.package = lib.mkForce (
+    config.boot.kernelPackages.nvidiaPackages.mkDriver {
+      version = "580.142";
+      sha256_64bit = "sha256-IJFfzz/+icNVDPk7YKBKKFRTFQ2S4kaOGRGkNiBEdWM=";
+      sha256_aarch64 = "sha256-jntr88SpTYR648P1rizQjB/8KleBoa14Ay12vx8XETM=";
+      openSha256 = "sha256-v968LbRqy8jB9+yHy9ceP2TDdgyqfDQ6P41NsCoM2AY=";
+      settingsSha256 = "sha256-BnrIlj5AvXTfqg/qcBt2OS9bTDDZd3uhf5jqOtTMTQM=";
+      persistencedSha256 = "sha256-il403KPFAnDbB+dITnBGljhpsUPjZwmLjGt8iPKuBqw=";
+    }
+  );
+
+  # Preserve the running D-Bus implementation during the 26.05 live migration.
+  # Switching to dbus-broker requires a reboot and cannot be tested by a switch.
+  services.dbus.implementation = "dbus";
+
+  # Keep the known boot path while migrating the release without a reboot.
+  boot.initrd.systemd.enable = false;
+
+  # Keep the running daemon and its containers through the protected live switch.
+  # The new Docker package becomes effective after a coordinated daemon restart.
+  systemd.services.docker.restartIfChanged = false;
+
+  # Keep the active DisplayLink session through the protected live switch.
+  # Apply the rebuilt manager only during a coordinated display restart.
+  systemd.services.dlm.restartIfChanged = false;
 
   # The AX211 can enumerate on PCI without iwlwifi being auto-loaded on some boots.
   # Request the in-kernel driver explicitly before NetworkManager starts.

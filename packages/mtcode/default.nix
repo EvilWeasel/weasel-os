@@ -53,6 +53,7 @@ pkgs.stdenv.mkDerivation {
     libdbusmenu-gtk3
     libgbm
     libnotify
+    libpulseaudio
     libsecret
     libxkbcommon
     nspr
@@ -104,6 +105,7 @@ pkgs.stdenv.mkDerivation {
             glib
             libgbm
             libglvnd
+            libpulseaudio
             libsecret
             libx11
             libxcomposite
