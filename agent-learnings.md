@@ -1259,3 +1259,8 @@ Root independently observed NoNewPrivs 0 and /run/wrappers/bin/sudo -n id -u ret
 - 2026-10-11: Storage26 tatsächlich aktiviert (0qrb, eigener Root-r5 Exit0); alle24 idle Cache-Verzeichnisse pfaderhaltend migriert, Rsync-Integrität zweimal pro Pfad und echte nichtrekursive Snapshot-Ausschlüsse bewiesen. Eigene Testsnapshots28/29 gezielt entfernt; Recovery26/27 erhalten. Alle7 Runtime-Dateien bytes/inodegleich (Farb-mtimes aktualisiert). Fokuschecks wiederverwenden; keine weitere Prüfung für diesen Docs-only-Abschluss.
 
 - 2026-10-11: Home reorganized under source categories; T3 Jarvis/Factorio bindings updated, canonical updater checkout kept physical. Old remote-backed repos removed, unpublished history preserved in verified bundles, VPN profiles kept byte/inode/mtime identical. Root backup staging snapshot pinned GC-deleted store and orphan-VM blocks; change to on-demand creation/finally cleanup and remove idle timer. Six lifecycle/privacy regressions PASS; Laptop drv evaluation and targeted full build PASS (wb9zx); Desktop unaffected. Existing retention preserves active/booted systems. Detailed personal cleanup receipts remain private outside Git.
+
+### 2026-10-11 — batch candidate 20261011T100131Z-81ef72e4
+
+- Updated existing configured sources: flake.lock, modules/displaylink.nix, packages/t3code/source.json.
+- Required before submission: all host evaluations, flake checks, the complete laptop build, changed critical app probes, closure inventory and session preservation. Build, activation and background completion require their own receipts.
