@@ -6,10 +6,12 @@ import json
 import os
 from pathlib import Path
 import shutil
+import signal
 import stat
 import subprocess
 import sys
 import tempfile
+import time
 import unittest
 from unittest.mock import patch
 
@@ -17,6 +19,152 @@ SPEC = importlib.util.spec_from_file_location("niri_gate", Path(__file__).resolv
 niri = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = niri
 SPEC.loader.exec_module(niri)
+
+
+class ParentTraversalTests(unittest.TestCase):
+    @unittest.skipIf(os.geteuid() == 0, "Requires an ordinary UID for search-only permission enforcement")
+    def test_owned_search_only_ancestor_allows_read_and_own_fixture_but_not_symlink(self):
+        with tempfile.TemporaryDirectory(prefix="weasel-niri-owned-search-test-") as temporary:
+            root = Path(temporary)
+            ancestor = root / "search-only"
+            ancestor.mkdir()
+            source = ancestor / "source"
+            source.mkdir()
+            readable = source / "config.kdl"
+            readable.write_bytes(b"immutable search-only configuration\n")
+            readable.chmod(0o444)
+            source.chmod(0o555)
+            own = ancestor / "ordinary-user"
+            own.mkdir(mode=0o700)
+            alias = ancestor / "source-link"
+            alias.symlink_to(source, target_is_directory=True)
+            ancestor.chmod(0o111)
+            try:
+                self.assertEqual(stat.S_IMODE(ancestor.stat().st_mode), 0o111)
+                self.assertEqual(ancestor.stat().st_uid, os.getuid())
+                with self.assertRaises(PermissionError):
+                    os.open(ancestor, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+                self.assertEqual(niri.read_file(readable, immutable=True), b"immutable search-only configuration\n")
+                target = own / "nested/fixture/result.kdl"
+                parent = niri.open_parent(target, create_missing=True)
+                try:
+                    self.assertFalse(os.get_inheritable(parent))
+                finally:
+                    os.close(parent)
+                niri.write_private(target, b"private ordinary-user fixture\n")
+                self.assertEqual(target.read_bytes(), b"private ordinary-user fixture\n")
+                self.assertEqual(target.stat().st_uid, os.getuid())
+                self.assertEqual(stat.S_IMODE(target.stat().st_mode), 0o600)
+                with self.assertRaises(OSError):
+                    niri.read_file(alias / "config.kdl", immutable=True)
+                self.assertEqual(stat.S_IMODE(ancestor.stat().st_mode), 0o111)
+            finally:
+                ancestor.chmod(0o700)
+                source.chmod(0o700)
+
+    def test_missing_o_path_fails_closed_before_opening(self):
+        if not hasattr(os, "O_PATH"):
+            self.skipTest("Linux O_PATH is unavailable")
+        original = os.O_PATH
+        try:
+            del os.O_PATH
+            with patch.object(niri.os, "open") as opened:
+                with self.assertRaisesRegex(niri.NiriGateError, "Search-only"):
+                    niri.open_parent(Path("/unopened/config.kdl"))
+                opened.assert_not_called()
+        finally:
+            os.O_PATH = original
+
+
+@unittest.skipUnless(os.geteuid() == 0, "Requires UID0 fixture and actual unprivileged child")
+class RootSearchOnlyParentTests(unittest.TestCase):
+    def test_search_only_source_and_private_fixture_with_unprivileged_uid(self):
+        with tempfile.TemporaryDirectory(prefix="weasel-niri-parent-traversal-test-") as temporary:
+            root = Path(temporary)
+            root.chmod(0o711)
+            namespace = root / "root-namespace"
+            namespace.mkdir(mode=0o711)
+            namespace.chmod(0o711)
+            source = namespace / "source"
+            source.mkdir()
+            readable = source / "config.kdl"
+            readable.write_bytes(b"immutable candidate configuration\n")
+            readable.chmod(0o444)
+            oversized = source / "oversized.kdl"
+            oversized.write_bytes(b"x" * (niri.MAXIMUM_FILE + 1))
+            oversized.chmod(0o444)
+            source.chmod(0o555)
+            private = root / "root-private"
+            private.mkdir(mode=0o700)
+            (private / "config.kdl").write_bytes(b"private fixture\n")
+            (private / "config.kdl").chmod(0o444)
+            alias = root / "source-link"
+            alias.symlink_to(source, target_is_directory=True)
+            own = root / "ordinary-user"
+            own.mkdir(mode=0o700)
+            os.chown(own, 65534, 65534)
+            before = [(path.stat().st_mode, path.stat().st_uid, path.stat().st_gid)
+                      for path in (namespace, source, readable)]
+            read_fd, write_fd = os.pipe()
+            pid = os.fork()
+            if pid == 0:
+                os.close(read_fd)
+                try:
+                    os.setgroups([])
+                    os.setgid(65534)
+                    os.setuid(65534)
+                    assert os.getuid() == os.geteuid() == 65534
+                    assert niri.read_file(readable, immutable=True) == b"immutable candidate configuration\n"
+                    try:
+                        niri.read_file(private / "config.kdl", immutable=True)
+                    except PermissionError:
+                        pass
+                    else:
+                        raise AssertionError("Private root directory was readable")
+                    try:
+                        niri.read_file(alias / "config.kdl", immutable=True)
+                    except OSError:
+                        pass
+                    else:
+                        raise AssertionError("Parent symlink was followed")
+                    try:
+                        niri.read_file(oversized, immutable=True)
+                    except niri.NiriGateError as error:
+                        assert "bounded" in str(error)
+                    else:
+                        raise AssertionError("Oversized source was accepted")
+                    target = own / "nested/fixture/result.kdl"
+                    parent = niri.open_parent(target, create_missing=True)
+                    os.close(parent)
+                    niri.write_private(target, b"private ordinary-user fixture\n")
+                    assert target.read_bytes() == b"private ordinary-user fixture\n"
+                    assert target.stat().st_uid == 65534
+                    assert stat.S_IMODE(target.stat().st_mode) == 0o600
+                    os.write(write_fd, b"PASS:0711-read;0700-refused;symlink-refused;bound;own-fixture\n")
+                    os._exit(0)
+                except BaseException as error:
+                    os.write(write_fd, (type(error).__name__ + ": " + str(error)[:300]).encode())
+                    os._exit(1)
+            os.close(write_fd)
+            try:
+                deadline = time.monotonic() + 10
+                while True:
+                    waited, status = os.waitpid(pid, os.WNOHANG)
+                    if waited:
+                        break
+                    if time.monotonic() >= deadline:
+                        os.kill(pid, signal.SIGKILL)
+                        os.waitpid(pid, 0)
+                        self.fail("Unprivileged parent traversal fixture timed out")
+                    time.sleep(0.01)
+                observed = os.read(read_fd, 1024)
+                self.assertEqual(os.waitstatus_to_exitcode(status), 0, observed.decode(errors="replace"))
+                self.assertEqual(observed, b"PASS:0711-read;0700-refused;symlink-refused;bound;own-fixture\n")
+                self.assertEqual(before, [(path.stat().st_mode, path.stat().st_uid, path.stat().st_gid)
+                                          for path in (namespace, source, readable)])
+                self.assertEqual(readable.read_bytes(), b"immutable candidate configuration\n")
+            finally:
+                os.close(read_fd)
 
 
 class NiriTests(unittest.TestCase):

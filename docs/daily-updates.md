@@ -426,3 +426,24 @@ Independent service composition also receives the typed supported-locale list, w
 The finite NetworkManager/WPA transition is independently composed as a coupled official module configuration. Only enabled NetworkManager with an empty unmanaged list, WPA backend and empty declarative WPA networks receives this projection: the locked old module leaves WPA disabled, while the new module enables DBus-controlled WPA with automatic interface detection disabled. Actual derived flags must equal the independently generated effective values; they are never copied into the seed. NetworkManager selectors, interface lists and locales remain in the compared fingerprint, and a plain canonical NetworkManager package is required. Outside this exact mode the previous strict wireless comparison remains. Both NetworkManager module revisions are explicitly hashed; all account, unit, credential, provider, vendor and authored-policy checks continue unchanged.
 
 The fixed release-migration proof explicitly realizes the exact complete system-unit tree in its existing bounded build before compiler-free policy evaluation. This prevents a fresh migration from relying on a historical full-host cache for the fwupd vendor-file check. The exact aggregate output is also required in the returned build roots; missing, substituted or additional outputs fail. Ordinary batches retain their previous SSH/configuration/selected-unit output tuple. All source, vendor-byte, unit-selection and authentication comparisons remain unchanged; no build fallback is enabled.
+
+
+### Durchsuchbare Root-Quellen beim Niri-Gate
+
+Der Niri-Prüfhelper öffnet ausschließlich Parent-Verzeichnisse mit Linux
+`O_PATH | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC`. Dadurch kann der gewöhnliche
+Prüfbenutzer die absichtlich nur durchsuchbaren Root-Quellnamespaces `0711`
+passieren. Die abschließenden Source-Verzeichnis- und Dateiöffnungen behalten
+`O_RDONLY`; Symlink-, Größen-, Inode- und Race-Prüfungen bleiben erhalten.
+Fehlendes `O_PATH` wird abgewiesen. Root-Journale und Worker mit `0700` bleiben
+privat; es werden keine Berechtigungen erweitert.
+
+Die Root-Prüfung des Kandidaten `20261011T051536Z-ea164243` bestand die
+Migrationsrichtlinien, den vollständigen Flake-Check und alle drei App-Proben,
+stoppte anschließend aber bereits vor der Niri-Fixture-Erstellung mit `EACCES`.
+Sie integrierte und aktivierte nichts. Gewöhnliche UID mit eigenem `0111`-Parent
+und eine tatsächliche Root-Fixture mit Wechsel auf UID/GID `65534` prüfen den
+gezielten Zugriff sowie weiterhin verweigerte private Verzeichnisse,
+Parent-Symlinks und übergroße Dateien. Diese Regressionstests ersetzen weder
+die frische Vorbereitung nach dem gesonderten Bootstrap noch die unabhängige
+Root-Transaktion des neuen Paketkandidaten.
