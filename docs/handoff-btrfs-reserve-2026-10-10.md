@@ -112,3 +112,15 @@ bewahrt. T3-Liste bestätigt Update-/MT-Threads beendet; keine fremde aktive
 Quellarbeit beobachtet. Vor Integration müssen die aktuellen Bytes separat
 erhalten sein. Projektmigrationen bleiben ausdrücklich deferred; die Freigabe
 der Quellarbeit ist keine implizite Freigabe des Piloten.
+
+Finaler Lauf 26-r2 mit den erhaltenen sieben Laufzeitdateien: Flake-Check
+Exit0/39.49s, Laptop Exit0/16.63s mit derselben Closure93qir7, isolierter
+Niri-Parser ohne GUI Exit0/3.32s. Beleg
+`/tmp/weasel-storage-validation-20261011-26-r2/receipt.json`.
+Reservierung freigegeben; historische unterbrochene Desktop-Prüfung bleibt
+FAILED. Desktop-drvPath unverändert. Projektmigrationen weiterhin deferred.
+
+Main-Fast-forward wurde durch automatische Freigabeprüfung abgewiesen:
+unklare aktuelle Freigabe nach früherer Main-Sperre. Keine Umgehung,
+keine Main-Integration oder Aktivierung. Fertiger Aufgabenbranch bereit
+für explizite Freigabe der Integration; Live-Dateien unverändert erhalten.
