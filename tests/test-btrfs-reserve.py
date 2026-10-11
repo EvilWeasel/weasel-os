@@ -30,6 +30,18 @@ def row(unallocated=7, errors=0, free=150):
 
 
 class SafetyTests(unittest.TestCase):
+    def test_busy_storage_operation_lock_is_a_clean_skip(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            with patch.object(health, 'STATE', Path(tmp) / 'last.json'), \
+                 patch.object(health.os, 'geteuid', return_value=0), \
+                 patch('sys.argv', ['health', 'record']), \
+                 patch.object(health.fcntl, 'flock', side_effect=BlockingIOError), \
+                 patch.object(health, 'measure') as measured, \
+                 patch('builtins.print') as output:
+                health.main()
+                measured.assert_not_called()
+                self.assertIn('storage operation lock held', output.call_args.args[0])
+
     def test_latest_complete_status_cannot_hide_unresolved_journal(self):
         import json
         with tempfile.TemporaryDirectory() as tmp:

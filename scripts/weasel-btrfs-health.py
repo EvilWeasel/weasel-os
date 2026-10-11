@@ -219,7 +219,11 @@ def main():
         parser.error('record and maintain require root')
     STATE.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
     with open(STATE.parent / 'operation.lock', 'a') as own_lock:
-        fcntl.flock(own_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        try:
+            fcntl.flock(own_lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError:
+            print(json.dumps({'schema': 1, 'outcome': 'deferred', 'reason': 'storage operation lock held'}))
+            return
         maintenance = None
         if args.mode == 'maintain':
             with open('/var/lib/weasel-updates/activation.lock', 'a') as update_lock:

@@ -66,3 +66,12 @@ Git history uses short, imperative, scope-first messages (for example: `added ll
 - Maintain `agent-learnings.md` as an append-only log for future agents.
 - After every task that changes files, append a short entry with date, what changed, pitfalls/root cause, and verification command(s) used.
 - Keep entries concise and factual.
+
+## Focused iteration and upgrade priority
+
+- Keep ordinary package/system upgrades separate from development of the updater itself. Finish the requested Laptop result before unrelated Desktop/VPS work unless the user requests otherwise.
+- Reuse successful evidence for an unchanged source/configuration. Do not repeat broad matrices or full builds after docs-only changes, minor unrelated failures, or an already-qualified package result. Preserve required installed security gates; do not bypass them to save time.
+- For a narrow fix, run the relevant regression and affected-host evaluation/build. Build the evaluated drvPath directly when possible to avoid repeating the same evaluation. An unchanged host drvPath needs no new host build.
+- Inspect uncached dependencies before a build. Unexpected heavy compilation must be stopped at the owned safe boundary and coordinated; prefer the existing Hephaestus route for long builds after verifying its availability. Do not spend hours on a blind local build.
+- A noncritical post-switch application/service failure should be repaired on the already-tested system when safe. Do not turn that into a new broad upgrade, discard the tested candidate, or repeat unrelated checks. Report actual activation and remaining failures separately.
+- For data migrations, perform one representative pilot and independent integrity/exclusion proof, then serial focused per-directory checks. Skip active projects; preserve files, sources, saves and evidence.

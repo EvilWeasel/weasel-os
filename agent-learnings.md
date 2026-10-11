@@ -1250,3 +1250,8 @@ Root independently observed NoNewPrivs 0 and /run/wrappers/bin/sudo -n id -u ret
 ### 2026-10-11 — Erhaltene App-Laufzeitdateien vor Storage-Integration
 
 - Sieben aktuelle MIME-/DMS-/Matugen-Dateien unverändert als fokussierten signierten Metadatenstand erhalten; index-only Staging bewahrt Live-Bytes/Inodes/mtime. Keine fremde aktive Quellarbeit in T3 beobachtet. Daten waren bereits im Storage-Branch identisch und durch Laptop-Build sowie isolierten Niri-Parser geprüft. Kein App-Neustart, keine GUI-/Mikrofonaktion.
+
+### 2026-10-11 — Gleichzeitigen Start der Storage-Oneshots sauber überspringen
+
+- Erste Native-Aktivierung setzte current/profile auf den getesteten Storage-Laptop, meldete jedoch Exit4, weil Messung/Wartung gleichzeitig anliefen und der belegte eigene Lock als Fehler behandelt wurde. Kein Btrfs-Eingriff, kein Rollback nötig. Busy operation.lock ist jetzt ein sauberer Exit0/Deferred ohne Mess-/Schreib-/Balance-Aktion; Regression gezielt ergänzt. Der native Fehler bleibt im privaten Aktivierungsbeleg erhalten.
+- Systemdienst-PATH muss explizit gesetzt werden. Direkte store-path-Aktivierung benötigt beim vorhandenen nixos-rebuild --no-reexec, um keinen unbeabsichtigten Tool-Rebuild via nicht vorhandenem NIX_PATH zu versuchen. Snapshot27 wurde einmal erstellt und bei Korrekturen wiederverwendet. Kein Root-Git-safe.directory-Workaround.
