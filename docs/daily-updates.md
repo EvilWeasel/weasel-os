@@ -212,16 +212,24 @@ Ein Stromausfall während Cleanup hinterlässt ebenfalls einen Recoveryfall.
 
 ## Einmaliger Bootstrap
 
-Die erste Installation des festen Root-Dienstes braucht normale Hostrechte.
-Zunächst blockierte das aus dem alten Harness gestartete T3 mit `NoNewPrivs`
-auch normal freigegebenes sudo. Nach einem eigenständigen Neustart der nativen
-T3-App wurde zwischenzeitlich `NoNewPrivs: 0` mit erfolgreichem sudo beobachtet.
-Die abschließende Prüfung am 2026-10-09 erbt jedoch wieder `NoNewPrivs: 1`;
-sudo verweigert diesen Prozess. Solange das der tatsächliche Harness-Zustand
-ist, braucht der vollständig gebaute und quellgeprüfte Bootstrap einen einzigen
-Aufruf im normalen Terminal. Eine frühere erfolgreiche Probe belegt keine
-aktuell verfügbaren Rechte. Kein User-Executor,
-kein alternativer Dispatch und keine verweigerte T3-Capability werden umgangen.
+Die Installation oder Änderung des festen Root-Helpers braucht die passenden
+Hostrechte und eine Freigabe für den privilegierten Updater. Ein normaler
+Paket-Batch darf weder diesen Helper noch Sicherheitsregeln ändern. Seine
+Aktivierungsfreigabe ersetzt eine solche gesonderte Bootstrap-Freigabe nicht.
+
+Der tatsächliche Harness-Zustand und die passende Sudo-Berechtigung sind pro
+Aufruf zu prüfen. Im alten Harness blockierte `NoNewPrivs: 1` auch freigegebenes
+sudo; das wurde zuletzt am 2026-10-09 beobachtet. Am 2026-10-11 zeigte ein
+normaler Hostprozess `NoNewPrivs: 0`; der normale NixOS-Wrapper
+`/run/wrappers/bin/sudo -n id -u` lieferte tatsächlich `0`. Dieser Wrapper hat
+den Setuid-Root-Modus `4511`. `/run/current-system/sw/bin/sudo` ist dagegen
+Modus `555` ohne Setuid und ist nicht der Pfad für den Terminal-Bootstrap.
+Der konkrete Bootstrap-Aufruf verwendet `/run/wrappers/bin/sudo`; aktuelle
+Hostrechte und die gesonderte Freigabe bleiben erforderlich. Scheitert die
+konkrete Ausführung weiterhin an fehlenden Rechten, braucht der vollständig
+gebaute und quellgeprüfte Bootstrap einen Aufruf im normalen Terminal. Kein
+User-Executor, alternativer Dispatch oder Umgehen einer verweigerten
+T3-Capability ersetzt fehlende Befugnisse.
 
 Der konkrete Bootstrap-Befehl nennt einen unveränderlichen Store-Wrapper und
 einen unveränderlichen Beleg mit exaktem signiertem Commit, Quellmanifest,
@@ -231,6 +239,120 @@ Wenn Main, Remote oder aktive Generation inzwischen gewechselt haben, muss
 zuerst neu gebaut und der Beleg erneuert werden. Ein späteres unbeschränktes
 `nixos-rebuild switch` aus mutable Quellen ersetzt diesen Nachweis nicht.
 
+## Authentifizierung bei Paketupdates und Release-Migration
+
+Normale Batches erhalten den exakten Rohvergleich von Authentifizierungs- und
+State-Version-Einstellungen. Zusätzlich werden die ausgewählten SSH-, Xauth-
+und Systemd-Paketausgaben, die erzeugte SSH-Konfiguration und die wirksamen
+SSH-Units gegen unabhängig zusammengesetzte offizielle Quellen gebunden.
+Der Vergleich umfasst die tatsächlichen Ausgabepfade und ihre Verwendung;
+ein übereinstimmender `drvPath` allein reicht nicht. Wirksame `/etc`-Ziele,
+SSH-Authentifizierungsdateien, PAM und Systemd-Managerkonfiguration gehören
+zu dieser Prüfung. Authentifizierungsdaten werden nur als
+Hashes erfasst; ihre Werte werden nicht ausgegeben. Diese Prüfungen sind keine Sandbox für beliebige weitere
+Nix-Aktivierungsskripte oder Dienste; die konkrete Quellprüfung bleibt nötig.
+
+Die feste Migration von 25.11 auf 26.05 erhält eine eng begrenzte Ausnahme
+für die exakt geprüften offiziellen Lock-Revisionen, NAR-Hashes und
+Modulquellen. Sie erklärt die zusätzlichen SSH-Nullwerte `AcceptEnv` und
+`Banner` und den tatsächlichen Upstream-Sudo-Zusatz
+`Defaults env_keep+=NIXOS_NO_CHECK`. Die unten beschriebene feste OpenSSH-Prüfung
+bindet zusätzlich die konkret geprüften Daemon-Defaults dieser Migration;
+sonstige gemeinsame Einstellungen bleiben gleich. Dieser Sudo-Zusatz verändert die erlaubte
+Umgebungsübernahme: Ein bereits berechtigter Sudo-Aufruf kann eine Variable
+erhalten, mit der die neue Switch-Implementierung ihre Vorprüfungen überspringt.
+Die geschützten Helper weisen diese Variable deshalb bei jeder Präsenz,
+auch mit leerem Wert, ab; der Root-Dienst entfernt sie zusätzlich aus seiner
+Umgebung. Die Installation dieser Ausnahme benötigt eine gesonderte
+Freigabe für den privilegierten Updater. Ein Paket-Batch darf sie nicht selbst
+hinzufügen oder ändern.
+
+Der feste normale User-Executor baut zuerst ausschließlich die ausgewählten
+SSH-Pakete, Konfigurationen und den kleinen SSH-Unit-Baum mit den vollständigen
+Quellbehauptungen. Diese Phase ist ein Build und kann auch eine benötigte
+Quellableitung für Import-from-Derivation realisieren. Die vollständige
+Systemd-Quellprovenienz wird dabei ausdrücklich ausgewertet. Danach lesen beide
+Produktionskontexte die Provenienz mit der festen Argumentliste aus
+`batch.sensitive_eval_args`: `--offline --max-jobs 0 --builders '' --option
+substitute false --option allow-import-from-derivation true`. Nix 2.31 verweigert
+kontextgebundene IFD-Lesezugriffe bei `false` auch dann, wenn die Ausgabe bereits
+existiert; ein erfolgreiches Lesen über einen kontextlosen Literalpfad wäre
+kein gültiger Ersatz für die Quellenbindung. Die neue Prüfung erlaubt den
+Kontextzugriff auf bereits vorhandene, quellengebundene Store-Ausgaben, jedoch
+keine lokalen oder entfernten Compiler-Jobs und keine Substitution.
+`--offline` erzeugt keine Netzwerkisolation; ungecachete Evaluator-Fetcher werden
+damit nicht pauschal blockiert. Fehlt eine benötigte gecachte Build-Ausgabe,
+scheitert die Prüfung.
+Es gibt keinen
+Fallback nach einem Evaluationsfehler und keine vom Aufrufer vorgegebene
+Ableitung. Es müssen keine vier vollständigen Host-Systeme allein für diesen
+SSH-Nachweis gebaut werden. Serielle Build-Koordination, Strom-, Platz-,
+Zeit- und Quellenprüfungen gelten auch für diese Phase; eine fortlaufende
+RAM-Überwachung ist keine zusätzliche Eigenschaft dieses SSH-Helpers.
+
+Die frisch gebauten SSH-Daemons laufen mit `-G -T` in privaten Bubblewrap-
+Umgebungen ohne Listener, Host-Schlüssel, vorhandene SSH-Dateien oder
+Agent-Sockets. Der Vergleich prüft die vollständige wirksame Ausgabe und
+mehrere feste Verbindungskontexte. Nur die unabhängig gebundenen Xauth-,
+SFTP-, `sshd-auth`- und `sshd-session`-Programmpfade dürfen mit ihrem exakten
+Paketbuild wechseln. Hinzu kommt ausschließlich die oben beschriebene feste
+Migration-Ausnahme für kanonische Defaults. Unbekannte oder konfigurierte
+Policy-Änderungen und fehlende beziehungsweise mehrdeutige Pflichtwerte blockieren die
+Vorbereitung. Root wiederholt den Nachweis unabhängig; ein Caller-Beleg ersetzt
+ihn nicht.
+
+Die systemweiten SSH-Client-Ergänzungen behalten ihre konfigurierten Bytes.
+Nur die vollständige offiziell erzeugte Libvirt-`Include`-Strophe und der
+vollständige GnuPG-`Match`-Block werden auf feste Rollen abgebildet. Dazu müssen
+die jeweiligen Aktivierungsflags boolesch und unverändert sein, der aktivierte
+Block exakt einmal vorkommen und die vollständigen Paketidentitäten aus dem
+kanonischen gesperrten nixpkgs stimmen. Der GnuPG-Block bindet zusätzlich Bash
+und den exakten `runtimeShell`. Vorgegebene Rollenmarker blockieren die Prüfung;
+alle übrigen Bytes, einschließlich `Host *` und `AddKeysToAgent`, bleiben Teil
+des Vergleichs. Die neuen Paketbindungen müssen im frischen Vier-Host-Nachweis
+bestehen; synthetische Fixtures oder historische Daemon-Proben ersetzen ihn nicht.
+
+Der exakt bekannte historische Baseline-Lock enthält einen byteidentischen
+doppelten Eintrag. Nur die gebundene vollständige Legacy-Datei darf auf der
+alten Seite verwendet werden. Neue Kandidaten-Locks bleiben frei von
+doppelten JSON-Einträgen.
+
+## Laufende Treiber und pausierte Dienste
+
+Vor dem Abschluss der Vorbereitung und erneut unmittelbar vor der
+Aktivierung im unabhängigen Root-Ablauf bindet der
+Treiber-Guard die erzeugte Graphics-Verknüpfung und die tatsächlich ausgewählte
+NVML-Bibliothek an die exakte System-Closure. Die Ausgabe wird über unveränderliche Pfade, ELF-Form, Metadaten und Hash
+gebunden; ihre ausgewiesene Bibliotheksversion wird mit der festen geladenen
+NVIDIA-Modulversion verglichen. Mehrdeutige, fehlende, entfernte oder inkompatible Ausgaben und
+beobachtete Änderungen während der Prüfung blockieren eine Live-Aktivierung.
+Der Guard führt keine GPU-Abfrage, kein Modul-Laden und keinen Neustart aus.
+Diese Metadatenprüfung beweist weder Hardwarefunktion noch die tatsächliche
+Verwendung eines neuen Treibers nach einem Boot.
+
+Für die bereits laufenden pausierten Computer-Use-, CUA- und
+Entscheidungsdienste ist als separate Kandidatenreparatur die Home-Manager-
+Regel `Unit.X-SwitchMethod=keep-old` vorgesehen. Sie ist kein Bestandteil
+dieses Updater-Bootstraps. Die Regel erhält aktive
+Instanzen; sie verhindert nicht das Starten bisher inaktiver, angeforderter
+Units. Ihr aktueller Zustand muss deshalb vor der Aktivierung erneut geprüft
+werden. Ein NixOS-`Service.X-RestartIfChanged=false` ersetzt diese Home-Manager-
+Regel nicht. Neue Programmausgaben im Profil bedeuten bei erhaltenen Instanzen
+nicht, dass deren neue Version bereits läuft. Eine spätere Übernahme braucht
+eine eigene Koordination mit dem pausierten Setup.
+
+Die separat vorbereiteten ergänzenden Migrationsproben lesen Kernel-,
+Initrd-, Modul- und Konfigurationsartefakte aus der gebauten Closure. Sie sind
+keine dauerhaft installierten zusätzlichen Helper-Gates. Der private Beleg
+vom 2026-10-10 bestätigt die Analyse des alten Initrd-Archivs, einschließlich
+des archivierten Stage-1-Skripts; er beweist keinen Kandidaten-Boot. Ein Stage-1-Symlink wird an
+die im Initrd-Archiv enthaltenen Skriptbytes gebunden; der Host-Pfad wird dabei
+nicht ausgeführt. Vollständige Archivprüfung, Boot-Modulbestand und Vermagic
+ersetzen keinen tatsächlichen Boot oder Hardwaretest. Ein Home-Snapshot deckt
+mutable Dienstedaten unter `/var` und `/etc` nicht ab. Erhaltene laufende
+Docker-/VM-Dienste und isolierte Schema-Proben sind daher jeweils mit ihren
+tatsächlichen Grenzen zu berichten.
+
 ## Remote Builds und mehrere Maschinen
 
 Die aktuelle Installation aktiviert ausschließlich `nixy-laptop`. Sie richtet
@@ -239,3 +361,55 @@ Trennung steht in [remote-update-builds.md](remote-update-builds.md): zentrale
 Kandidaten-/Build-/VM-Tests, maschinenspezifische Gates und lokale Aktivierung.
 Ein VPS-Test ersetzt weder echte Laptop-Hardwareprüfungen noch Backups von
 produktiven VM-Daten.
+
+
+SSH provenance preserves the typed client `setXAuthLocation` boolean and client
+`extraConfig`, plus the ordered typed PAM `loginLimits`, when independently
+composing the official locked modules. The complete protected `/etc` sources,
+metadata and generated PAM policy must still match that independent composition;
+caller-supplied PAM text, rules or replacement sources are not seeds. The exact
+canonical `limits.conf` artifact is an optional fourth output of the bounded SSH
+mini-build. Its content hash and typed limits remain in the cross-source policy
+fingerprint; only its independently bound store path is normalized.
+
+When `setXAuthLocation = false`, the exact canonical daemon is first parsed with
+`/dev/null` in the same isolated read-only sandbox. Its compiled XAuth default
+stays literal in the complete effective-output comparison. The typed boolean,
+a different compiled default, or an arbitrary configured executable cannot be
+normalized into the enabled option's canonical store-path substitution. These
+adapter fixtures do not replace the actual full policy and system build gates.
+
+
+Die OpenSSH-Prüfung normalisiert ausschließlich die Groß-/Kleinschreibung der
+Ausgabeschlüssel; Werte, Mehrfachwerte, Pflichtfelder und vollständige
+Ausgabe-Hashes bleiben geprüft. Leere `RevokedKeys` erscheinen in der exakt
+gebundenen Version `10.5p1` nicht als Zeile. Diese Schreibweise wird nur mit
+einem frischen `/dev/null`-Parse desselben kanonischen Daemons als deaktiviert
+anerkannt. Die Pfade von `sshd-auth` und `sshd-session` müssen genau aus dessen
+unabhängig gebundenem OpenSSH-Paket stammen. Numerische Reihenfolge-Kommentare
+in erzeugtem PAM-Text werden nur im verifizierten Fingerprint vereinheitlicht;
+Regeln, tatsächliche Reihenfolge, vollständige Quellen und Metadaten bleiben
+an die unabhängig zusammengesetzten offiziellen Module gebunden.
+
+Nur die feste Release-Migration von OpenSSH `10.2p1` auf `10.5p1` kann die exakt
+hinterlegten WebAuthn-Ergänzungen in vier Algorithmus-Defaults und den
+`PerSourcePenalties`-Default mit `invaliduser` akzeptieren. Beide Seiten müssen
+den frisch beobachteten Defaults ihrer eigenen kanonischen Daemons exakt
+entsprechen. Eine konfigurierte Abweichung, ein anderes Versionspaar oder ein
+weiterer Default-Wechsel wird abgewiesen. Normale Batches erhalten keine solche
+semantische Ausnahme. Die [offiziellen OpenSSH-10.5-Releasehinweise](https://www.openssh.com/txt/release-10.5)
+beschreiben diese Upstream-Änderungen; die Freigabe beruht zusätzlich auf den
+konkreten gebundenen Modulen und frischen lokalen Daemon-Ausgaben. Parser- und
+Adapterproben beweisen weder erfolgreiche Authentifizierung noch einen
+Systembuild, Boot oder Hardwaretest. Die vollständige Vier-Host-Richtlinienprüfung
+und alle System-Gates bleiben erforderlich.
+
+The separately reviewed 25.11-to-26.05 migration adapter also proves two finite official service defaults against independently composed locked NixOS modules: the new empty `wpa_supplicant` system account/group and the exact final fwupd refresh rule. It binds credential-free canonical accounts, effective names and non-login shell, empty supplementary/group memberships, plain package/output identities, wireless control flags and canonical service/unit artifacts. The fwupd rule grants only `get-remotes` and `refresh-remote` to the existing `fwupd-refresh` system account; its complete stanza must occur once at the end, with the existing policy prefix unchanged. Both locked module revisions are explicitly hashed. All other users, groups, SSH authorization data and Polkit policy stay in the compared fingerprint. Ordinary batches retain their original strict policy comparison. Synthetic fixtures prove the narrow predicates; fresh four-host policy gates and the exact bootstrap build remain required before any separately approved installation.
+
+The automatic-interface flag is version-specific: locked 25.11 has no `networking.wireless.autoDetectInterfaces`, while locked 26.05 defines a boolean whose standalone WPA default is `true`. The flag is not seeded into independent composition. The new side must equal its independently composed effective official value, which is `false` in the exact NetworkManager-managed WPA mode below, with strict boolean typing even when wireless is disabled. The old side never reads a nonexistent option. This correction does not admit custom wireless behavior or alter ordinary-batch policy.
+
+Independent service composition also receives the typed supported-locale list, which remains in the compared migration fingerprint. The actual generated locale archive must have the same complete package/output identity as the independently composed clean package, and the complete global service environment must match. Raw environment values, archive paths and unit text are never seeded. Full unit text/path/metadata and vendor-byte comparisons remain required, including locale-dependent service lines.
+
+The finite NetworkManager/WPA transition is independently composed as a coupled official module configuration. Only enabled NetworkManager with an empty unmanaged list, WPA backend and empty declarative WPA networks receives this projection: the locked old module leaves WPA disabled, while the new module enables DBus-controlled WPA with automatic interface detection disabled. Actual derived flags must equal the independently generated effective values; they are never copied into the seed. NetworkManager selectors, interface lists and locales remain in the compared fingerprint, and a plain canonical NetworkManager package is required. Outside this exact mode the previous strict wireless comparison remains. Both NetworkManager module revisions are explicitly hashed; all account, unit, credential, provider, vendor and authored-policy checks continue unchanged.
+
+The fixed release-migration proof explicitly realizes the exact complete system-unit tree in its existing bounded build before compiler-free policy evaluation. This prevents a fresh migration from relying on a historical full-host cache for the fwupd vendor-file check. The exact aggregate output is also required in the returned build roots; missing, substituted or additional outputs fail. Ordinary batches retain their previous SSH/configuration/selected-unit output tuple. All source, vendor-byte, unit-selection and authentication comparisons remain unchanged; no build fallback is enabled.

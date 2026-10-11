@@ -13,6 +13,9 @@ import json
 import os
 from pathlib import Path
 import re
+import shlex
+import stat
+import struct
 import subprocess
 import sys
 
@@ -260,7 +263,141 @@ def verify_closure(old_system, new_system, app_pairs, changes):
             "coverage": "full builds and critical probes; inventory does not prove every package runtime"}
 
 
+def _nv_bound(path, roots, *, directory=False):
+    """Resolve only immutable artifacts belonging to this exact system closure."""
+    try:
+        resolved = Path(path).resolve(strict=True)
+        root = next((p for p in (resolved, *resolved.parents) if STORE.fullmatch(str(p))), None)
+        if root is None or str(root) not in roots:
+            raise BatchError("NVIDIA artifact escapes the exact immutable closure")
+        cursor = resolved if directory else resolved.parent
+        while True:
+            info = cursor.stat()
+            if not stat.S_ISDIR(info.st_mode) or info.st_mode & 0o222:
+                raise BatchError("Writable/non-directory NVIDIA artifact parent")
+            if cursor == root:
+                break
+            cursor = cursor.parent
+        if directory:
+            return resolved
+        info = resolved.stat()
+        if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o222:
+            raise BatchError("Writable/non-regular NVIDIA artifact")
+        return resolved
+    except BatchError:
+        raise
+    except (OSError, RuntimeError) as exc:
+        raise BatchError("Unavailable immutable NVIDIA artifact") from exc
+
+
+def _nv_read(path, roots, *, maximum):
+    resolved = _nv_bound(path, roots)
+    try:
+        fd = os.open(resolved, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(fd, "rb") as stream:
+            before = os.fstat(stream.fileno())
+            if not stat.S_ISREG(before.st_mode) or before.st_mode & 0o222 or before.st_size > maximum:
+                raise BatchError("Invalid NVIDIA artifact type/mode/size")
+            data = stream.read(maximum + 1)
+            after = os.fstat(stream.fileno())
+        identity = lambda s: (s.st_dev, s.st_ino, s.st_mode, s.st_size, s.st_mtime_ns, s.st_ctime_ns)
+        if len(data) > maximum or identity(before) != identity(after) or _nv_bound(path, roots) != resolved:
+            raise BatchError("NVIDIA artifact changed during verification")
+        return resolved, data
+    except OSError as exc:
+        raise BatchError("Cannot read bound NVIDIA artifact") from exc
+
+
+def _nvidia_selection(system):
+    """Bind generated L+ graphics selection to the actual selected NVML file."""
+    system = Path(system)
+    roots = _closure(system)
+    _nv_bound(system, roots, directory=True)
+    configs = system / "etc/tmpfiles.d"
+    rules = []
+    if configs.exists():
+        _nv_bound(configs, roots, directory=True)
+        for entry in sorted(configs.glob("*.conf")):
+            path, raw = _nv_read(entry, roots, maximum=2 * 1024 * 1024)
+            try:
+                for line in raw.decode("utf-8").splitlines():
+                    fields = shlex.split(line, comments=True)
+                    if len(fields) > 1 and fields[1] == "/run/opengl-driver":
+                        if len(fields) != 7 or fields[0] != "L+" or any(x != "-" for x in fields[2:6]):
+                            raise BatchError("Unsupported generated graphics-driver selection")
+                        rules.append({"config": str(path), "config_sha256": hashlib.sha256(raw).hexdigest(),
+                                      "graphics": fields[6]})
+            except (UnicodeError, ValueError) as exc:
+                raise BatchError("Cannot parse immutable graphics-driver rules") from exc
+    elif configs.is_symlink():
+        raise BatchError("Broken generated tmpfiles directory")
+    if len(rules) > 1:
+        raise BatchError("Ambiguous generated graphics-driver selection")
+    if not rules:
+        return {"nvidia": False, "graphics_rule": None}
+    rule = rules[0]
+    if not STORE.fullmatch(rule["graphics"]):
+        raise BatchError("Graphics target is not an immutable Store output")
+    _nv_bound(rule["graphics"], roots, directory=True)
+    library = Path(rule["graphics"]) / "lib/libnvidia-ml.so.1"
+    if not library.exists():
+        if library.is_symlink():
+            raise BatchError("Broken selected NVIDIA library")
+        return {"nvidia": False, "graphics_rule": rule}
+    path, raw = _nv_read(library, roots, maximum=64 * 1024 * 1024)
+    match = re.fullmatch(r"libnvidia-ml\.so\.([0-9]+\.[0-9]+(?:\.[0-9]+)?)", path.name)
+    if not match:
+        raise BatchError("Selected NVIDIA library has unknown exact version")
+    # No dlopen/GPU access: this checks ELF64/shared-object shape only.
+    # Shape and the versioned filename do not prove vendor authenticity;
+    # the existing trusted source/closure checks remain mandatory.
+    if len(raw) < 64 or raw[:5] != b"\x7fELF\x02" or raw[5] not in (1, 2):
+        raise BatchError("Selected NVIDIA library is not ELF64")
+    byteorder = "<" if raw[5] == 1 else ">"
+    if struct.unpack_from(byteorder + "H", raw, 16)[0] != 3:
+        raise BatchError("Selected NVIDIA library is not a shared ELF object")
+    return {"nvidia": True, "graphics_rule": rule, "library": str(path), "version": match[1],
+            "library_sha256": hashlib.sha256(raw).hexdigest()}
+
+
+def _loaded_nvidia_version():
+    # Fixed kernel metadata only. Neither caller JSON nor candidate source can opt out.
+    path = Path("/sys/module/nvidia/version")
+    try:
+        fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+        with os.fdopen(fd, "rb") as stream:
+            if not stat.S_ISREG(os.fstat(stream.fileno()).st_mode):
+                raise BatchError("Loaded NVIDIA version is not regular kernel metadata")
+            raw = stream.read(129)
+    except FileNotFoundError:
+        return None
+    except OSError as exc:
+        raise BatchError("Cannot establish loaded NVIDIA driver version") from exc
+    if not re.fullmatch(rb"[0-9]+\.[0-9]+(?:\.[0-9]+)?\n?", raw):
+        raise BatchError("Unknown or unbounded loaded NVIDIA driver version")
+    return raw.decode("ascii").strip()
+
+
+def verify_nvidia_live_abi(old_system, new_system):
+    loaded = _loaded_nvidia_version()
+    before, after = _nvidia_selection(old_system), _nvidia_selection(new_system)
+    if after["nvidia"]:
+        if loaded is None or after["version"] != loaded:
+            raise BatchError("Candidate NVIDIA userspace does not match the loaded kernel driver; coordinated boot required")
+    elif before["nvidia"] or loaded is not None:
+        raise BatchError("Candidate removes or cannot bind userspace for an existing NVIDIA driver")
+    # Re-read selection, hashes and kernel metadata. Root invokes this again directly
+    # before activating, independently of the preparer's candidate JSON receipt.
+    if (_loaded_nvidia_version() != loaded or _nvidia_selection(old_system) != before
+            or _nvidia_selection(new_system) != after):
+        raise BatchError("NVIDIA selection or loaded kernel driver changed during verification")
+    return {"ok": True, "old": before, "new": after, "loaded_kernel_driver": loaded,
+            "policy": "exact-immutable-nvml-vs-loaded-kernel-version",
+            "coverage": "static selected NVML ELF/version/hash and fixed loaded module metadata; no GPU query, module load, modeset or hardware acceptance"}
+
+
 def verify_runtime_units(old_system, new_system):
+    nvidia_abi = verify_nvidia_live_abi(old_system, new_system)
     checked = []
     def unit(path):
         content = path.read_bytes()
@@ -291,7 +428,7 @@ def verify_runtime_units(old_system, new_system):
         if before != after and restart != b'false':
             raise BatchError("Changed graphical session unit would restart the user's session")
         checked.append({"unit": relative, "changed": before != after, "restart_on_change": False if before != after else "unchanged"})
-    return {"ok": True, "checked": checked, "reboot": "not performed; existing kernel/session may remain running"}
+    return {"ok": True, "checked": checked, "nvidia_abi": nvidia_abi, "reboot": "not performed; existing kernel/session may remain running"}
 
 
 def codex_ownership_predicate(source, host):
@@ -311,6 +448,15 @@ def codex_ownership_predicate(source, host):
         "builtins.all (pkg: if builtins.elem (pkg.pname or \"\") [\"codex\" \"codex-scoped-cancel\"] "
         "then (pkg.drvPath or null) == expectedCodex.drvPath else true) packages)"
     )
+
+
+def sensitive_eval_args(expression):
+    """Read cached IFD context without local/remote builds or substitution."""
+    if not isinstance(expression, str) or not expression.strip() or "\0" in expression:
+        raise BatchError("Sensitive proof requires a nonempty expression")
+    return ["eval", "--raw", "--impure", "--no-write-lock-file", "--offline",
+            "--max-jobs", "0", "--builders", "", "--option", "substitute", "false",
+            "--option", "allow-import-from-derivation", "true", "--expr", expression]
 
 
 def sensitive_expression(source, host):
@@ -379,8 +525,13 @@ def sensitive_expression(source, host):
             'builtins.hashString "sha256" (builtins.toJSON v)')
 
 
-def verify_sensitive_state(old_source, new_source, evaluator, *, mode="batch"):
-    checks, releases = {}, {}
+def verify_sensitive_state(old_source, new_source, evaluator, *, mode="batch", migration_executor=None):
+    checks, releases, transitions, ssh_proofs = {}, {}, {}, {}
+    if mode not in {"batch", "release-migration"}:
+        raise BatchError("Unknown sensitive-state lane")
+    spec = importlib.util.spec_from_file_location("batch_migration", Path(__file__).with_name("weasel-update-migration.py"))
+    migration = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(migration)
     for host in HOSTS:
         before = evaluator(sensitive_expression(old_source, host)).strip()
         after = evaluator(sensitive_expression(new_source, host)).strip()
@@ -388,8 +539,32 @@ def verify_sensitive_state(old_source, new_source, evaluator, *, mode="batch"):
             before = before.decode()
         if isinstance(after, bytes):
             after = after.decode()
-        if not re.fullmatch(r"[0-9a-f]{64}", before) or before != after:
+        if not re.fullmatch(r"[0-9a-f]{64}", before) or not re.fullmatch(r"[0-9a-f]{64}", after):
+            raise BatchError("Invalid authentication/stateVersion fingerprint: " + host)
+        if mode == "batch" and before != after:
             raise BatchError("Batch changes evaluated authentication or stateVersion policy: " + host)
+        try:
+            verifier = migration.verify_general if mode == "batch" else migration.verify
+            transition = verifier(sensitive_expression, old_source, new_source, host, evaluator, migration_executor)
+        except RuntimeError as error:
+            raise BatchError("Protected authentication/SSH check failed: " + host + ": " + str(error)) from error
+        if transition["old"] != before or transition["new"] != after:
+            raise BatchError("Authentication policy changed during fresh SSH proof: " + host)
+        # Re-evaluate after building/parsing to reject source drift; the
+        # existing full-source manifest guards remain mandatory too.
+        again_before = evaluator(sensitive_expression(old_source, host)).strip()
+        if isinstance(again_before, bytes):
+            again_before = again_before.decode()
+        if again_before != before:
+            raise BatchError("Baseline authentication changed during SSH proof: " + host)
+        again = evaluator(sensitive_expression(new_source, host)).strip()
+        if isinstance(again, bytes):
+            again = again.decode()
+        if again != after:
+            raise BatchError("Candidate authentication changed during SSH proof: " + host)
+        if mode == "release-migration":
+            transitions[host] = transition
+        ssh_proofs[host] = transition
         checks[host] = before
         release = lambda source: ('let f = builtins.getFlake ' + json.dumps("path:" + str(Path(source).absolute())) +
                                   '; in f.nixosConfigurations.' + host + '.config.system.nixos.release')
@@ -398,7 +573,7 @@ def verify_sensitive_state(old_source, new_source, evaluator, *, mode="batch"):
         if (mode == "batch" and a != b) or (mode == "release-migration" and (a, b) != ("25.11", "26.05")):
             raise BatchError("Built NixOS release does not match the typed candidate lane: " + host)
         releases[host] = {"old": a, "new": b}
-    return {"ok": True, "auth_and_state_version_sha256": checks, "nixos_releases": releases}
+    return {"ok": True, "auth_and_state_version_sha256": checks, "nixos_releases": releases, "reviewed_migration_transitions": transitions, "protected_ssh": ssh_proofs}
 
 
 def verify_published(old_source, new_source):

@@ -593,7 +593,8 @@ def prepare_batch(repo, state, source, mode):
             attribute = f'nixosConfigurations.{host}.config.system.build.toplevel.drvPath'
             derivations[host] = command(['nix', 'eval', '--raw', '--no-write-lock-file', f'{source}#{attribute}']).decode().strip()
         sensitive = batch.verify_sensitive_state(repo, source, lambda expr: command(
-            ['nix', 'eval', '--raw', '--impure', '--no-write-lock-file', '--expr', expr]), mode=mode)
+            ['nix', *batch.sensitive_eval_args(expr)]), mode=mode,
+            migration_executor=lambda name, args: command([name, *args], timeout=1800))
         lock_before = (source / 'flake.lock').read_bytes()
         command(['nix', 'flake', 'check', '--no-write-lock-file', '--max-jobs', '1', '--cores', '2', str(source)], timeout=10800)
         if (source / 'flake.lock').read_bytes() != lock_before:

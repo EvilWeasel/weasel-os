@@ -309,6 +309,18 @@ class BatchPreparationTests(unittest.TestCase):
         current.symlink_to(self.old_system)
         profile.symlink_to(self.old_system)
         self.batch, self.gates = p.peer('batch'), p.peer('gates')
+        from types import SimpleNamespace
+        def general_ssh_fixture(expression, before, after, host, evaluator, executor):
+            # This real-Git orchestration fixture declares no NixOS inputs.
+            # Real canonical SSH proof is covered by its separate suites and
+            # mandatory runtime evidence; verify the immutable executor is
+            # passed even when these source/package workloads are mocked.
+            self.assertEqual(executor('nix', ['eval', '--expr', 'fixture-fresh-ssh-proof']), b'f' * 64)
+            return {'old': evaluator(expression(before, host)).decode().strip(),
+                    'new': evaluator(expression(after, host)).decode().strip(),
+                    'coverage': 'Mocked SSH orchestration only; no daemon'}
+        self.ssh_adapter = SimpleNamespace(verify_general=general_ssh_fixture)
+        self.ssh_spec = SimpleNamespace(loader=SimpleNamespace(exec_module=lambda module: None))
         self.sign_requests, self.verified, self.workloads, self.probes = [], [], [], []
         self.profile_checks = []
         self.changed_apps = {'t3', 'codex', 'chatgpt', 'acp'}
@@ -322,8 +334,14 @@ class BatchPreparationTests(unittest.TestCase):
                 patch.object(p, 'command', side_effect=self.command),
                 patch.object(p, 'build', side_effect=self.build),
                 patch.object(p, 'peer', side_effect=lambda name: {'batch': self.batch, 'gates': self.gates}[name]),
+                patch.object(self.batch.importlib.util, 'spec_from_file_location', return_value=self.ssh_spec),
+                patch.object(self.batch.importlib.util, 'module_from_spec', return_value=self.ssh_adapter),
                 patch.object(self.batch, 'verify_published', return_value={'ok': True, 'published_pins': {}}),
                 patch.object(self.batch, 'verify_closure', side_effect=self.closure),
+                # The real-Git fake-closure fixture has no installed NVIDIA/store graph.
+                # Actual static file/ABI negatives live in test-update-batch.py.
+                patch.object(self.batch, 'verify_nvidia_live_abi', return_value={
+                    'ok': True, 'coverage': 'Mocked hardware boundary for preparation orchestration only'}),
                 patch.object(self.gates, 'probe', side_effect=self.probe),
                 patch.object(self.gates, 'verify_codex_profile', side_effect=self.profile_ownership)]:
             patcher.start()
@@ -398,9 +416,56 @@ class BatchPreparationTests(unittest.TestCase):
     def prepare(self, *, source=None, mode='batch'):
         return p.prepare_batch(self.repo, self.state, source or self.source, mode)
 
+    def test_nvidia_abi_failure_blocks_signing_and_tested_receipt(self):
+        with patch.object(self.batch,'verify_nvidia_live_abi',side_effect=self.batch.BatchError('NVIDIA loaded ABI mismatch')):
+            with self.assertRaisesRegex(self.batch.BatchError,'NVIDIA loaded ABI mismatch'):
+                self.prepare()
+        self.assert_not_committed()
+        self.assertFalse(self.sign_requests)
+        self.assertEqual(p.read_json(self.directory/'candidate.json')['phase'],'failed')
+
     def assert_not_committed(self):
         self.assertEqual(p.git(self.repo, 'rev-parse', self.record['candidate_ref']).decode().strip(), self.baseline_commit)
         self.assertEqual(self.sign_requests, [])
+
+    def test_fresh_ssh_proof_executor_uses_fixed_preparer_and_cannot_sign_after_failure(self):
+        calls = []
+        def sensitive(old, new, evaluator, *, mode, migration_executor):
+            self.assertEqual((old, new), (self.repo, self.source))
+            self.assertEqual(mode, 'batch')
+            self.assertEqual(evaluator('fixture-sensitive-expression'), b'f' * 64)
+            self.assertEqual(migration_executor('nix', ['eval', '--expr', 'fixture-fresh-ssh-proof']), b'f' * 64)
+            calls.append('fixed-executor')
+            raise self.batch.BatchError('Fresh built SSH proof failed')
+        with patch.object(self.batch, 'verify_sensitive_state', side_effect=sensitive):
+            with self.assertRaisesRegex(self.batch.BatchError, 'Fresh built SSH'):
+                self.prepare()
+        self.assertEqual(calls, ['fixed-executor'])
+        self.assertIn(['nix', 'eval', '--raw', '--impure', '--no-write-lock-file', '--offline',
+                       '--max-jobs', '0', '--builders', '', '--option', 'substitute', 'false',
+                       '--option', 'allow-import-from-derivation', 'true', '--expr',
+                       'fixture-sensitive-expression'], self.workloads)
+        self.assert_not_committed()
+        self.assertEqual(self.probes, [])
+        self.assertFalse(any(v[:3] == ['nix', 'flake', 'check'] for v in self.workloads))
+
+    def test_missing_cached_sensitive_artifact_has_no_retry_build_or_sign(self):
+        calls = []
+        def command(arguments, **kwargs):
+            arguments = list(map(str, arguments))
+            if arguments[:2] == ['nix', 'eval'] and '--expr' in arguments:
+                calls.append(arguments)
+                raise p.Blocked('Missing cached IFD artifact')
+            return self.command(arguments, **kwargs)
+        with patch.object(p, 'command', side_effect=command):
+            with self.assertRaisesRegex(p.Blocked, 'Missing cached IFD artifact'):
+                self.prepare()
+        self.assertEqual(len(calls), 1)
+        self.assertEqual(calls[0][1:-1], self.batch.sensitive_eval_args('ignored')[:-1])
+        self.assert_not_committed()
+        self.assertEqual(self.probes, [])
+        self.assertFalse(any(v[:3] == ['nix', 'flake', 'check'] or v[0] == 'build' for v in self.workloads))
+        self.assertEqual(p.read_json(self.directory / 'candidate.json')['phase'], 'failed')
 
     def test_foreign_worktree_path_and_source_symlink_are_refused(self):
         foreign = self.root / 'other-task' / self.directory.name / 'source'

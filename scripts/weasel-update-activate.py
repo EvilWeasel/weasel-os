@@ -279,6 +279,7 @@ class Runner:
 
     @staticmethod
     def run(argv, cwd=None, timeout=600):
+        require_switch_checks()
         result = subprocess.run(argv, cwd=cwd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, timeout=timeout, check=False)
         if result.returncode:
             # Neither arbitrary subprocess output nor private profile contents enter status logs.
@@ -913,7 +914,13 @@ def notify_outcome(runner, outcome):
         pass  # A closed graphical session does not invalidate an update receipt.
 
 
+def require_switch_checks():
+    if "NIXOS_NO_CHECK" in os.environ:
+        raise ActivationError("NIXOS_NO_CHECK is forbidden in protected activation")
+
+
 def activate_exact(runner, system):
+    require_switch_checks()
     valid_system(str(system))
     runner.root("nix-env", ["--profile", PROFILE, "--set", system])
     # The validated immutable Store program is the only root executable from a candidate.
@@ -923,6 +930,7 @@ def activate_exact(runner, system):
 
 
 def process_request(runner, request, state, repository, *, check_only=False):
+    require_switch_checks()
     batch_mode = request["schema"] == 2
     discover = None if batch_mode else import_peer("weasel-update-discover.py")
     batch = import_peer("weasel-update-batch.py") if batch_mode else None
@@ -995,8 +1003,9 @@ def process_request(runner, request, state, repository, *, check_only=False):
         if batch_mode:
             sensitive_state = batch.verify_sensitive_state(
                 old_source, new_source,
-                lambda expression: runner.user("nix", ["eval", "--raw", "--impure", "--no-write-lock-file", "--expr", expression]),
-                mode=request["mode"])
+                lambda expression: runner.user("nix", batch.sensitive_eval_args(expression)),
+                mode=request["mode"],
+                migration_executor=lambda name, args: runner.user(name, args, timeout=1800))
             nix_check(runner, new_source)
         journal("preparing", host_derivations=host_derivations, flake_check_passed=batch_mode, sensitive_state=sensitive_state)
         app_pairs, app_tests = probe_applications(runner, old_source, new_source,
@@ -1102,6 +1111,7 @@ def main():
         else:
             print(json.dumps({"schema": 1, "outcome": "not-installed"}))
         return 0
+    require_switch_checks()
     if os.geteuid() != 0:
         raise ActivationError("Activation/check requires the fixed root system service")
     if args.request != INBOX or args.state != STATE or args.repository != REPOSITORY:
