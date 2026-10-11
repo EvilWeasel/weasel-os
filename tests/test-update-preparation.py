@@ -5,6 +5,7 @@ import datetime as dt
 import json
 import os
 from pathlib import Path
+import stat
 import subprocess
 import tempfile
 import unittest
@@ -53,6 +54,18 @@ class PreparationTests(unittest.TestCase):
             link.symlink_to(real)
             with self.assertRaises(OSError):
                 p.read_json(link)
+
+    def test_candidate_writer_and_reader_keep_existing_one_mib_limit(self):
+        with tempfile.TemporaryDirectory() as folder:
+            candidate = Path(folder) / 'candidate.json'
+            candidate.write_bytes(b'{"phase":"tested"}\n')
+            oversized = {'phase': 'tested', 'evidence': 'x' * (1024 * 1024)}
+            with self.assertRaisesRegex(p.Blocked, 'Candidate document exceeds size bound'):
+                p.atomic_write(candidate, p.encoded_candidate(oversized))
+            self.assertEqual(candidate.read_bytes(), b'{"phase":"tested"}\n')
+            candidate.write_bytes(json.dumps(oversized).encode())
+            with self.assertRaisesRegex(p.Blocked, 'Input document exceeds size bound'):
+                p.read_json(candidate)
 
     def test_battery_and_power_failure_are_real_refusals(self):
         with tempfile.TemporaryDirectory() as folder:
@@ -621,6 +634,63 @@ class BatchPreparationTests(unittest.TestCase):
         self.assertEqual(inbox.stat().st_nlink, 1)
         self.assertEqual(p.read_json(self.directory / 'candidate.json')['phase'], 'submitted')
         self.assertEqual(p.git(self.repo, 'rev-parse', 'HEAD').decode().strip(), self.baseline_commit)
+
+    def test_large_full_candidate_roundtrips_preparation_submission_and_completion_losslessly(self):
+        inventory = [{'path': '/nix/store/' + f'{i:032x}' + '-fixture-package',
+                      'deriver': '/nix/store/' + f'{i:032x}' + '-fixture-package.drv',
+                      'nar_hash': 'sha256-' + 'a' * 44, 'references': []}
+                     for i in range(4000)]
+        closure = {'ok': True, 'policy': 'fixture-full-closure', 'inventory': inventory}
+        with patch.object(self.batch, 'verify_closure', return_value=closure):
+            record = self.prepare()
+        self.assertEqual(record['phase'], 'tested')
+        self.assertGreater(len(p.encoded(record)), 1024 * 1024)
+        candidate = self.directory / 'candidate.json'
+        self.assertLessEqual(candidate.stat().st_size, 1024 * 1024)
+        self.assertEqual(p.read_json(candidate), record)
+        self.assertEqual(stat.S_IMODE(candidate.stat().st_mode), 0o600)
+        self.assertEqual(stat.S_IMODE(self.directory.stat().st_mode), 0o700)
+        inbox = self.root / 'inbox/request.json'
+        inbox.parent.mkdir(mode=0o700)
+        self.assertEqual(p.submit(self.repo, self.state, record['id'], inbox=inbox)['phase'], 'submitted')
+        status = self.root / 'root-status.json'
+        status.write_text(json.dumps({'id': record['id'], 'phase': 'complete'}))
+        for phase in ('submitted', 'complete'):
+            expected = dict(record, phase=phase)
+            if phase == 'complete':
+                with patch.object(p, 'STATUS', status):
+                    p.prune_candidates(self.repo, self.state)
+            self.assertEqual(p.read_json(candidate), expected)
+            self.assertLessEqual(candidate.stat().st_size, 1024 * 1024)
+            self.assertEqual(p.read_json(candidate)['closure']['inventory'], inventory)
+        for interrupted in ('preparing', 'building'):
+            p.atomic_write(candidate, p.encoded_candidate(dict(record, phase=interrupted)))
+            with patch.object(p, 'STATUS', status):
+                p.prune_candidates(self.repo, self.state)
+            expected = dict(record, phase='failed',
+                            error='Previous preparation interrupted before submission')
+            self.assertEqual(p.read_json(candidate), expected)
+            self.assertLessEqual(candidate.stat().st_size, 1024 * 1024)
+            self.assertEqual(p.read_json(candidate)['closure']['inventory'], inventory)
+
+    def test_submitted_record_size_refusal_cannot_publish_a_request(self):
+        record = self.prepare()
+        candidate = self.directory / 'candidate.json'
+        record['size_fixture'] = ''
+        remaining = 1024 * 1024 - 2 - len(p.encoded_candidate(record))
+        self.assertGreater(remaining, 0)
+        record['size_fixture'] = 'x' * remaining
+        p.atomic_write(candidate, p.encoded_candidate(record))
+        before = candidate.read_bytes()
+        self.assertEqual(len(before), 1048574)
+        self.assertEqual(p.read_json(candidate), record)
+        inbox = self.root / 'inbox/request.json'
+        inbox.parent.mkdir(mode=0o700)
+        with self.assertRaisesRegex(p.Blocked, 'Candidate document exceeds size bound'):
+            p.submit(self.repo, self.state, record['id'], inbox=inbox)
+        self.assertFalse(inbox.exists())
+        self.assertEqual(list(inbox.parent.iterdir()), [])
+        self.assertEqual(candidate.read_bytes(), before)
 
     def test_private_cli_umask_stages_a_preparable_batch_without_changing_main_modes(self):
         before = p.source_manifest(self.repo)

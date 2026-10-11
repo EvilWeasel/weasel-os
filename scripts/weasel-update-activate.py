@@ -978,7 +978,10 @@ def process_request(runner, request, state, repository, *, check_only=False):
         write_status("running", request["id"], phase)
     journal("preparing")
     source_root = state / "sources" / request["id"]
-    source_root.mkdir(mode=0o755)
+    source_root.mkdir(mode=0o711)
+    # The service's private umask must not block the normal-user verifier.
+    # Only this root-owned source namespace is searchable, never writable.
+    source_root.chmod(0o711)
     old_source, new_source = source_root / "baseline", source_root / "candidate"
     workspace = state / "workers" / request["id"]
     workspace.mkdir(mode=0o700)

@@ -128,6 +128,19 @@ unveränderten geschützten Modul entsprechen. Er friert die geprüften Quellen 
 schreibgeschützten Root-Verzeichnissen ein. Nix-Evaluationen, Builds,
 Netzwerk-Discovery und App-Prüfungen laufen weiterhin als normaler Benutzer.
 
+Die private Dienst-Umask bleibt `0077`. Das frisch angelegte Root-Verzeichnis
+für die beiden Quellbäume erhält ausdrücklich Modus `0711`, damit der normale
+Prüfbenutzer es durchqueren kann. Die eingefrorenen Verzeichnisse bleiben
+`0555`, Dateien `0444` beziehungsweise `0555`; Journale und Arbeitsverzeichnisse
+behalten ihre privaten Rechte. Ein tatsächlicher Test unter einer anderen UID
+prüft Lesbarkeit ohne Schreibrecht und den weiterhin gesperrten Journalzugriff.
+
+Private Kandidatenbelege werden vollständig als kompaktes JSON geschrieben.
+Der Leser behält seine Grenze von 1 MiB; Closure-Einträge und Quellmanifeste
+werden nicht gekürzt. Auch die Übergänge nach Submit und beim späteren
+Abschluss verwenden dieselbe Ausgabe. Die nächste Kandidatenausgabe muss
+bereits vor Veröffentlichung der Anfrage in diese Grenze passen.
+
 Jeder Batch braucht Nix-Syntax, Evaluation aller vier Hosts, den vollständigen
 Flake-Check und den kompletten Laptop-Build. Seine Closure-Prüfung hält alle
 hinzugefügten und entfernten Store-Artefakte mit vollständigen Inventar-Hashes

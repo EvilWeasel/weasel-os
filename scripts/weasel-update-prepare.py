@@ -48,6 +48,15 @@ def encoded(value):
     return (json.dumps(value, sort_keys=True, indent=2) + '\n').encode()
 
 
+def encoded_candidate(value):
+    # Full closure/manifests fit the existing reader bound without discarding
+    # evidence. Other receipts retain their human-readable serialization.
+    data = (json.dumps(value, sort_keys=True, separators=(',', ':')) + '\n').encode()
+    if len(data) > 1024 * 1024:
+        raise Blocked('Candidate document exceeds size bound')
+    return data
+
+
 def atomic_write(path, data):
     path = Path(path)
     path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
@@ -348,11 +357,11 @@ def prune_candidates(repo, state, *, keep=3):
             # build cannot still run, and these phases were never submit-ready.
             phase = 'failed'
             record.update(phase=phase, error='Previous preparation interrupted before submission')
-            atomic_write(marker, encoded(record))
+            atomic_write(marker, encoded_candidate(record))
         if phase == 'submitted' and status.get('id') == directory.name and status.get('phase') == 'complete':
             phase = 'complete'
             record['phase'] = phase
-            atomic_write(marker, encoded(record))
+            atomic_write(marker, encoded_candidate(record))
         if phase not in {'failed', 'tested', 'complete'}:
             continue
         resolved.append(directory)
@@ -425,7 +434,7 @@ def prepare(repo, state, lane, metadata):
     record = {'schema': 1, 'id': identifier, 'lane': lane, 'phase': 'preparing',
               'baseline_commit': manifest['head'], 'baseline_system': str(old_system),
               'candidate_ref': ref, 'source': str(source)}
-    atomic_write(directory / 'candidate.json', encoded(record))
+    atomic_write(directory / 'candidate.json', encoded_candidate(record))
     try:
         git(repo, 'worktree', 'add', '-b', ref.removeprefix('refs/heads/'), source, manifest['head'])
         old_bytes = (source / discover.SOURCE_FILES[lane]).read_bytes()
@@ -435,7 +444,7 @@ def prepare(repo, state, lane, metadata):
         # Preserve Git's original executable bits; metadata adapters are regular files.
         (source / discover.SOURCE_FILES[lane]).chmod((repo / discover.SOURCE_FILES[lane]).stat().st_mode & 0o777)
         record.update(phase='building', transition=transition)
-        atomic_write(directory / 'candidate.json', encoded(record))
+        atomic_write(directory / 'candidate.json', encoded_candidate(record))
         if lane != 't3':
             command(['nix-instantiate', '--parse', source / discover.SOURCE_FILES[lane]])
         affected_hosts = ['nixy-laptop', 'michapc', 'michapc-debug'] if lane == 't3' else ['nixy-laptop']
@@ -480,11 +489,11 @@ def prepare(repo, state, lane, metadata):
         record.update(phase='tested', candidate_commit=commit,
                       tested_system=str(final_system), app=str(new_app), probe=probe,
                       closure=closure, manifest=manifest, candidate_manifest=source_manifest(source))
-        atomic_write(directory / 'candidate.json', encoded(record))
+        atomic_write(directory / 'candidate.json', encoded_candidate(record))
         return record
     except Exception as error:
         record.update(phase='failed', error=str(error))
-        atomic_write(directory / 'candidate.json', encoded(record))
+        atomic_write(directory / 'candidate.json', encoded_candidate(record))
         raise
 
 
@@ -505,7 +514,7 @@ def new_batch(repo, state, mode):
               'baseline_commit': manifest['head'], 'baseline_system': str(system),
               'candidate_ref': 'refs/heads/weasel-update-' + identifier,
               'source': str(source), 'manifest': manifest}
-    atomic_write(directory / 'candidate.json', encoded(record))
+    atomic_write(directory / 'candidate.json', encoded_candidate(record))
     try:
         git(repo, 'worktree', 'add', '-b', record['candidate_ref'].removeprefix('refs/heads/'), source, manifest['head'])
         # Git checks out respecting this helper's private umask. Preserve the
@@ -518,7 +527,7 @@ def new_batch(repo, state, mode):
         return record
     except Exception as error:
         record.update(phase='failed', error=str(error))
-        atomic_write(directory / 'candidate.json', encoded(record))
+        atomic_write(directory / 'candidate.json', encoded_candidate(record))
         raise
 
 
@@ -583,7 +592,7 @@ def prepare_batch(repo, state, source, mode):
         atomic_write(source / 'agent-learnings.md', old_log + learning)
         (source / 'agent-learnings.md').chmod(manifest['files']['agent-learnings.md']['mode'])
         record.update(phase='building', policy=policy, helper_learning=learning.decode())
-        atomic_write(directory / 'candidate.json', encoded(record))
+        atomic_write(directory / 'candidate.json', encoded_candidate(record))
         tested_manifest = source_manifest(source)
         for name in changes:
             if name.endswith('.nix'):
@@ -650,11 +659,11 @@ def prepare_batch(repo, state, source, mode):
                       niri=niri,
                       published=published,
                       candidate_manifest=source_manifest(source))
-        atomic_write(directory / 'candidate.json', encoded(record))
+        atomic_write(directory / 'candidate.json', encoded_candidate(record))
         return record
     except Exception as error:
         record.update(phase='failed', error=str(error))
-        atomic_write(directory / 'candidate.json', encoded(record))
+        atomic_write(directory / 'candidate.json', encoded_candidate(record))
         raise
 
 
@@ -677,6 +686,10 @@ def submit(repo, state, identifier, *, inbox=INBOX):
         request['mode'] = record['mode']
     if not inbox.parent.is_dir() or inbox.parent.is_symlink():
         raise Blocked('Activation inbox is not installed; perform verified bootstrap first')
+    # Validate the next record before publication; a size refusal must leave
+    # no request pending with an unwritten submitted receipt.
+    submitted = dict(record, phase='submitted')
+    submitted_data = encoded_candidate(submitted)
     # A complete single-link inode avoids partial-file/inbox observation races.
     fd, temporary = tempfile.mkstemp(prefix='.request-', dir=inbox.parent)
     try:
@@ -690,8 +703,7 @@ def submit(repo, state, identifier, *, inbox=INBOX):
     finally:
         if os.path.exists(temporary):
             os.unlink(temporary)
-    record['phase'] = 'submitted'
-    atomic_write(directory / 'candidate.json', encoded(record))
+    atomic_write(directory / 'candidate.json', submitted_data)
     return {'id': identifier, 'phase': 'submitted', 'request': str(inbox),
             'note': 'Activation is pending; submission is not activation success.'}
 
