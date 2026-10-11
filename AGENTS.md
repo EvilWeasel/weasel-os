@@ -75,3 +75,9 @@ Git history uses short, imperative, scope-first messages (for example: `added ll
 - Inspect uncached dependencies before a build. Unexpected heavy compilation must be stopped at the owned safe boundary and coordinated; prefer the existing Hephaestus route for long builds after verifying its availability. Do not spend hours on a blind local build.
 - A noncritical post-switch application/service failure should be repaired on the already-tested system when safe. Do not turn that into a new broad upgrade, discard the tested candidate, or repeat unrelated checks. Report actual activation and remaining failures separately.
 - For data migrations, perform one representative pilot and independent integrity/exclusion proof, then serial focused per-directory checks. Skip active projects; preserve files, sources, saves and evidence.
+
+## Home layout
+
+- Put new source projects under `~/source/<category>/<project>`: `personal`, `gamedev`, `system`, `tools`, or the existing work/learning categories. Keep disposable task builds under `~/.cache/<tool>/<task>` and tool backups under their state directory. Do not create build runs, backup piles or new project directories at Home top level.
+- The canonical `~/weasel-os` checkout stays a real directory because installed update/source validators reject symlink ancestors; `~/source/system/weasel-os` links to it. Old compatibility links for other moved projects preserve existing scripts and thread references. New work uses the organized source paths.
+- Old locally unnecessary clean repositories may be removed after remote publication is verified; preserve unpublished changes/branches and local-only settings first. Downloadable installers and obsolete duplicate builds are disposable; VPN profiles, credentials, saves and unique personal files are preserved.

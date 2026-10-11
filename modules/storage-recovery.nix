@@ -77,11 +77,6 @@ in
       RandomizedDelaySec = "30m";
     };
   };
-  systemd.timers.weasel-system-state-export = {
-    wantedBy = [ "timers.target" ];
-    timerConfig = {
-      OnCalendar = "*-*-* 02:30:00";
-      Persistent = true;
-    };
-  };
+  # The cloud helper snapshots on demand. An idle whole-root snapshot would
+  # retain deleted store/VM files whenever cloud upload fails or never starts.
 }

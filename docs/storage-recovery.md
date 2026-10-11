@@ -136,20 +136,22 @@ REST-Adapter verbindet beide. Ein zufälliger Token schützt jeden Lauf; er wird
 nicht protokolliert. Dieser Adapter ist eigener Repository-Code und muss bei
 CLI-Änderungen erneut mit einem echten Restore geprüft werden.
 
-* **02:30 Uhr:** ein Root-Dienst erstellt einen kurzlebigen schreibgeschützten
-  Root-Btrfs-Snapshot für `/etc`, `/root`, `/var/lib` und `/var/spool`.
-  Installierte Flatpaks, Nix-Verwaltung, Coredumps und Root-Caches sind ausgenommen.
-  Auch VM-Zustand und VM-Datenträger unter `/var/lib/libvirt` bleiben eingeschlossen:
-  sie enthalten potentiell persönliche Daten. Restic sichert diese direkt über
-  kleine Übertragungspakete; es gibt kein großes dauerhaftes lokales Exportarchiv.
-  Der temporäre Root-Snapshot wird nach erfolgreichem System-Backup entfernt.
+* **Systemzustand nach Bedarf:** Erst innerhalb eines tatsächlichen System-Backups
+  erstellt der Root-Helfer einen schreibgeschützten Root-Btrfs-Snapshot für
+  `/etc`, `/root`, `/var/lib` und `/var/spool`. Installierte Flatpaks,
+  Nix-Verwaltung, Coredumps und Root-Caches sind von der Übertragung ausgenommen.
+  VM-Zustand und registrierte VM-Datenträger bleiben eingeschlossen. Der
+  temporäre Snapshot wird auch nach Übertragungs-/Prüffehlern entfernt; der
+  lebende Systemzustand bleibt erhalten. Der bisherige 02:30-Timer entfällt: Ein
+  wartender Ganz-Root-Snapshot hatte gelöschte Store-/VM-Blöcke weiter festgehalten.
+  Ein bewusst manuell erstellter Snapshot kann mit
+  `sudo weasel-system-state-export cleanup` wieder entfernt werden.
 * **03:30 Uhr:** persönliches Home inklusive Dokumenten, Quellcode, Git-Historie,
   App-Zustand, Zugangsdaten, lokalen AI-/T3-Verläufen, Spielständen und Mods.
-  Anschließend sichert ein Root-Restic-Prozess den vorbereiteten Systemzustand
-  direkt durch denselben Proton-Transport. Bis zu zehn Minuten Verzögerung;
-  verpasste Läufe werden nachgeholt. Ein fehlender oder mehr als 48 Stunden
-  alter System-Snapshot verhindert einen vollständigen Erfolg. Die
-  Erfolgsmarkierung wird erst nach beiden Datenbeständen und Repository-Check geschrieben.
+  Anschließend sichert ein Root-Restic-Prozess den frisch aufgenommenen
+  Systemzustand direkt durch denselben Proton-Transport. Bis zu zehn Minuten
+  Verzögerung; verpasste Läufe werden nachgeholt. Die Erfolgsmarkierung wird
+  erst nach beiden Datenbeständen und Repository-Check geschrieben.
 * **Ausgenommen:** lokale Snapshots, temporäre Daten, bekannte Caches,
   installierte Steam-Spieldateien, Shadercache, heruntergeladene LM-Studio-Modelle,
   `node_modules`, Rust-Debug-/Release-Artefakte und virtuelle Umgebungen.

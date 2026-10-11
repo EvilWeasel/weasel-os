@@ -17,9 +17,43 @@ STATE = Path('/var/lib/weasel-system-state')
 SNAPSHOT = STATE / 'snapshot'
 
 
+def remove_snapshot():
+    if SNAPSHOT.is_symlink():
+        raise RuntimeError('Unsafe snapshot path')
+    if SNAPSHOT.exists():
+        subprocess.run(['btrfs', 'subvolume', 'delete', str(SNAPSHOT)], check=True)
+    (STATE / 'ready.json').unlink(missing_ok=True)
+
+
+def create_snapshot():
+    with open('/var/lib/weasel-updates/activation.lock', 'a') as activation:
+        fcntl.flock(activation, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        remove_snapshot()
+        subprocess.run(['btrfs', 'subvolume', 'snapshot', '-r', '/', str(SNAPSHOT)], check=True)
+        (STATE / 'ready.json').write_text(json.dumps({'time': time.time()}))
+
+
+def backup_snapshot(restic, env):
+    # A whole-root snapshot pins Nix garbage and obsolete VM/coredump blocks.
+    # Keep it only for the actual upload, including cleanup after upload errors.
+    try:
+        create_snapshot()
+        source = str(SNAPSHOT)
+        command = [restic, '-o', 'rest.connections=1', 'backup', '--host', 'nixy-laptop',
+                   '--tag', 'system-state', '--pack-size', '32']
+        for item in ['var/lib/nix', 'var/lib/flatpak', 'var/lib/systemd/coredump',
+                     'var/lib/weasel-system-state', 'root/.cache', 'root/.npm']:
+            command += ['--exclude', source + '/' + item]
+        command += [source + '/' + item for item in ['etc', 'root', 'var/lib', 'var/spool']]
+        subprocess.run(command, env=env, check=True)
+        subprocess.run([restic, '-o', 'rest.connections=1', 'check'], env=env, check=True)
+    finally:
+        remove_snapshot()
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument('mode', choices=['snapshot', 'backup', 'probe'])
+    p.add_argument('mode', choices=['snapshot', 'backup', 'probe', 'cleanup'])
     p.add_argument('--restic', required=True)
     args = p.parse_args()
     if os.geteuid() != 0:
@@ -30,13 +64,14 @@ def main():
     STATE.mkdir(mode=0o700, exist_ok=True)
     with (STATE / 'snapshot.lock').open('a') as lock:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        if args.mode == 'snapshot':
+        if args.mode == 'cleanup':
             with open('/var/lib/weasel-updates/activation.lock', 'a') as activation:
                 fcntl.flock(activation, fcntl.LOCK_EX | fcntl.LOCK_NB)
-                if SNAPSHOT.exists():
-                    subprocess.run(['btrfs', 'subvolume', 'delete', str(SNAPSHOT)], check=True)
-                subprocess.run(['btrfs', 'subvolume', 'snapshot', '-r', '/', str(SNAPSHOT)], check=True)
-                (STATE / 'ready.json').write_text(json.dumps({'time': time.time()}))
+                remove_snapshot()
+            print('Temporary system-state snapshot removed; live system unchanged')
+            return
+        if args.mode == 'snapshot':
+            create_snapshot()
             print('Readonly system-state snapshot ready; no local data archive created')
             return
         request = json.load(sys.stdin)
@@ -46,11 +81,6 @@ def main():
         password = Path('/home/evilweasel/.local/share/weasel-backup/nixy-laptop-restic-password.txt')
         if password.is_symlink() or password.stat().st_uid != 1000 or password.stat().st_mode & 0o077:
             raise RuntimeError('Unsafe private password file')
-        if not SNAPSHOT.is_dir() or time.time() - json.loads((STATE / 'ready.json').read_text())['time'] > 48 * 3600:
-            raise RuntimeError('System-state snapshot missing or older than 48 hours')
-        properties = subprocess.check_output(['btrfs', 'property', 'get', str(SNAPSHOT), 'ro'], text=True)
-        if properties.strip() != 'ro=true':
-            raise RuntimeError('System-state snapshot must be readonly')
         env = dict(os.environ, RESTIC_REPOSITORY=repo, RESTIC_PASSWORD_FILE=str(password),
                    RESTIC_CACHE_DIR='/var/cache/weasel-backup-root')
         if args.mode == 'probe':
@@ -69,17 +99,7 @@ def main():
                     raise RuntimeError('Private root-state restore proof failed')
             print('Private root-state cloud restore proof passed, including ownership and permissions')
             return
-        source = str(SNAPSHOT)
-        command = [args.restic, '-o', 'rest.connections=1', 'backup', '--host', 'nixy-laptop',
-                   '--tag', 'system-state', '--pack-size', '32']
-        for item in ['var/lib/nix', 'var/lib/flatpak', 'var/lib/systemd/coredump',
-                     'var/lib/weasel-system-state', 'root/.cache', 'root/.npm']:
-            command += ['--exclude', source + '/' + item]
-        command += [source + '/' + item for item in ['etc', 'root', 'var/lib', 'var/spool']]
-        subprocess.run(command, env=env, check=True)
-        subprocess.run([args.restic, '-o', 'rest.connections=1', 'check'], env=env, check=True)
-        subprocess.run(['btrfs', 'subvolume', 'delete', source], check=True)
-        (STATE / 'ready.json').unlink()
+        backup_snapshot(args.restic, env)
         print('Mutable system-state backup completed; temporary root snapshot removed')
 
 
