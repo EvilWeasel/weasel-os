@@ -1229,3 +1229,7 @@ Root independently observed NoNewPrivs 0 and /run/wrappers/bin/sudo -n id -u ret
 
 - Updated existing configured sources: flake.lock, flake.nix, hosts/nixy-laptop/config.nix, modules/apple-silicon-support/packages/asahi-fwextract/default.nix, modules/nixos/roles/openclaw.nix, packages/chatgpt/default.nix, packages/codex-acp.nix, packages/cua-driver-bin.nix, packages/helium/flake.nix, packages/mtcode/default.nix, packages/netbird-bin.nix, packages/netbird-ui-bin.nix, packages/t3code/source.json, packages/tuios-bin.nix, packages/vesktop-bin.nix, packages/wispr-flow/default.nix, profiles/home/laptop.nix, profiles/system/base.nix, profiles/system/laptop.nix.
 - Required before submission: all host evaluations, flake checks, the complete laptop build, changed critical app probes, closure inventory and session preservation. Build, activation and background completion require their own receipts.
+
+### 2026-10-11 — Erhaltene App-Laufzeitdateien vor Storage-Integration
+
+- Sieben aktuelle MIME-/DMS-/Matugen-Dateien unverändert als fokussierten signierten Metadatenstand erhalten; index-only Staging bewahrt Live-Bytes/Inodes/mtime. Keine fremde aktive Quellarbeit in T3 beobachtet. Daten waren bereits im Storage-Branch identisch und durch Laptop-Build sowie isolierten Niri-Parser geprüft. Kein App-Neustart, keine GUI-/Mikrofonaktion.
