@@ -152,8 +152,8 @@ Privater Beleg: `/tmp/weasel-storage26-final-exclusion-proof-20261011.json`;
 Batch `/tmp/weasel-storage26-migration-batch-20261011/receipt.json`;
 Aktivierung `/tmp/weasel-storage26-activation-20261011/receipt.json`.
 Root-Health/Reserve-Dienste Exit0, alle drei neuen Timer aktiv, bekannter alter
-Minuten-Alarmtimer deaktiviert. Geräte-Reserve47GiB, Gesamtfreiraum rund129GiB
-(Reserve darin enthalten), keine aktive Balance und alle Gerätefehlerzähler0.
+Minuten-Alarmtimer deaktiviert. Abschlussmessung: Geräte-Reserve45GiB, Gesamtfreiraum rund127GiB
+(Reserve darin enthalten); Btrfs hat einen weiteren Metadatenbereich angelegt, keine aktive Balance und alle Gerätefehlerzähler0.
 Alte Snapshots behalten ihre alten Cache-Blöcke bis zur regulären Aufbewahrung;
 die Migration ist keine Löschung von 12GiB Nutzdaten. Normales Cache-Löschen als
 UID1000 wurde separat mit einem Wegwerf-Subvolume erfolgreich geprüft.
