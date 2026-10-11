@@ -1,16 +1,15 @@
 # Speicher, Backups und Recovery
 
-Stand: 10. Oktober 2026. Host: `nixy-laptop`. Die Konfiguration liegt in
+Stand: 11. Oktober 2026. Host: `nixy-laptop`. Die Konfiguration liegt in
 `modules/storage-recovery.nix`, `modules/home-snapshots.nix` und
 `programs/cloud-backup.nix`; Backup-Ausnahmen in `config/backup-excludes.txt`.
 
 ## Btrfs-Reserve und Projekt-Ausschlüsse
 
-Die vorbereitete Erweiterung liegt in `modules/btrfs-reserve.nix`,
+Die aktive Erweiterung liegt in `modules/btrfs-reserve.nix`,
 `programs/storage-health.nix` und den beiden `scripts/weasel-*.py`-Helfern.
-Stand dieser Änderung: nach abgeschlossenem 26.05-Update im eigenen Worktree
-an die neue Basis angepasst; noch nicht integriert oder aktiviert. Die folgenden Dienste sind
-erst nach der abgestimmten Integration und Aktivierung verfügbar.
+Nach dem abgeschlossenen 26.05-Update wurde sie integriert und aktiviert.
+Die folgenden Dienste laufen auf dem Laptop; Desktop-Konfiguration unverändert.
 
 `weasel-btrfs-health` misst alle 15 Minuten getrennt Dateisystem-Freiraum,
 unzugewiesenen Geräteplatz, belegte Metadaten und temporäre Reservierungen.
@@ -66,6 +65,10 @@ nicht sofort 12 GiB freien Platz. Ein Werkzeug, das den ganzen Cache-Ordner
 löscht und neu erstellt, kann die Subvolume-Grenze beseitigen. Nach `cargo clean`
 oder einer entsprechenden Neuinstallation erneut inventarisieren und einen
 gegebenenfalls normalen Ordner im ruhenden Zustand erneut migrieren.
+
+Am 11. Oktober wurden alle 24 Verzeichnisse tatsächlich migriert. Ein echter
+read-only Home-Snapshot bestätigte sämtliche Ausschlüsse; die Live-Caches und
+Projektquellen bleiben vorhanden. Aktivierung und Migration sind abgeschlossen.
 
 Die erste Bestandsaufnahme vom 10. Oktober 2026 ergab 24 erkannte Verzeichnisse
 mit nominell 12,37 GiB. Dies ist keine Messung exklusiv freigebbarer Bytes.

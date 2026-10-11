@@ -124,3 +124,43 @@ Main-Fast-forward wurde durch automatische Freigabeprüfung abgewiesen:
 unklare aktuelle Freigabe nach früherer Main-Sperre. Keine Umgehung,
 keine Main-Integration oder Aktivierung. Fertiger Aufgabenbranch bereit
 für explizite Freigabe der Integration; Live-Dateien unverändert erhalten.
+
+
+## Abschluss am 11. Oktober 2026 · tatsächlich live
+
+Die spätere ausdrückliche Nutzerfreigabe umfasst Integration, Aktivierung und
+Projekt-Ausschlüsse; die vorherigen Sperren/Abweisungen oben sind historische
+Belege. Signierte Storage-Quelle `1b1f3d32` ist integriert und normal gepusht.
+Aktive und ausgewählte Laptop26-Closure ist `0qrbxxkxwda0pqyf48lqavj1c46v3asr`.
+Eigene Root-Aktivierung r5 endete Exit0/3.53s, Journal `phase=complete`, Snapshot27.
+Die vorherigen eigenen Fehlversuche sind getrennt erhalten; der relevante
+Busy-Lock-Fehler des Wartungsdienstes wurde eng korrigiert (zehn Tests PASS und
+betroffener Laptop-Build PASS). Keine Desktop-Aktivierung, keine GUI-Eingabe.
+
+Alle 24 inventarisierten, ruhenden Cache-/Build-Verzeichnisse wurden mit
+Pfaderhalt zu verschachtelten Subvolumes migriert: 20 `node_modules` und vier
+Rust-`target`-Verzeichnisse, nominell 13.280.923.648 Bytes / 12,37 GiB. Die
+serielle Hauptmigration dauerte 91,54s; der vorherige Pilot zusätzlich 0,82s.
+Jede Migration hat zwei Prüfsummen-/Metadatenvergleiche und ein privates
+Phasenjournal. Der Pilot wurde unabhängig gegen Recovery-Snapshot27 verglichen
+(Rsync Exit0, keine Unterschiede). Abschließender echter Snapshot29: alle24
+Caches als leere Platzhalter, Live-Caches nicht leer, Projektmanifest vorhanden,
+Snapshot read-only. Eigene temporäre Testsnapshots28/29 nach Beweissicherung
+gezielt entfernt; Recovery26/27 und sämtliche früheren Update-Belege erhalten.
+
+Privater Beleg: `/tmp/weasel-storage26-final-exclusion-proof-20261011.json`;
+Batch `/tmp/weasel-storage26-migration-batch-20261011/receipt.json`;
+Aktivierung `/tmp/weasel-storage26-activation-20261011/receipt.json`.
+Root-Health/Reserve-Dienste Exit0, alle drei neuen Timer aktiv, bekannter alter
+Minuten-Alarmtimer deaktiviert. Geräte-Reserve47GiB, Gesamtfreiraum rund129GiB
+(Reserve darin enthalten), keine aktive Balance und alle Gerätefehlerzähler0.
+Alte Snapshots behalten ihre alten Cache-Blöcke bis zur regulären Aufbewahrung;
+die Migration ist keine Löschung von 12GiB Nutzdaten. Normales Cache-Löschen als
+UID1000 wurde separat mit einem Wegwerf-Subvolume erfolgreich geprüft.
+
+Alle sieben MIME-/DMS-/Farbdateien haben weiterhin dieselben Bytes und Inodes;
+MIME zusätzlich identische mtime. Drei identische Farbdateien erhielten während
+des Rollouts neuere mtimes. Die Launcher-Einträge werden jetzt dauerhaft von
+Home Manager bereitgestellt; keine GUI-Prüfung oder App-Neustarts durchgeführt.
+Die in AGENTS.md ergänzten Regeln für fokussierte Iteration vermeiden redundante
+Prüfrunden und trennen Upgrader-Entwicklung vom eigentlichen Laptop-Upgrade.
