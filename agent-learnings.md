@@ -1285,3 +1285,10 @@ Root independently observed NoNewPrivs 0 and /run/wrappers/bin/sudo -n id -u ret
 - Added an enabled laptop user SSH tunnel to the remote loopback adapter, reusing the existing pinned Hephaestus root identity. The Hermes login key explicitly denies forwarding; preserve that restriction.
 - Imported nixy route now uses the current MT environment and a private scoped session. Other peers are preserved. Verified authenticated private HTTPS and successful non-session-starting voice RPC on both MT backends; S24 microphone/playback and live delegation remain device acceptance work.
 - Verification: Nix syntax and laptop drvPath evaluation; evaluated unit command matches enabled runtime unit. No whole-system activation or main MT/T3 restart.
+
+
+## 2026-10-12 — prepare isolated getent bootstrap and retain MT MIME association
+
+- Separate bootstrap proposal adds only glibc.getent to the updater runtime dependencies; installed glibc.bin does not provide getent, so the fixed Root PATH previously rejected the DNS health probe and rolled back. No verifier, policy, SSH, credentials or gates changed.
+- Preserve the live MT-generated t3code protocol association byte-for-byte. Main has two separately signed source changes since the last active closure; ordinary daily candidate creation correctly requires their separately checked baseline installation.
+- Proposal validation: nix-instantiate --parse modules/daily-updates.nix; full nix flake check --no-write-lock-file (exit 0); Laptop full-system build (exit 0, 10.63s, akap7f0agqrhsw5vgjddq346y86x6jgn); Desktop drvPath eval (exit 0). Independent review confirmed all nine runfiles byte-identical and all three packaged wrappers resolve getent from its immutable separate output. No Main integration or activation at preparation.

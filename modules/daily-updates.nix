@@ -23,6 +23,7 @@ let
     pkgs.util-linux
     pkgs.iproute2
     pkgs.glibc.bin
+    pkgs.glibc.getent
     pkgs.systemd
     pkgs.snapper
     pkgs.btrfs-progs
