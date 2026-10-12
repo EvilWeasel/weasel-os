@@ -87,11 +87,47 @@ def source_checkpoint(runner, repository, receipt):
     return full, index
 
 
-def preflight(runner, receipt, *, repository=a.REPOSITORY, privileged=True):
+def resume_journal(run, receipt, receipt_path, expected_digest):
+    data, _ = a.read_regular(run / "journal.json", maximum=8 * 1024 * 1024, expected_uid=0)
+    record = a.json_object(data)
+    if (not isinstance(expected_digest, str) or not re.fullmatch(r"[0-9a-f]{64}", expected_digest)
+            or a.digest(data) != expected_digest or record.get("marker") != BOOTSTRAP_TAG
+            or record.get("commit") != receipt["commit"] or run.name != receipt["commit"]
+            or record.get("receipt") != str(receipt_path)
+            or record.get("old_system") != receipt["old_system"]
+            or record.get("new_system") != receipt["new_system"]
+            or record.get("phase") != "recovery-required"
+            or record.get("system_rollback") != "complete" or record.get("home_rollback") is not False
+            or type(record.get("snapshot")) is not int or record["snapshot"] <= 0):
+        raise a.RecoveryRequired("Resume must bind the exact reviewed failed bootstrap and complete system rollback")
+    return data, record
+
+
+def check_resume_evidence(runner, run, receipt, record):
+    for name, system in (("old-system", receipt["old_system"]), ("tested-system", receipt["new_system"])):
+        root = run / name
+        if not root.is_symlink() or root.resolve() != Path(system):
+            raise a.RecoveryRequired("Bootstrap rollback/tested closure root changed")
+    snapshot = Path("/home/.snapshots") / str(record["snapshot"]) / "snapshot"
+    runner.root("btrfs", ["subvolume", "show", snapshot])
+    if runner.root("btrfs", ["property", "get", "-ts", snapshot, "ro"]).decode().strip() != "ro=true":
+        raise a.RecoveryRequired("The original bootstrap Home snapshot must remain read-only")
+
+
+def preflight(runner, receipt, *, repository=a.REPOSITORY, privileged=True, resume=None):
     a.check_system(Path(receipt["old_system"]))
     a.check_other_activation()
     if privileged:
-        a.check_recovery(a.STATE, read_only=True)
+        if resume is None:
+            a.check_recovery(a.STATE, read_only=True)
+        else:
+            receipt_path, expected_digest = resume
+            run = a.STATE / "bootstrap" / receipt["commit"]
+            _, record = resume_journal(run, receipt, receipt_path, expected_digest)
+            a.check_recovery(a.STATE, read_only=True, bootstrap_resume=(receipt["commit"], expected_digest))
+            check_resume_evidence(runner, run, receipt, record)
+    elif resume is not None:
+        raise a.ActivationError("Normal-user receipt inspection cannot authorize bootstrap resume")
     a.check_remote(runner, repository, receipt["commit"])
     signed_head(runner, repository, receipt["commit"])
     before = source_checkpoint(runner, repository, receipt)
@@ -147,9 +183,13 @@ def health(runner, receipt):
         raise a.ActivationError("Installed normal-user helper status did not pass")
 
 
-def install(runner, receipt, expected, run, receipt_path, *, repository=a.REPOSITORY):
+def install(runner, receipt, expected, run, receipt_path, *, repository=a.REPOSITORY, resumed=None):
     record = {"schema": 1, "marker": BOOTSTRAP_TAG, "commit": receipt["commit"],
               "old_system": receipt["old_system"], "new_system": receipt["new_system"], "receipt": str(receipt_path)}
+    if resumed is not None:
+        record.update(resumed_from=resumed["journal_sha256"], original_snapshot=resumed["snapshot"],
+                      original_journal=str(resumed["archive"]), snapshot=resumed["snapshot"],
+                      system_rollback="complete", home_rollback=False)
     identifier = "bootstrap-" + receipt["commit"][:12]
     def journal(phase, **fields):
         record.update(phase=phase, **fields)
@@ -177,6 +217,9 @@ def install(runner, receipt, expected, run, receipt_path, *, repository=a.REPOSI
         health(runner, receipt)
         if source_checkpoint(runner, repository, receipt) != expected:
             raise a.ActivationError("Concurrent source save retained during bootstrap")
+        if resumed is not None:
+            record.pop("system_rollback", None)
+            record.pop("home_rollback", None)
         journal("complete")
         a.write_status("installed", identifier, "complete", system=receipt["new_system"], snapshot=number,
                        note="Root activation path verified; daily T3 schedule remains separately controlled")
@@ -191,7 +234,7 @@ def install(runner, receipt, expected, run, receipt_path, *, repository=a.REPOSI
             except Exception as rollback_error:
                 journal("recovery-required", system_rollback="failed", rollback_error=type(rollback_error).__name__, home_rollback=False)
         else:
-            journal("failed-before-integration" if record["phase"] == "bootstrap-preparing" else "recovery-required", error=type(exc).__name__)
+            journal("failed-before-integration" if resumed is None and record["phase"] == "bootstrap-preparing" else "recovery-required", error=type(exc).__name__)
         a.write_status("blocked", identifier, record["phase"], reason=str(exc)[:400])
         raise
 
@@ -229,7 +272,11 @@ def main():
     modes = parser.add_mutually_exclusive_group()
     modes.add_argument("--check", action="store_true", help="Root read-only source and exact-closure validation")
     modes.add_argument("--verify-receipt", action="store_true", help="Normal-user receipt/source inspection; proves no privileged activation")
+    parser.add_argument("--resume", action="store_true", help="Continue only an exactly reviewed, completely rolled-back bootstrap")
+    parser.add_argument("--journal-sha256", help="Exact failed root journal SHA-256; required with --resume")
     args = parser.parse_args()
+    if args.resume != (args.journal_sha256 is not None) or (args.resume and args.verify_receipt):
+        raise a.ActivationError("--resume requires --journal-sha256 and privileged check or execution")
     if os.uname().nodename != a.HOST:
         raise a.ActivationError("Bootstrap belongs to nixy-laptop")
     receipt = load_receipt(args.receipt)
@@ -245,7 +292,8 @@ def main():
     if os.geteuid() != 0:
         raise a.ActivationError("Run the immutable bootstrap wrapper with sudo from the normal host terminal")
     runner = a.Runner()
-    expected = preflight(runner, receipt)
+    resume = (args.receipt, args.journal_sha256) if args.resume else None
+    expected = preflight(runner, receipt, resume=resume)
     if args.check:
         reproduce(runner, receipt, expected)
         print(json.dumps({"schema": 1, "ok": True, "new_system": receipt["new_system"],
@@ -258,16 +306,33 @@ def main():
     try:
         fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
         # State and source may have changed while waiting for the privileged lock.
-        expected = preflight(runner, receipt)
+        expected = preflight(runner, receipt, resume=resume)
         run = parent / receipt["commit"]
         try:
             run.mkdir(mode=0o700)
         except FileExistsError:
             a.ensure_directory(run)
-            previous = retryable_journal(run)
-            a.atomic_write(run / ("failed-attempt-" + uuid.uuid4().hex + ".json"), previous)
+            if resume is None:
+                previous = retryable_journal(run)
+                archive = run / ("failed-attempt-" + uuid.uuid4().hex + ".json")
+            else:
+                previous, prior = resume_journal(run, receipt, args.receipt, args.journal_sha256)
+                archive = run / ("resumed-attempt-" + args.journal_sha256 + ".json")
+                if archive.exists() or archive.is_symlink():
+                    archived, _ = a.read_regular(archive, maximum=8 * 1024 * 1024, expected_uid=0)
+                    if archived != previous:
+                        raise a.RecoveryRequired("The original recovery archive differs from its journal")
+                else:
+                    a.atomic_write(archive, previous)
+            if resume is None:
+                a.atomic_write(archive, previous)
+        else:
+            if resume is not None:
+                raise a.RecoveryRequired("The reviewed failed bootstrap directory disappeared")
         a.sync_directory(parent)
-        result = install(runner, receipt, expected, run, args.receipt)
+        resuming = None if resume is None else {"journal_sha256": args.journal_sha256,
+                                              "snapshot": prior["snapshot"], "archive": archive}
+        result = install(runner, receipt, expected, run, args.receipt, resumed=resuming)
     finally:
         os.close(lock)
     print(json.dumps(result, sort_keys=True))

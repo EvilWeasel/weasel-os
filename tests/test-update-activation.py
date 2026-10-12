@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Failure-path tests for the privileged source transaction; no system activation."""
 import importlib.util
+from contextlib import ExitStack
 import json
 import os
 from pathlib import Path
@@ -830,6 +831,111 @@ for private in [run, run / 'journal.json', workspace]:
         runner.git = substituted
         with self.assertRaisesRegex(activation.ActivationError, "signed content address"):
             activation.tracked_tree(runner, repo, request["baseline_commit"])
+
+
+class BootstrapResumeRecoveryFenceTests(unittest.TestCase):
+    """Private journal fixtures prove that only one reviewed root exception is admitted."""
+
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory(prefix="weasel-resume-recovery-fence-")
+        self.addCleanup(self.temporary.cleanup)
+        self.root = Path(self.temporary.name)
+        self.commit = "a" * 40
+        self.run = self.root / "bootstrap" / self.commit
+        self.run.mkdir(parents=True)
+        self.record = {"marker": "weasel-daily-bootstrap-v1", "commit": self.commit,
+                       "phase": "recovery-required", "system_rollback": "complete",
+                       "home_rollback": False}
+        self.data = activation.encoded(self.record)
+        (self.run / "journal.json").write_bytes(self.data)
+
+    def root_fixture(self, stack):
+        real = activation.read_regular
+        def fixture_read(path, *args, **kwargs):
+            if kwargs.get("expected_uid") == 0:
+                self.assertTrue(Path(path).is_relative_to(self.root))
+                kwargs["expected_uid"] = os.getuid()
+            return real(path, *args, **kwargs)
+        stack.enter_context(patch.object(activation.os, "geteuid", return_value=0))
+        return stack.enter_context(patch.object(activation, "read_regular", side_effect=fixture_read))
+
+    def resume(self, **kwargs):
+        return activation.check_recovery(self.root, read_only=True,
+                         bootstrap_resume=(self.commit, activation.digest(self.data)), **kwargs)
+
+    def test_default_fence_remains_unconditional_and_read_only(self):
+        with self.assertRaises(activation.RecoveryRequired):
+            activation.check_recovery(self.root, read_only=True)
+        self.assertEqual((self.run / "journal.json").read_bytes(), self.data)
+        self.assertEqual(sorted(p.name for p in self.run.iterdir()), ["journal.json"])
+
+    def test_explicit_root_exception_admits_exact_one_and_does_not_relabel_it(self):
+        with ExitStack() as stack:
+            reads = self.root_fixture(stack)
+            self.resume()
+        self.assertEqual(reads.call_args.kwargs["expected_uid"], 0)
+        self.assertEqual((self.run / "journal.json").read_bytes(), self.data)
+        self.assertEqual(json.loads(self.data)["phase"], "recovery-required")
+
+    def test_unprivileged_or_malformed_resume_never_broadens_recovery(self):
+        digest = activation.digest(self.data)
+        with patch.object(activation.os, "geteuid", return_value=1000), self.assertRaises(activation.ActivationError):
+            self.resume()
+        variants = [[self.commit, digest], (self.commit,), (self.commit, digest, "extra"),
+                    ("main", digest), (self.commit, "bad"), (self.commit, "F" * 64),
+                    (self.commit, None), (None, digest)]
+        with ExitStack() as stack:
+            self.root_fixture(stack)
+            for value in variants:
+                with self.subTest(value=value), self.assertRaises(activation.ActivationError):
+                    activation.check_recovery(self.root, read_only=True, bootstrap_resume=value)
+        self.assertEqual((self.run / "journal.json").read_bytes(), self.data)
+
+    def test_wrong_digest_commit_phase_or_rollback_keeps_fence(self):
+        with ExitStack() as stack:
+            self.root_fixture(stack)
+            for value in [(self.commit, "0" * 64), ("b" * 40, activation.digest(self.data))]:
+                with self.subTest(binding=value), self.assertRaises(activation.RecoveryRequired):
+                    activation.check_recovery(self.root, read_only=True, bootstrap_resume=value)
+            for key, value in [("phase", "activating"), ("phase", "complete"),
+                               ("phase", "failed-before-integration"), ("system_rollback", "failed"),
+                               ("system_rollback", None), ("home_rollback", True),
+                               ("home_rollback", 0), ("home_rollback", None)]:
+                raw = activation.encoded(dict(self.record, **{key: value}))
+                (self.run / "journal.json").write_bytes(raw)
+                with self.subTest(key=key, value=value), self.assertRaises(activation.RecoveryRequired):
+                    activation.check_recovery(self.root, read_only=True,
+                                             bootstrap_resume=(self.commit, activation.digest(raw)))
+                self.assertEqual((self.run / "journal.json").read_bytes(), raw)
+
+    def test_other_bootstrap_and_daily_transactions_remain_blocked(self):
+        with ExitStack() as stack:
+            self.root_fixture(stack)
+            for kind in ["bootstrap", "runs"]:
+                parent = self.root / kind
+                parent.mkdir(exist_ok=True)
+                other = parent / ("b" * 40 if kind == "bootstrap" else "20261012T120000Z-1234abcd")
+                other.mkdir()
+                record = {"phase": "recovery-required"}
+                if kind == "bootstrap":
+                    record.update(marker="weasel-daily-bootstrap-v1", commit=other.name,
+                                  system_rollback="complete", home_rollback=False)
+                raw = activation.encoded(record)
+                (other / "journal.json").write_bytes(raw)
+                with self.subTest(kind=kind), self.assertRaises(activation.RecoveryRequired):
+                    self.resume()
+                self.assertEqual((other / "journal.json").read_bytes(), raw)
+                (other / "journal.json").unlink()
+                with self.subTest(kind=kind, missing_journal=True), self.assertRaises(activation.RecoveryRequired):
+                    self.resume()
+                other.rmdir()
+        self.assertEqual((self.run / "journal.json").read_bytes(), self.data)
+
+    def test_resume_journal_uid_is_enforced_without_fixture_owner_substitution(self):
+        if os.getuid() == 0:
+            self.skipTest("Non-root ownership rejection requires normal-user fixtures")
+        with patch.object(activation.os, "geteuid", return_value=0), self.assertRaises(activation.ActivationError):
+            self.resume()
 
 
 if __name__ == "__main__":

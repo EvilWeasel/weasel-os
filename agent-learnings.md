@@ -1292,3 +1292,11 @@ Root independently observed NoNewPrivs 0 and /run/wrappers/bin/sudo -n id -u ret
 - Separate bootstrap proposal adds only glibc.getent to the updater runtime dependencies; installed glibc.bin does not provide getent, so the fixed Root PATH previously rejected the DNS health probe and rolled back. No verifier, policy, SSH, credentials or gates changed.
 - Preserve the live MT-generated t3code protocol association byte-for-byte. Main has two separately signed source changes since the last active closure; ordinary daily candidate creation correctly requires their separately checked baseline installation.
 - Proposal validation: nix-instantiate --parse modules/daily-updates.nix; full nix flake check --no-write-lock-file (exit 0); Laptop full-system build (exit 0, 10.63s, akap7f0agqrhsw5vgjddq346y86x6jgn); Desktop drvPath eval (exit 0). Independent review confirmed all nine runfiles byte-identical and all three packaged wrappers resolve getent from its immutable separate output. No Main integration or activation at preparation.
+
+
+## 2026-10-12 — preserve failed bootstrap and prepare bounded resume
+
+- Approved getent packaging/bootstrap Main751 failed native switch exit4 because a manually enabled MT tunnel wants-symlink was foreign to Home Manager. Root rollback completed, original readonly Snapshot33 and failure journal retained; no update success inferred.
+- Preserved the two manual unit originals and adopted byte-checked immutable HM links. All unit section values and running PID453278/Invocation remain identical; no daemon reload or restart during adoption.
+- Separate helper proposal adds root-only exact journal-SHA resume for the same immutable signed receipt/closure after complete system rollback. Default recovery/retry fences remain; original journal and Snapshot are archived, all existing gates and a fresh Snapshot run, complete requires native exit0+health+unchanged source. Early resumed failures remain recovery-required.
+- Validation: nine existing update/Codex regression groups passed (435 cases, one existing Root-only fixture skipped); focused bootstrap29 cases passed, full Laptop system build exit0, full flakecheck exit0. Independent review found and verified early-failure fence retention and dangling archive rejection. This entry records preparation; deployment and actual recovery remain unperformed.

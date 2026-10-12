@@ -216,6 +216,24 @@ separat sichern bzw. integrieren. Danach einen konkreten Reparaturkandidaten
 bauen und prüfen. Journale nicht einfach löschen oder auf `complete` setzen.
 Der Helper bietet bewusst keinen pauschalen Recovery-/Home-Reset-Befehl.
 
+Eine separat geprüfte Bootstrap-Fortsetzung ist mit `weasel-update-bootstrap
+--receipt IMMUTABLE_RECEIPT --resume --journal-sha256 SHA256` möglich. Die
+Root-Operation akzeptiert ausschließlich das exakte eigene `recovery-required`-
+Journal mit vollständig ausgeführtem Systemrollback und unverändertem Receipt,
+Commit, altem/neuem System, behaltenen Closure-Roots und readonly Original-
+Snapshot. Andere offene Transaktionen bleiben gesperrt. `--check` prüft diese
+Bindungen ohne Aktivierung. Normale User-Receiptprüfung kann keine Fortsetzung
+autorisieren. Default-Updates und normale Bootstrap-Wiederholung behalten ihre
+bisherigen Sperren.
+
+Die Fortsetzung archiviert die ursprünglichen Journalbytes, prüft alle bisherigen
+Quellen-/Signatur-/Remote-/Strom-/Speichergates, erstellt einen frischen
+Home-Snapshot und verlangt erneut nativen Exit 0, Health und unveränderte Quellen.
+Ein früher oder erneuter Resume-Fehler bleibt `recovery-required`; ein alter
+Fehlversuch wird nie durch `failed-before-integration` oder einen anderen
+Commit-Namensraum ersetzt. Ein identisches bereits geschriebenes Root-Archiv
+wird sicher wiederverwendet; veränderte Archive und Symlinks werden abgewiesen.
+
 Der Updater begrenzt ausschließlich seine markierten aufgelösten Kandidaten
 und abgeschlossenen Transaktionen auf drei. Geänderte Originale, offene
 Dateideskriptoren und ungeklärte Transaktionen werden erhalten. Gelöscht werden

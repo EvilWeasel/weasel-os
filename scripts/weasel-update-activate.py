@@ -435,7 +435,17 @@ def check_space(minimum, paths=(Path("/home"), Path("/nix/store"), Path("/var/li
             raise ActivationError("Insufficient filesystem reserve")
 
 
-def check_recovery(state, *, read_only=False):
+def check_recovery(state, *, read_only=False, bootstrap_resume=None):
+    # Only the explicit root bootstrap resume operation can review its own
+    # exact failed journal. Ordinary updates retain the unconditional fence.
+    if bootstrap_resume is not None:
+        if (os.geteuid() != 0 or not isinstance(bootstrap_resume, tuple)
+                or len(bootstrap_resume) != 2
+                or not all(isinstance(value, str) for value in bootstrap_resume)
+                or not re.fullmatch(r"[0-9a-f]{40}|[0-9a-f]{64}", bootstrap_resume[0])
+                or not re.fullmatch(r"[0-9a-f]{64}", bootstrap_resume[1])):
+            raise ActivationError("Bootstrap resume requires root and an exact journal digest")
+    resumed = False
     bootstrap = state / "bootstrap"
     if bootstrap.exists():
         if bootstrap.is_symlink() or not bootstrap.is_dir():
@@ -446,11 +456,21 @@ def check_recovery(state, *, read_only=False):
             journal = path / "journal.json"
             if not journal.exists():
                 raise RecoveryRequired("An interrupted bootstrap requires recovery review")
-            record = json_object(read_regular(journal, maximum=8 * 1024 * 1024)[0])
+            data, _ = read_regular(journal, maximum=8 * 1024 * 1024,
+                                   expected_uid=0 if bootstrap_resume is not None else None)
+            record = json_object(data)
             if record.get("marker") != "weasel-daily-bootstrap-v1" or record.get("commit") != path.name:
                 raise ActivationError("Bootstrap recovery marker mismatch")
             if record.get("phase") not in {"complete", "failed-before-integration"}:
-                raise RecoveryRequired("An earlier bootstrap requires recovery review")
+                if (bootstrap_resume == (path.name, digest(data))
+                        and record.get("phase") == "recovery-required"
+                        and record.get("system_rollback") == "complete"
+                        and record.get("home_rollback") is False):
+                    resumed = True
+                else:
+                    raise RecoveryRequired("An earlier bootstrap requires recovery review")
+    if bootstrap_resume is not None and not resumed:
+        raise RecoveryRequired("The exact rolled-back bootstrap journal is no longer pending")
     runs = state / "runs"
     if not runs.exists():
         return
