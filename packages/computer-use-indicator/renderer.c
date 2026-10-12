@@ -12,12 +12,14 @@
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
+#include "monitor-match.h"
 
 #define LEASE_US (4 * G_USEC_PER_SEC)
 #define MAX_LINE 64
 static GtkWidget *surfaces[5];
 static GdkMonitor *target;
 static GdkRectangle expected;
+static GdkRectangle initial_gdk_geometry;
 static char *output_name, *task_id;
 static gint64 last_heartbeat;
 static gboolean begun, stopped;
@@ -140,8 +142,10 @@ static gboolean timer(gpointer unused) {
     (void)unused;
     GdkRectangle current;
     gdk_monitor_get_geometry(target, &current);
-    if (!target_valid || current.x != expected.x || current.y != expected.y ||
-        current.width != expected.width || current.height != expected.height) {
+    if (!target_valid || current.x != initial_gdk_geometry.x ||
+        current.y != initial_gdk_geometry.y ||
+        current.width != initial_gdk_geometry.width ||
+        current.height != initial_gdk_geometry.height) {
         finish("monitor_changed");
         return G_SOURCE_REMOVE;
     }
@@ -193,10 +197,11 @@ int main(int argc, char **argv) {
     for (int i = 0; i < gdk_display_get_n_monitors(display); i++) {
         GdkMonitor *candidate = gdk_display_get_monitor(display, i);
         GdkRectangle geometry; gdk_monitor_get_geometry(candidate, &geometry);
-        if (geometry.x == expected.x && geometry.y == expected.y &&
-            geometry.width == expected.width && geometry.height == expected.height) {
+        if (monitor_geometry_matches(geometry.x, geometry.y, geometry.width, geometry.height,
+                                     expected.x, expected.y, expected.width, expected.height)) {
             if (target) { fprintf(stderr, "Ambiguous monitor geometry\n"); return 4; }
             target = candidate;
+            initial_gdk_geometry = geometry;
         }
     }
     if (!target) { fprintf(stderr, "No monitor matches selected output geometry\n"); return 4; }

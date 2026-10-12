@@ -15,6 +15,8 @@ stdenv.mkDerivation {
     root = ./.;
     fileset = lib.fileset.unions [
       ./renderer.c
+      ./monitor-match.h
+      ./test-monitor-match.c
       ./indicator.py
     ];
   };
@@ -44,6 +46,13 @@ stdenv.mkDerivation {
       --set WEASEL_INDICATOR_RENDERER "$out/libexec/weasel-computer-use-indicator-renderer" \
       --set WEASEL_INDICATOR_NIRI "${niri}/bin/niri"
     runHook postInstall
+  '';
+  doCheck = true;
+  checkPhase = ''
+    runHook preCheck
+    $CC -std=c11 -O2 -Wall -Wextra -Werror test-monitor-match.c -o test-monitor-match
+    ./test-monitor-match
+    runHook postCheck
   '';
   meta = {
     description = "Click-through, task-owned Wayland Computer Use monitor indicator";

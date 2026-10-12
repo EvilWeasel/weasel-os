@@ -70,7 +70,10 @@ v1 end
 ```
 
 Arguments fix output name, task ID and the freshly obtained Niri logical rectangle
-for the lifetime. Its GDK monitor must match that rectangle uniquely; there is no
+for the lifetime. Its GDK monitor must match that rectangle uniquely; fractional
+scaling may differ by one logical pixel in width or height, while position stays
+exact. Once selected, any change to the original GDK geometry ends the renderer;
+the helper independently requires unchanged Niri geometry. There is no
 default-output fallback. All surfaces begin hidden. A 1-second helper heartbeat
 keeps the renderer alive. The renderer hides on end, EOF, malformed protocol,
 signal, monitor invalidation/layout change, or a heartbeat gap exceeding
