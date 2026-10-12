@@ -1300,3 +1300,8 @@ Root independently observed NoNewPrivs 0 and /run/wrappers/bin/sudo -n id -u ret
 - Preserved the two manual unit originals and adopted byte-checked immutable HM links. All unit section values and running PID453278/Invocation remain identical; no daemon reload or restart during adoption.
 - Separate helper proposal adds root-only exact journal-SHA resume for the same immutable signed receipt/closure after complete system rollback. Default recovery/retry fences remain; original journal and Snapshot are archived, all existing gates and a fresh Snapshot run, complete requires native exit0+health+unchanged source. Early resumed failures remain recovery-required.
 - Validation: nine existing update/Codex regression groups passed (435 cases, one existing Root-only fixture skipped); focused bootstrap29 cases passed, full Laptop system build exit0, full flakecheck exit0. Independent review found and verified early-failure fence retention and dangling archive rejection. This entry records preparation; deployment and actual recovery remain unperformed.
+
+### 2026-10-12 — batch candidate 20261012T115729Z-571105d5
+
+- Updated existing configured sources: flake.lock, flake.nix, packages/t3code/source.json.
+- Required before submission: all host evaluations, flake checks, the complete laptop build, changed critical app probes, closure inventory and session preservation. Build, activation and background completion require their own receipts.
