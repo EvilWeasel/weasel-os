@@ -1278,3 +1278,10 @@ Root independently observed NoNewPrivs 0 and /run/wrappers/bin/sudo -n id -u ret
 - DP-5 at scale 1.5 reports Niri logical width 1706 and GDK width 1707. Exact cross-library geometry matching prevented the task indicator from starting.
 - Accept only a unique monitor at the exact requested position with at most one logical pixel extent difference. Keep subsequent GDK geometry checks exact against its initial rectangle; the helper still detects every Niri layout change.
 - Verified focused Nix package build including observed-geometry regression, 25 indicator lifecycle tests, laptop drvPath evaluation, and live worker ready event plus visible DP-5 indicator. Unrelated mimeapps edits preserved; no system activation performed.
+
+## 2026-10-12 · Hephaestus MT laptop route
+
+- The phone MT import still pointed nixy-laptop at the stopped official T3 environment on port 3774. Its independent active MT environment uses loopback port 3773.
+- Added an enabled laptop user SSH tunnel to the remote loopback adapter, reusing the existing pinned Hephaestus root identity. The Hermes login key explicitly denies forwarding; preserve that restriction.
+- Imported nixy route now uses the current MT environment and a private scoped session. Other peers are preserved. Verified authenticated private HTTPS and successful non-session-starting voice RPC on both MT backends; S24 microphone/playback and live delegation remain device acceptance work.
+- Verification: Nix syntax and laptop drvPath evaluation; evaluated unit command matches enabled runtime unit. No whole-system activation or main MT/T3 restart.

@@ -5,6 +5,22 @@
   ...
 }:
 {
+  # Expose only the laptop's loopback MT server to the private Hephaestus
+  # connection adapter. Reuse the existing pinned SSH host and identity.
+  systemd.user.services.mt-hephaestus-laptop-tunnel = {
+    Unit = {
+      Description = "Private MT Code laptop route for Hephaestus";
+      After = [ "network-online.target" ];
+    };
+    Service = {
+      ExecStart = "${pkgs.openssh}/bin/ssh -NT -o BatchMode=yes -o ExitOnForwardFailure=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=3 -R 127.0.0.1:3879:127.0.0.1:3773 hephaestus-root";
+      Restart = "always";
+      RestartSec = "10s";
+      UMask = "0077";
+    };
+    Install.WantedBy = [ "default.target" ];
+  };
+
   # Keep provider read access separate from the user's existing rules. This
   # does not permit billing, monitors, login, or arbitrary Parallel commands.
   home.file.".codex/rules/parallel-search.rules".source = ./parallel-search.rules;
