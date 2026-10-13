@@ -92,9 +92,9 @@ in
       updater
     ];
     xdg.desktopEntries.t3code-fork = {
-      name = "T3 Code Fork";
+      name = "T3 Code · Morrowbyte";
       exec = "${launcher}/bin/t3code-weasel %U";
-      icon = "applications-development";
+      icon = "${../pictures/t3code-fork.svg}";
       terminal = false;
       categories = [
         "Development"

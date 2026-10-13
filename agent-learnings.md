@@ -1352,3 +1352,8 @@ Root independently observed NoNewPrivs 0 and /run/wrappers/bin/sudo -n id -u ret
 
 - Cold CI follow-up: `flake check --no-build` disallows generated sources beyond the chosen host too; CI now uses ordinary locked flake check. Preserve the existing private transcription/account launcher when present.
 - Owner policy now persists in the shared Codex guidance: Namespace-only builds/full suites, priority tier, concrete measurable goals and one writer per path. Installed verified updater unit files directly for immediate laptop use; first service run succeeded and timer is active. Full NixOS activation was not needed. Existing private launcher remains intact.
+
+## 2026-10-14 — Distinct fork icon and private profile merge
+- Added a native SVG branch icon for the fork and installed it for the existing launcher, preserving its private account/transcription command.
+- Privately merged T3/MT connection catalogs using their existing unlocked keyring keys; route identity includes environment plus connection ID/type, not environment alone. Retained all routes/credentials, validated encrypted roundtrip/reference integrity and preserved both source profiles with backups. Merged settings/keybindings with existing fork customizations taking precedence; instance identity/server exposure was not cloned.
+- Verification: SVG rendered/viewed, private import receipt and source hashes, Nix parse/evaluation for both hosts; full source builds remain on Namespace.
