@@ -12,6 +12,10 @@ on:
         description: Build both host systems after evaluation
         type: boolean
         default: false
+      probe_only:
+        description: Measure runner storage without evaluating or building hosts
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -32,6 +36,8 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
       - name: Restore persistent Nix store
+        # Full system closures plus build temporaries exceed the 50-GB cache.
+        if: github.event_name != 'workflow_dispatch' || !inputs.build
         uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1
         with:
           cache: nix
@@ -41,13 +47,18 @@ jobs:
             experimental-features = nix-command flakes
             max-jobs = 4
             cores = 2
+      - name: Measure runner storage
+        run: |
+          df -h / /nix /tmp
+          df -B1 --output=target,size,used,avail / /nix /tmp
       - name: Evaluate locked flake and host
+        if: github.event_name != 'workflow_dispatch' || !inputs.probe_only
         run: |
           nix eval --no-write-lock-file --raw .#nixosConfigurations.${{ matrix.host }}.config.system.build.toplevel.drvPath > host.drv
           # The flake imports generated sources during evaluation; allow their realization.
           nix flake check --no-write-lock-file
       - name: Inspect and build evaluated host
-        if: github.event_name == 'workflow_dispatch' && inputs.build
+        if: github.event_name == 'workflow_dispatch' && inputs.build && !inputs.probe_only
         run: |
           nix build --dry-run --no-link "$(cat host.drv)^*"
           nix build --no-link --print-build-logs "$(cat host.drv)^*"

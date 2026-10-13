@@ -1361,3 +1361,7 @@ Root independently observed NoNewPrivs 0 and /run/wrappers/bin/sudo -n id -u ret
 - Home Manager adopts the existing `t3code-weasel.desktop` ID, so future activation does not add a fourth launcher. The private CLI wrapper remains the credential/settings owner.
 
 - Follow-up evaluation caught an invalid `xdg.dataFile.force` override: `xdg.desktopEntries` installs package entries, so no dataFile source exists. Removed the override; the shared desktop ID itself prevents duplicate launcher entries. The initial evaluation failure is retained.
+
+## 2026-10-14 — Overnight CI storage diagnosis
+- Both full Namespace host builds evaluated successfully but exhausted the 50-GB Nix cache during realization (desktop substitution alone: 41.8 GiB unpacked, before temporary/output space). Cache-backed evaluation remains enabled; full builds use the runner filesystem instead. Added a bounded storage-only dispatch to measure capacity before retrying compilation, with no purchased storage or laptop fallback.
+- Verification: actionlint and both unchanged host drvPath evaluations; remote probe pending. Original failed run 38484408376 retained.
