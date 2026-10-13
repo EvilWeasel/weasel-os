@@ -160,7 +160,7 @@ no evaluation loop, implicit fetch or activation. Preserve all first errors in
 private cache `r68.log` and `r70.log` plus matching receipts. Future IFD/source
 realization or cache-only evaluation needs an explicit precise reservation.
 
-Current qualification: launch source and closed MCP schema tested; independent
+Qualification at R70 (historical): launch source and closed MCP schema tested; independent
 source review approved; **host evaluation/build and actual merge incomplete**.
 Installed runtime, physical Escape behavior, app readiness/isolation, output
 placement and opened project/file are **not live-accepted**. Any later docs/log
@@ -204,3 +204,62 @@ The corrected gate runs current actor/Niri checks first, then reconstructs and
 compares the filesystem command as its final preparation check; bounded_command
 checks cancellation/epoch/input again before the actual spawn syscall. It does
 not leave a compositor-query wait between target comparison and spawn.
+
+
+### Final corrected source qualification: R76-R79
+
+Root narrow R2 independently APPROVED signed
+`7f139e30d25f4499751ac4fba8608ac38a811a39`, retaining the original R1 approval.
+R76 ran only the changed device-free retarget regression: 1/1 PASS,
+PID 719227, 03:16:51.390-03:16:57.951 UTC, peak 813,924,352 bytes.
+The unchanged schema/launch evidence was reused; the full package checks below
+also cover all current tests.
+
+R77 cache-only laptop evaluation passed on that exact source: PID 722765,
+03:18:32.833-03:19:21.189 UTC, peak 3,679,723,520 bytes. Exact command:
+
+```sh
+nix eval --offline --no-write-lock-file --option allow-import-from-derivation true --option substitute false --option max-jobs 0 --option builders '' --option cores 2 .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath
+```
+
+Actual new host derivation:
+`/nix/store/24bl27jinfc7mxhaaiqg6hgrif3yqx62-nixos-system-nixy-laptop-26.05.20261010.6fcc160.drv`.
+The runner accidentally retained offline/no-substitution options for its initial
+dry plan. That restrictive result is preserved; only the already-authorized
+substitution-aware dry run was then performed, without reevaluation, within the
+same original reservation deadline. PID 726424, 03:20:38.303-03:20:39.203 UTC,
+peak 34,803,712 bytes: 14 actor/HM/system derivations, zero downloads. Integration
+accepted both the evaluation and corrected plan; the command discrepancy is not
+reported as an exact two-command runner PASS.
+
+R79 realized that exact reviewed derivation with:
+
+```sh
+nix build --no-link --option substitute true --option max-jobs 1 --option cores 2 --option builders '' '/nix/store/24bl27jinfc7mxhaaiqg6hgrif3yqx62-nixos-system-nixy-laptop-26.05.20261010.6fcc160.drv^*'
+```
+
+PID/group 737558, 03:26:55.341-03:29:53.345 UTC, 178.004 seconds,
+aggregate owned client plus new daemon-builder descendant peak 1,050,165,248
+bytes, exit 0. Only the reviewed 14 derivations ran. Actor package checkPhase:
+**159 passed, zero failed**, including the retarget barrier regression.
+Built host output:
+`/nix/store/wsvl2x75aklvgqhx3cmkbqxwijkr5qim-nixos-system-nixy-laptop-26.05.20261010.6fcc160`.
+Tracked PID/birth identities and client group were empty at terminal; independent
+PGID inspection also found no client processes. R76/R77/R79 explicitly released.
+Logs and receipts remain under `~/.cache/codex/jarvis-desktop-launch/`; full actor
+log is `/nix/var/log/nix/drvs/a1/j9f2ds89iminq0gb9yqlqwzivsx04z-weasel-computer-use-0.1.0.drv.bz2`.
+
+Source review, focused regression, current full package checks and affected-laptop
+evaluation/build are complete. This evidence commit changes documentation only;
+all `packages/computer-use` bytes remain identical to qualified `7f139e30`.
+No activation, installed actor replacement, GUI, capture, input, microphone,
+service or takeover-marker change occurred. OS spawn ACK remains distinct from
+successful UI verification. Live Escape, app isolation/readiness, project/file
+opening and output placement remain unaccepted.
+
+Follow-on proposals are deliberately outside this source increment: Chrome CDP
+requires fixed loopback/ephemeral debugging plus private-profile PID/endpoint
+provenance; owned Jarvis-window placement requires a separate typed geometry
+action with final actor identity/epoch/input fences. Existing pointer Move does
+not place a window. Both await their next source scope after PR4 merge; neither
+has a physical lease or DP-5 fallback.
