@@ -64,7 +64,9 @@ class IndicatorLifecycle(unittest.TestCase):
             "queued_batches": 0, "actor_release_confirmed": True,
             "task_scope_active": False,
         }
-        self.task_scopes = set()
+        self.task_scopes = {}
+        self.actor_events = []
+        self.drop_begin_ack_once = False
         self.actor_lock = threading.Lock()
         self.receipt_runs = []
         self.control_requests = []
@@ -130,7 +132,8 @@ class IndicatorLifecycle(unittest.TestCase):
                 if request["tool"] != "desktop_indicator_lifecycle":
                     raise AssertionError("unexpected tool instead of lightweight lifecycle")
                 event = request.get("arguments", {}).get("event", "status")
-                task_id = request.get("arguments", {}).get("task_id")
+                arguments = request.get("arguments", {})
+                task_id = arguments.get("task_id")
                 with self.actor_lock:
                     index = len(self.actor_requests)
                     record = {"index":index,"at":time.monotonic(),"tool":request["tool"]}
@@ -138,20 +141,43 @@ class IndicatorLifecycle(unittest.TestCase):
                         self.actor_requests.append(record)
                     plan = dict(self.actor_plan.get(index, {})) if event == "status" else {}
                     state = copy.deepcopy(self.actor_state)
+                    self.actor_events.append(copy.deepcopy(request))
+                    is_error = False
                     if event == "begin":
-                        self.task_scopes.add(task_id)
+                        self.task_scopes[task_id] = {
+                            "scope_token": arguments.get("scope_token"),
+                            "session_id": arguments.get("session_id"),
+                            "expected_epoch": arguments.get("expected_epoch"),
+                        }
                     elif event == "end":
-                        self.task_scopes.discard(task_id)
-                    state["task_scope_active"] = task_id in self.task_scopes
+                        owner = self.task_scopes.get(task_id)
+                        binding = {key: arguments.get(key) for key in ("scope_token", "session_id", "expected_epoch")}
+                        if owner is None:
+                            pass
+                        elif owner == binding:
+                            self.task_scopes.pop(task_id, None)
+                        else:
+                            is_error = True
+                    owner = self.task_scopes.get(task_id)
+                    state["task_scope_active"] = owner == {
+                        "scope_token": arguments.get("scope_token"),
+                        "session_id": arguments.get("session_id"),
+                        "expected_epoch": arguments.get("expected_epoch"),
+                    }
+                    drop_begin_ack = event == "begin" and self.drop_begin_ack_once
+                    if drop_begin_ack:
+                        self.drop_begin_ack_once = False
+                if drop_begin_ack:
+                    return  # actor committed begin; response was lost
                 if plan.get("eof"):
                     return
                 if plan.get("delay"):
                     self.server_stop.wait(plan["delay"])
                 state["actor_active"] = state.pop("active") is not None
-                state["lifecycle_revision"] = 2
+                state["lifecycle_revision"] = 3
                 state["complete"] = True
                 state.update(plan.get("status", {}))
-                response = {"content": [{"type": "text", "text": json.dumps(state)}], "isError": False}
+                response = {"content": [{"type": "text", "text": json.dumps(state)}], "isError": is_error}
                 response.update(plan.get("envelope", {}))
                 packet = plan.get("raw", json.dumps(response).encode() + b"\n")
                 fragments = plan.get("fragments", 1)
@@ -216,6 +242,19 @@ class IndicatorLifecycle(unittest.TestCase):
         self.assertTrue(all(type(x.get("monotonic")) in (float, int) for x in events))
         return ended
 
+    def test_lost_begin_ack_cleanup_uses_exact_owner_and_removes_committed_scope(self):
+        self.drop_begin_ack_once = True
+        process = self.launch()
+        ended = self.ended(process)
+        self.assertEqual(ended["reason"], "capability_unavailable")
+        begin = next(event for event in self.actor_events if event["arguments"].get("event") == "begin")
+        cleanup = next(event for event in self.actor_events if event["arguments"].get("event") == "end")
+        self.assertEqual(self.task_scopes, {}, "the daemon committed begin before the ACK was lost; exact cleanup removed it")
+        for field in ("task_id", "session_id", "expected_epoch", "scope_token"):
+            self.assertEqual(cleanup["arguments"].get(field), begin["arguments"].get(field))
+        self.assertIn("v1 end", [item["line"] for item in self.protocol()], "failed startup still removes the renderer surfaces")
+        self.assertTrue(any(event.get("event") == "task_scope_ended" for event in self.last_events))
+
     def test_thinking_gap_stays_owned_and_explicit_end_cleans(self):
         process = self.launch()
         self.ready(process)
@@ -245,7 +284,7 @@ class IndicatorLifecycle(unittest.TestCase):
         process = self.launch()
         self.ready(process)
         with self.actor_lock:
-            self.task_scopes.discard("fixture-task")
+            self.task_scopes.pop("fixture-task", None)
         self.assertEqual(self.ended(process)["reason"], "actor_task_scope_expired_or_ended")
         self.assertNotIn("v1 heartbeat", [item["line"] for item in self.protocol()])
 

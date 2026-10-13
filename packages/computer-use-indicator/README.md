@@ -95,10 +95,16 @@ The helper registers one actor-owned task scope when its visible indicator
 starts and closes it on normal end, disconnect, stop or expiry. That scope
 keeps physical Escape effective across model-thinking gaps. The fixed 20-minute
 scope is never renewed; expiry only drops stale scope ownership and cannot
-resume any task. The helper reads the actor's internal
-`desktop_indicator_lifecycle` contract, revision 2 with `complete=true`:
-session, cancellation epoch, takeover latch, active flag, task-scope state,
-queue count and confirmed release. It excludes full `last_result`,
+resume any task. A resume warning returns an ownership `scope_token`; pass it
+to `run --scope-token` with that exact task ID. Ordinary new tasks may omit the
+option and the helper creates a fresh token. Each `desktop_act` call must carry
+the indicator's exact task ID; multiple batches within that scope remain
+allowed. The helper reads the actor's internal
+`desktop_indicator_lifecycle` contract, revision 3 with `complete=true`:
+session, cancellation epoch, task ID and owner token, takeover latch, active
+flag, task-scope state, queue count and confirmed release. Begin, status and end
+are bound to the exact session/epoch/token tuple; an uncertain begin ACK still
+attempts matching cleanup. It excludes full `last_result`,
 images, display modes and capture/input-readiness inventories. Unknown endpoint,
 revision, incomplete or malformed replies fail closed; there is no full-status
 fallback. This endpoint is internal, not another agent action tool.

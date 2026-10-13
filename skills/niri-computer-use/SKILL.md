@@ -82,13 +82,17 @@ task-owned Computer Use indicator scope is open, Esc cancels the whole task and
 persists `physical_escape`, including across backend restart. Only a newly and
 explicitly requested Computer Use task with a fresh task ID may clear that
 cause. The first current session/epoch-bound `desktop_resume` returns a visible
-2-second warning; wait the reported interval, then retry once with the same
-task ID and binding. Use that exact fresh task ID to start the task indicator.
+2-second warning and a unique ownership token; wait the reported interval, then
+retry once with the same task ID and session/epoch binding. Start the task
+indicator with that exact task ID and returned `--scope-token`. Include the same
+task ID on every `desktop_act` request; multiple action batches may share the
+same live task scope, while an older, ended, reused or mismatched ID is refused.
 Esc during that warning aborts and retains the stop.
 Released controls, the quiet-input gate and a fresh observation remain
 required. A backend restart alone never
 clears the cause. `explicit_desktop_takeover` remains a separate stronger stop
-that waits for the user's return of control. Older `physical_input_activity`
+that waits for the user's return of control and cannot use the physical-Escape
+re-arm binding. Older `physical_input_activity`
 markers remain preserved across upgrade and keep their explicit resume
 requirement; ordinary input under the new policy does not create them.
 Controlled evdev simulation is test evidence only.

@@ -18,17 +18,21 @@ does not latch a takeover or persist a marker. An in-scope Esc advances the
 cancel epoch immediately, stops preparation and queued actions, releases owned
 keys/buttons, and persists `physical_escape`. Completed/partial effects remain
 reported and are never replayed. A real explicit desktop takeover remains a
-separate, stronger persistent stop.
+separate, stronger persistent stop and has higher cause priority than a later
+Escape.
 
 The indicator opens an actor-owned task scope when it begins and closes it on
 end, disconnect, stop or lease expiry. Its fixed 20-minute bound is not renewed;
 expiry only drops stale scope ownership and never resumes work. A latched
 `physical_escape` can be cleared only by a fresh, explicitly requested Computer
 Use task with a new task ID and current backend session/epoch binding. The first
-resume call returns a visible two-second `rearm_warning`; wait that interval and
-retry once with the same task ID and binding. Esc during the warning keeps or
-refreshes the stop. A successful resume binds the indicator scope to the new
-task before clearing the old stop; start the indicator with that same task ID.
+resume call returns a visible two-second `rearm_warning` and a unique
+`scope_token`; wait that interval and retry once with the same task ID and
+binding. Esc during the warning keeps or refreshes the stop. A successful
+resume binds the indicator scope to the new task before clearing the old stop;
+start the indicator with that task ID and returned `--scope-token`. Include the
+same task ID on every `desktop_act` call. A live indicator permits multiple
+batches for its one task; stale, ended, reused or mismatched IDs are refused.
 Resume also requires released controls and
 the existing 300 ms quiet gate, and always requires a fresh observation before
 input. Explicit takeover
@@ -297,8 +301,10 @@ idle Esc invalidates old observations without latching the actor.
 Synthetic agent Escape for dialogs does not trigger physical abort. Check
 confirmed input release; completed effects persist. A latched physical Escape
 can be cleared only for a newly requested task after its 2-second warning,
-current session/epoch binding and quiet/released gates; then obtain a fresh
-observation. An explicit takeover still requires the user's return of control.
+current session/epoch binding and quiet/released gates; use the returned
+`scope_token` with the indicator and the task ID with every action. An explicit
+takeover still requires the user's return of control and cannot use the
+physical-Escape re-arm path.
 Repair only this owned backend; do not
 restart T3, the compositor or foreign clients as chaos tests.
 

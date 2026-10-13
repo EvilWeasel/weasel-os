@@ -5,8 +5,10 @@ const MAX_MARKER: u64 = 16_384;
 static CAUSE_SERIAL: AtomicU64 = AtomicU64::new(1);
 fn source_priority(source: &str) -> Option<u8> {
     match source {
+        // Explicit takeover is the strongest live cause. A later Escape still
+        // cancels/invalidate work, but may not downgrade this return-of-control gate.
+        "explicit_desktop_takeover" => Some(5),
         "physical_escape" => Some(4),
-        "explicit_desktop_takeover" => Some(3),
         "physical_input_activity" => Some(2),
         "controlled_evdev_simulation" => Some(1),
         "backend_startup" => Some(0),
@@ -204,7 +206,7 @@ impl Latch {
         // for audit without inviting clients to treat it as an active latch.
         let reason = self.marker_active.then_some(&self.reason);
         let last_reason = (!self.marker_active).then_some(&self.reason);
-        json!({"reason":reason,"last_reason":last_reason,"marker_path":self.path,"marker_active":self.marker_active,"persistence_error":self.persistence_error,"backend_restart_requires_explicit_resume":true,"cause_preservation":"Active physical Escape dominates explicit takeover, legacy, simulation and startup; active explicit takeover dominates legacy, simulation and startup. Each accepted new stop has a new cause identity. Cleared history never prevents a new stop.","resume_policy":"Startup, physical Escape, explicit takeover and legacy persisted causes require user-authorized resume with actor released and physical input quiet. Ordinary activity never creates a marker. last_reason is historical and never authorizes or requires a transition."})
+        json!({"reason":reason,"last_reason":last_reason,"marker_path":self.path,"marker_active":self.marker_active,"persistence_error":self.persistence_error,"backend_restart_requires_explicit_resume":true,"cause_preservation":"Active explicit desktop takeover dominates physical Escape, legacy, simulation and startup; active physical Escape dominates legacy, simulation and startup. Each accepted new stop has a new cause identity. Cleared history never prevents a new stop.","resume_policy":"Startup, physical Escape, explicit takeover and legacy persisted causes require user-authorized resume with actor released and physical input quiet. Ordinary activity never creates a marker. last_reason is historical and never authorizes or requires a transition."})
     }
 }
 #[cfg(test)]
@@ -259,7 +261,6 @@ mod tests {
             "controlled_evdev_simulation",
             "backend_startup",
             "physical_input_activity",
-            "explicit_desktop_takeover",
         ] {
             assert!(
                 !latch.set(lower, "test-session").unwrap(),
@@ -281,6 +282,28 @@ mod tests {
                 .session_id,
             "current-session"
         );
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn r9_explicit_and_escape_preserve_the_stronger_explicit_cause_in_both_orders() {
+        let dir = env::temp_dir().join(format!("weasel-r9-precedence-{}", std::process::id()));
+        private_dir(&dir).unwrap();
+        let path = dir.join("takeover.json");
+        let mut latch = Latch::startup(path.clone(), "precedence-session").unwrap();
+        latch.set("explicit_desktop_takeover", "precedence-session").unwrap();
+        let explicit = fs::read(&path).unwrap();
+        assert!(!latch.set("physical_escape", "precedence-session").unwrap());
+        assert_eq!(latch.reason.source, "explicit_desktop_takeover");
+        assert_eq!(fs::read(&path).unwrap(), explicit);
+
+        latch.clear().unwrap();
+        latch.set("physical_escape", "precedence-session").unwrap();
+        latch.set("explicit_desktop_takeover", "precedence-session").unwrap();
+        assert_eq!(latch.reason.source, "explicit_desktop_takeover");
+        let explicit = fs::read(&path).unwrap();
+        assert!(!latch.set("physical_escape", "precedence-session").unwrap());
+        assert_eq!(latch.reason.source, "explicit_desktop_takeover");
+        assert_eq!(fs::read(&path).unwrap(), explicit);
         fs::remove_dir_all(dir).unwrap();
     }
     #[test]

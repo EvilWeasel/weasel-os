@@ -14,6 +14,7 @@ import os
 from pathlib import Path
 import re
 import selectors
+import secrets
 import signal
 import socket
 import stat
@@ -27,7 +28,7 @@ MAX_RUNTIME_SECONDS = 20 * 60
 POLL_SECONDS = 0.1
 STATUS_TIMEOUT_SECONDS = 0.3
 MAX_STATUS_BYTES = 16 * 1024
-LIFECYCLE_REVISION = 2
+LIFECYCLE_REVISION = 3
 STATUS_FRESH_SECONDS = POLL_SECONDS + STATUS_TIMEOUT_SECONDS
 IDENTIFIER = re.compile(r"[A-Za-z0-9_.-]{1,128}\Z")
 
@@ -138,10 +139,12 @@ def actor_call(actor_socket, tool, arguments):
     return result
 
 
-def desktop_lifecycle(actor_socket, task_id=None, event="status", binding=None):
+def desktop_lifecycle(actor_socket, task_id=None, event="status", binding=None, scope_token=None):
     arguments = {"event": event}
     if task_id:
         arguments["task_id"] = task_id
+    if scope_token is not None:
+        arguments["scope_token"] = scope_token
     if binding is not None:
         arguments["session_id"] = binding["session_id"]
         arguments["expected_epoch"] = binding["epoch"]
@@ -151,7 +154,7 @@ def desktop_lifecycle(actor_socket, task_id=None, event="status", binding=None):
 
 class LifecycleProbe:
     """Exactly one nonblocking read; main-loop end/owner events remain reachable."""
-    def __init__(self, selector, actor_socket, task_id):
+    def __init__(self, selector, actor_socket, task_id, binding, scope_token):
         self.selector = selector
         self.stream = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.stream.setblocking(False)
@@ -159,7 +162,7 @@ class LifecycleProbe:
         self.deadline = self.started + STATUS_TIMEOUT_SECONDS
         self.sent = 0
         self.buffer = bytearray()
-        self.request = json.dumps({"tool":"desktop_indicator_lifecycle","arguments":{"event":"status","task_id":task_id}}, separators=(",", ":")).encode() + b"\n"
+        self.request = json.dumps({"tool":"desktop_indicator_lifecycle","arguments":{"event":"status","task_id":task_id,"session_id":binding["session_id"],"expected_epoch":binding["epoch"],"scope_token":scope_token}}, separators=(",", ":")).encode() + b"\n"
         self.closed = False
         try:
             result = self.stream.connect_ex(str(actor_socket))
@@ -283,10 +286,11 @@ def run(args):
     owned_lease_identity = None
     old_signals = {}
     probe = None
-    scope_begun = False
+    scope_begin_attempted = False
+    scope_token = args.scope_token or secrets.token_urlsafe(32)
     stop_signal = [None]
     metadata = {
-        "revision": REVISION, "task_id": args.task_id, "output": args.output,
+        "revision": REVISION, "task_id": args.task_id, "scope_token": scope_token, "output": args.output,
         "pid": os.getpid(), "start_ticks": process_start_ticks(os.getpid()),
         "owner_pid": owner_pid, "owner_start_ticks": owner_ticks,
         "actor_session_id": initial["session_id"], "actor_epoch": initial["epoch"],
@@ -320,8 +324,10 @@ def run(args):
             selector.register(sys.stdin, selectors.EVENT_READ, "stdin")
         for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
             old_signals[signum] = signal.signal(signum, lambda received, _frame: stop_signal.__setitem__(0, received))
-        desktop_lifecycle(actor_socket, args.task_id, "begin", initial)
-        scope_begun = True
+        # Set before sending: the actor can commit begin and then lose the ACK.
+        # Finally must still attempt exact-owner cleanup in that ambiguous case.
+        scope_begin_attempted = True
+        desktop_lifecycle(actor_socket, args.task_id, "begin", initial, scope_token)
         renderer.stdin.write("v1 begin\n")
         renderer.stdin.flush()
         emit("starting", task_id=args.task_id, output=args.output, pid=os.getpid(), geometry=geometry)
@@ -452,7 +458,7 @@ def run(args):
                 timeout_retry = 0
                 next_poll = now + POLL_SECONDS
             if probe is None and now >= next_poll:
-                probe = LifecycleProbe(selector, actor_socket, args.task_id)
+                probe = LifecycleProbe(selector, actor_socket, args.task_id, initial, scope_token)
                 last_valid_at = None  # no renewal while authority is unknown
             if probe is None and now >= next_geometry:
                 new_geometry, new_logical = selected_geometry(args.output)
@@ -481,12 +487,16 @@ def run(args):
         cleanup_started = time.monotonic()
         if probe is not None:
             probe.close()
-        if scope_begun:
+        if scope_begin_attempted:
             try:
-                desktop_lifecycle(actor_socket, args.task_id, "end")
-                emit("task_scope_ended", task_id=args.task_id)
+                ended = desktop_lifecycle(actor_socket, args.task_id, "end", initial, scope_token)
+                if ended["task_scope_active"]:
+                    raise CapabilityError("actor did not confirm exact task scope end")
+                emit("task_scope_ended", task_id=args.task_id, session_id=initial["session_id"], epoch=initial["epoch"])
             except (OSError, ValueError, CapabilityError):
-                emit("task_scope_end_unconfirmed", task_id=args.task_id)
+                # The actor-side task scope remains fail-closed; never report an
+                # idle/ended task when exact ownership cleanup was uncertain.
+                emit("task_scope_end_unconfirmed", task_id=args.task_id, session_id=initial["session_id"], epoch=initial["epoch"], fail_closed=True)
         # Closing the owned pipe hides the renderer even if writing end fails.
         if renderer:
             try:
@@ -533,6 +543,7 @@ def main():
     commands = parser.add_subparsers(dest="command", required=True)
     runner = commands.add_parser("run", help="foreground task-owned indicator; use an owned exec session")
     runner.add_argument("--task-id", required=True)
+    runner.add_argument("--scope-token", help="ownership token returned by desktop_resume for physical-Escape re-arm")
     runner.add_argument("--output", required=True)
     runner.add_argument("--owner-pid", type=int)
     runner.add_argument("--owner-start-ticks", type=int)

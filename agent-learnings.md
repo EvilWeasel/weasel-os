@@ -1236,6 +1236,11 @@ Root independently observed NoNewPrivs 0 and /run/wrappers/bin/sudo -n id -u ret
 - Updated existing configured sources: flake.lock, flake.nix, hosts/nixy-laptop/config.nix, modules/apple-silicon-support/packages/asahi-fwextract/default.nix, modules/nixos/roles/openclaw.nix, packages/chatgpt/default.nix, packages/codex-acp.nix, packages/cua-driver-bin.nix, packages/helium/flake.nix, packages/mtcode/default.nix, packages/netbird-bin.nix, packages/netbird-ui-bin.nix, packages/t3code/source.json, packages/tuios-bin.nix, packages/vesktop-bin.nix, packages/wispr-flow/default.nix, profiles/home/laptop.nix, profiles/system/base.nix, profiles/system/laptop.nix.
 - Required before submission: all host evaluations, flake checks, the complete laptop build, changed critical app probes, closure inventory and session preservation. Build, activation and background completion require their own receipts.
 
+### 2026-10-13 — scoped Escape follow-up review corrections
+
+- Explicit takeover now outranks physical Escape. Action admission binds to the one live indicator task ID, permits multiple batches in that same scope, and tombstones action-only IDs. Resume warning publication and ID reservation serialize with cancellation. Indicator begin/end/status now bind session, epoch and owner token; cleanup is attempted even when begin ACK is lost. Corrected test fixtures to mutate `Arc<State>` before sharing.
+- Validation: offline locked Cargo core suite passed 169/169 with the cached gcc wrapper and scoped review target; indicator suite passed 27/27; Rust syntax parse, `git diff --check`, and required Laptop drvPath evaluation passed (`/nix/store/ibm3yrl1y9yj0zx0si3jcixn4d8ih2b2-nixos-system-nixy-laptop-26.05.20261012.7993f34.drv`). No runtime deployment or GUI acceptance.
+
 ### 2026-10-13 — scope physical Escape to active Computer Use
 
 - Physical Escape outside queued/preparing/running work or the exact task-indicator scope now only advances input generation; in-scope Escape cancels by epoch, clears that old scope, releases through the actor cleanup path, and preserves its restart-persistent cause. The revision-2 indicator scope stays live across model gaps and has a fixed nonrenewing 20-minute bound.
