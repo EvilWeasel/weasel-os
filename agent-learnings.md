@@ -1305,3 +1305,5 @@ Root independently observed NoNewPrivs 0 and /run/wrappers/bin/sudo -n id -u ret
 
 - Updated existing configured sources: flake.lock, flake.nix, packages/t3code/source.json.
 - Required before submission: all host evaluations, flake checks, the complete laptop build, changed critical app probes, closure inventory and session preservation. Build, activation and background completion require their own receipts.
+
+- 2026-10-13: Added closed Jarvis launch/project/file actions inside the shared desktop actor with fresh private profiles, canonical file containment and explicit OS-spawn/uncertain receipts; post-focus/launch capture checks DP-6/eDP-1 before capture. The ordinary MCP action schema has a <5000-byte budget: shorten redundant prose, preserve tagged fields/enums. Focused offline Cargo launch tests passed 9/9 and action_schema_contract_tests 4/4; Root source review approved 000c438. Laptop `nix eval --no-write-lock-file ...config.system.build.toplevel.drvPath` with IFD disabled stopped at the existing Wispr helper source; no host build or runtime acceptance claimed. R65-R70 receipts and errors retained in the launch handoff.

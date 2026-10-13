@@ -125,3 +125,44 @@ bytes. Schema-only suite again passed 3/failed 1: actual schema 5,286 bytes.
 Exit 101 preserved in private `r66.log`/`r66-receipt.json`; group empty and
 reservation released. No launch repeat or Nix/runtime call. The next description
 reduction is source-derived at 4,895 bytes before requesting the compiler gate.
+
+### R67-R70 and independent source review
+
+R67: exact `000c438fd49ed53e5367a6510a5be4d82cdfb108`, schema-only Cargo suite
+4/4 PASS; PID/group 670251, 02:47:20.432-02:47:23.510 UTC, peak 690,556,928 bytes.
+The actual Rust schema gate confirms <5000 bytes (source reconstruction: 4895).
+No unchanged launch test repeat. All relevant process groups were independently
+absent and their reservations explicitly released.
+
+Root's independent actor-launch R1 review APPROVED the exact `000c438` source,
+including actor fencing, isolation/path guards, receipts, schema and protected
+post-capture behavior. [Draft PR4](https://github.com/EvilWeasel/weasel-os/pull/4)
+is linked to the launch thread and Root's review child, never persistent Root.
+
+R68: exact laptop evaluation with command-local
+`allow-import-from-derivation=false`, PID/group 672234,
+02:48:35.484-02:49:04.129 UTC, peak 2,196,045,824 bytes, exit 1. Evaluation stopped
+at the existing Wispr Flow helper v0.1.2 fixed-output source derivation
+`/nix/store/h030ihxjb913mgcnp431kxq410ss3i21-source.drv^out`.
+No host drv returned; the subsequent host dry run did not execute.
+
+R69: single fixed-output source dry run, PID/group 677688,
+02:51:34.788-02:51:34.902 UTC, peak 13,062,144 bytes, exit 0. Empty plan: no work
+proposed. Plain filesystem inspection confirms its expected Store source directory
+exists; normalized Store timestamps cannot establish when/how it was installed.
+No source fetch or realization was performed by this writer.
+
+R70: one separately granted cached-source laptop eval retry retaining the same
+no-IFD guard, PID/group 680572, 02:53:35.656-02:53:57.631 UTC,
+peak 2,200,383,488 bytes, exit 1. Same guard refusal despite source presence.
+No host drv/dry-run/build result. Host validation is handed to Root/Integration;
+no evaluation loop, implicit fetch or activation. Preserve all first errors in
+private cache `r68.log` and `r70.log` plus matching receipts. Future IFD/source
+realization or cache-only evaluation needs an explicit precise reservation.
+
+Current qualification: launch source and closed MCP schema tested; independent
+source review approved; **host evaluation/build and actual merge incomplete**.
+Installed runtime, physical Escape behavior, app readiness/isolation, output
+placement and opened project/file are **not live-accepted**. Any later docs/log
+commit reuses these unchanged source/test identities and must not trigger a new
+unchanged broad review or test matrix.
