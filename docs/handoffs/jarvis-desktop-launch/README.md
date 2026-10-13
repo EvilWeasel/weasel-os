@@ -199,3 +199,8 @@ regression reproduces the old-argv escape while the new request remains inside
 its temporary project, and requires zero fake executor effects. No new policy
 framework or wire change. PR4 remains draft: new correction needs one focused
 source review/regression and affected-host validation, not old-pin PASS claims.
+
+The corrected gate runs current actor/Niri checks first, then reconstructs and
+compares the filesystem command as its final preparation check; bounded_command
+checks cancellation/epoch/input again before the actual spawn syscall. It does
+not leave a compositor-query wait between target comparison and spawn.

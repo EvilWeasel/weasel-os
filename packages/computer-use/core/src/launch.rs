@@ -285,10 +285,10 @@ mod command_tests {
                 let result = dispatch(&mut receipt, || Ok(()), |gate, receipt| {
                     barrier.wait(); // prepared command, before the actual commit gate
                     barrier.wait();
+                    gate()?;
                     let current = command_plan(App::Zed, &profile,
                         vec![root.clone(), project_path(&root, Some("requested.rs"))?])?;
                     prepared.require_same_target(&current)?;
-                    gate()?;
                     effects.fetch_add(1, Ordering::SeqCst);
                     receipt.commit(123);
                     Ok(())
