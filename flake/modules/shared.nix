@@ -9,13 +9,34 @@ let
     import nixpkgsInput {
       inherit system;
       config.allowUnfree = true;
+      overlays = [
+        (final: prev: {
+          # Nixpkgs 1f4c563e fixes only this incorrect pnpm fetcher hash.
+          # Retire the override when the configured channel carries that fix.
+          typescript-language-server =
+            let
+              package = prev.typescript-language-server;
+            in
+            if
+              package.version == "6.0.2"
+              && package.pnpmDeps.outputHash == "sha256-MUSxDMlbG21KSesGdEvqa2kEpuVfLlXRUX1qV/FGsSo="
+            then
+              package.overrideAttrs (old: {
+                pnpmDeps = old.pnpmDeps.overrideAttrs (_: {
+                  outputHash = "sha256-xR/EF60lVBsITKgH7wCM2wHM46PFQevD51KfCENSUH4=";
+                });
+              })
+            else
+              package;
+        })
+      ];
     };
 in
 {
   _module.args = {
     inherit mkPkgs;
     inherit hostRegistry;
-    mkHost = import ../../lib/mk-host.nix { inherit inputs; };
+    mkHost = import ../../lib/mk-host.nix { inherit inputs mkPkgs; };
     mkDevEnvironment =
       system:
       let

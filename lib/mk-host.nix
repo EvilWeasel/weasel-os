@@ -1,4 +1,4 @@
-{ inputs }:
+{ inputs, mkPkgs }:
 {
   hostName,
   class,
@@ -12,10 +12,7 @@ inputs.nixpkgs.lib.nixosSystem {
 
   specialArgs =
     let
-      pkgsUnstable = import inputs.nixpkgs-unstable {
-        inherit system;
-        config.allowUnfree = true;
-      };
+      pkgsUnstable = mkPkgs inputs.nixpkgs-unstable system;
     in
     {
       inherit inputs pkgsUnstable username;
@@ -28,10 +25,7 @@ inputs.nixpkgs.lib.nixosSystem {
     {
       nixpkgs.config.allowUnfree = true;
       home-manager.extraSpecialArgs = {
-        pkgsUnstable = import inputs.nixpkgs-unstable {
-          inherit system;
-          config.allowUnfree = true;
-        };
+        pkgsUnstable = mkPkgs inputs.nixpkgs-unstable system;
         inherit inputs username;
         host = hostName;
       };

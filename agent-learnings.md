@@ -1314,3 +1314,8 @@ Root independently observed NoNewPrivs 0 and /run/wrappers/bin/sudo -n id -u ret
 - Preserve current MIME association and Zed UI-generated settings byte-for-byte in the isolated baseline snapshot. No provider, model, credentials, access or app process was selected or changed by the updater.
 - Main includes the merged, already-tested Jarvis desktop-launch increment while current/profile still reproduce the preceding daily batch. Qualify the exact new baseline through the existing protected bootstrap before ordinary candidate preparation; no helper or gate changes.
 - Reuse the documented actor159-test and full Laptop build evidence only when the exact current derivation matches. Fresh Laptop evaluation, substitution-aware dry plan and cached realization bind this snapshot; activation needs its own immutable receipt and readonly Home snapshot.
+
+### 2026-10-13 — batch candidate 20261013T103836Z-0a4b72a1
+
+- Updated existing configured sources: flake.lock, flake/modules/shared.nix, lib/mk-host.nix, packages/t3code/source.json, profiles/system/base.nix.
+- Required before submission: all host evaluations, flake checks, the complete laptop build, changed critical app probes, closure inventory and session preservation. Build, activation and background completion require their own receipts.

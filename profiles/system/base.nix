@@ -10,7 +10,7 @@
 }:
 let
   dankGreeterModule = builtins.fetchurl {
-    url = "https://raw.githubusercontent.com/AvengeMedia/dank-greeter/a91ca2ad486bfc25bd23f624c542d695c2dfb8b8/distro/nix/greeter.nix";
+    url = "https://raw.githubusercontent.com/AvengeMedia/dank-greeter/3a38384124dc770a660007235049294d20636159/distro/nix/greeter.nix";
     sha256 = "9055f860ab31aae88b9a71af6528f78dea4ca71364538e11a315c0aff78634a6";
   };
   inherit (import ../../hosts/${host}/variables.nix) keyboardLayout;
