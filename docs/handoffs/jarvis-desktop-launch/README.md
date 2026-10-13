@@ -116,3 +116,12 @@ Process group independently empty; reservation explicitly released. No retry
 or Nix/runtime/device call under R65. Follow-up shortens only schema prose,
 preserving action fields/enums/semantics and adding a byte-count failure diagnostic.
 Launch execution source and its passing test evidence are unchanged.
+
+### R66 schema receipt
+
+Frozen signed `bf3b3c53f0a114185be9dc3433799e1c34b1ca32`, PID/group 668187,
+02:46:17.245 to 02:46:21.639 UTC, 4.39 seconds, peak aggregate RSS 734,547,968
+bytes. Schema-only suite again passed 3/failed 1: actual schema 5,286 bytes.
+Exit 101 preserved in private `r66.log`/`r66-receipt.json`; group empty and
+reservation released. No launch repeat or Nix/runtime call. The next description
+reduction is source-derived at 4,895 bytes before requesting the compiler gate.
