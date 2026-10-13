@@ -63,6 +63,14 @@ pub fn capability() -> Value {
     json!({"revision":REVISION,"implemented":true,"standalone":true,"apps":["zed","chrome"],"projects":["jarvis"],"outputs":["DP-6","eDP-1"],"pinned_binaries_present":{"zed":executable(ZED)&&executable(ZED_APP),"chrome":executable(CHROME)},"isolation":"fresh private user-data-dir per action; Zed --new --foreground, Chrome --new-window","spawn_ack_is_ui_success":false,"uncertain_after_spawn_requires_verification":true,"automatic_retry":false,"live_isolation_attested":false})
 }
 pub struct Plan { pub program: &'static str, pub args: Vec<String> }
+impl Plan {
+    pub fn require_same_target(&self, current: &Self) -> R<()> {
+        if self.program != current.program || self.args != current.args {
+            return Err("Launch command target changed during preparation; no spawn, reobserve".into());
+        }
+        Ok(())
+    }
+}
 pub fn plan(request: Request<'_>, profile: &Path) -> R<Plan> {
     let app = match request { Request::App(app) => app, _ => App::Zed };
     let program = match app { App::Zed => ZED, App::Chrome => CHROME };
@@ -254,4 +262,56 @@ mod command_tests {
             assert!(!args.iter().any(|a| a.contains("YouTube") || a.contains("Alarm") || a.contains("reserved") || a == "--reuse"));
         }
     }
+    #[test]
+    fn retargeted_file_precommit_rejects_stale_argv_without_spawning() {
+        use std::{sync::{Arc, Barrier, atomic::{AtomicUsize, Ordering}}, thread};
+        let root = std::env::temp_dir().join(format!("launch-retarget-{}", std::process::id()));
+        fs::create_dir(&root).unwrap();
+        fs::write(root.join("old.rs"), "first").unwrap();
+        fs::write(root.join("new.rs"), "second").unwrap();
+        std::os::unix::fs::symlink("old.rs", root.join("requested.rs")).unwrap();
+        let profile = root.join("private-profile");
+        let prepared = command_plan(App::Zed, &profile,
+            vec![root.clone(), project_path(&root, Some("requested.rs")).unwrap()]).unwrap();
+        let barrier = Arc::new(Barrier::new(2));
+        let effects = Arc::new(AtomicUsize::new(0));
+        let worker = {
+            let root = root.clone();
+            let profile = profile.clone();
+            let barrier = barrier.clone();
+            let effects = effects.clone();
+            thread::spawn(move || {
+                let mut receipt = Receipt::default();
+                let result = dispatch(&mut receipt, || Ok(()), |gate, receipt| {
+                    barrier.wait(); // prepared command, before the actual commit gate
+                    barrier.wait();
+                    let current = command_plan(App::Zed, &profile,
+                        vec![root.clone(), project_path(&root, Some("requested.rs"))?])?;
+                    prepared.require_same_target(&current)?;
+                    gate()?;
+                    effects.fetch_add(1, Ordering::SeqCst);
+                    receipt.commit(123);
+                    Ok(())
+                });
+                (result, receipt)
+            })
+        };
+        barrier.wait();
+        // A changed request can pass containment while the old argv filename
+        // now escapes. The final gate must validate the command actually sent.
+        fs::remove_file(root.join("requested.rs")).unwrap();
+        std::os::unix::fs::symlink("new.rs", root.join("requested.rs")).unwrap();
+        fs::remove_file(root.join("old.rs")).unwrap();
+        std::os::unix::fs::symlink("/etc/passwd", root.join("old.rs")).unwrap();
+        assert!(project_path(&root, Some("requested.rs")).is_ok());
+        assert!(project_path(&root, Some("old.rs")).is_err());
+        barrier.wait();
+        let (result, receipt) = worker.join().unwrap();
+        assert!(result.unwrap_err().contains("target changed"));
+        assert_eq!(effects.load(Ordering::SeqCst), 0);
+        assert!(!receipt.spawn_committed && !receipt.spawn_acknowledged);
+        assert_eq!(fs::read_to_string(root.join("new.rs")).unwrap(), "second");
+        fs::remove_dir_all(root).unwrap();
+    }
+
 }

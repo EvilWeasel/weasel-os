@@ -1767,7 +1767,8 @@ fn execute_launch(state: &State, obs: &Observation, request: launch::Request<'_>
         let result = bounded_command_with_launch(state, plan.program, &plan.args, None,
             remaining_timeout(Duration::from_secs(3)), Some(epoch), Some((&mut || {
                 // Recheck filesystem containment immediately before spawn too.
-                launch::plan(request, &profile.path)?;
+                let current = launch::plan(request, &profile.path)?;
+                plan.require_same_target(&current)?;
                 gate()
             }, receipt)));
         profile.committed = receipt.spawn_committed;

@@ -166,3 +166,36 @@ Installed runtime, physical Escape behavior, app readiness/isolation, output
 placement and opened project/file are **not live-accepted**. Any later docs/log
 commit reuses these unchanged source/test identities and must not trigger a new
 unchanged broad review or test matrix.
+
+### R71-R73 and focused precommit target correction
+
+R71, rebound to signed docs-only `83858d720db4604ff8044b2446feaa1214921ae4`
+(package code identical to `000c438`), passed cache-only laptop evaluation and
+no-substitution planning. PID 684580, 02:56:07.627-02:56:52.494 UTC,
+peak 3,679,875,072 bytes. CLI IFD=true, offline, substitute=false, max-jobs=0,
+builders empty: no realization/network. Actual host drv:
+`/nix/store/r612i9svkifizpdqf8xaahrh4181rsdz-nixos-system-nixy-laptop-26.05.20261010.6fcc160.drv`.
+The no-substitute plan's 1074 builds were not permission to build blindly.
+
+R72 substitution-aware dry run of that exact drv passed: PID 688513,
+02:58:37.347-02:58:40.449 UTC, peak 35,323,904 bytes. Actual plan: 77 derivations
+(crate fetch/unpack/vendor, actor, small HM/system outputs) and 99 substituted
+paths, 7.9 MiB download/45.2 MiB unpacked. No bootstrap compilation proposed.
+
+R73 realized that reviewed exact closure, no activation: PID 692239,
+03:01:30.328-03:04:25.365 UTC, 175.04 seconds, aggregate owned client plus NEW
+Nix-daemon descendant peak 1,132,482,560 bytes, exit 0. Tracked PID/birth identities
+and client group were empty at terminal release; no unrelated daemon/builder
+was killed. Actor package checkPhase passed **158 tests**. Built host output:
+`/nix/store/76a5h5qpfyixmp1yda8ranvzvrx8f8fw-nixos-system-nixy-laptop-26.05.20261010.6fcc160`.
+These are historical PASS results for `83858d7`/`000c438`, not the correction below.
+
+Final source inspection found a preparation mismatch: the last containment check
+reconstructed a fresh Plan but discarded it; initial canonical argv could differ
+if a request symlink retargeted while its old target became an escaping symlink.
+The focused correction compares the actual prepared command against the fresh
+Plan before spawn and rejects any changed program/argv. A device-free barrier
+regression reproduces the old-argv escape while the new request remains inside
+its temporary project, and requires zero fake executor effects. No new policy
+framework or wire change. PR4 remains draft: new correction needs one focused
+source review/regression and affected-host validation, not old-pin PASS claims.
