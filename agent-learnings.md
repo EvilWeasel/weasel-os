@@ -1359,3 +1359,5 @@ Root independently observed NoNewPrivs 0 and /run/wrappers/bin/sudo -n id -u ret
 - Verification: SVG rendered/viewed, private import receipt and source hashes, Nix parse/evaluation for both hosts; full source builds remain on Namespace.
 
 - Home Manager adopts the existing `t3code-weasel.desktop` ID, so future activation does not add a fourth launcher. The private CLI wrapper remains the credential/settings owner.
+
+- Follow-up evaluation caught an invalid `xdg.dataFile.force` override: `xdg.desktopEntries` installs package entries, so no dataFile source exists. Removed the override; the shared desktop ID itself prevents duplicate launcher entries. The initial evaluation failure is retained.

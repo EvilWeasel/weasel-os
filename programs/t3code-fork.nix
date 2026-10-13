@@ -101,8 +101,6 @@ in
         "IDE"
       ];
     };
-    # Adopt the existing installer desktop ID, avoiding a duplicate fork entry.
-    xdg.dataFile."applications/t3code-weasel.desktop".force = true;
     systemd.user.services.t3code-fork-update = lib.mkIf cfg.autoUpdate {
       Unit.Description = "Prepare the next T3 Code fork release without restarting sessions";
       Service = {
