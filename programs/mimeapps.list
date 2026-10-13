@@ -59,4 +59,4 @@ image/png=imv-dir.desktop;
 x-scheme-handler/http=zen.desktop;
 x-scheme-handler/https=zen.desktop;
 x-scheme-handler/chrome=zen.desktop;
-x-scheme-handler/t3code=mtcode.desktop;
+x-scheme-handler/t3code=mtcode.desktop;com.t3tools.T3Code.desktop;
