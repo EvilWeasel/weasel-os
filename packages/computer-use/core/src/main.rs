@@ -1,6 +1,7 @@
 mod global_keyboard;
 mod image_reference;
 mod input_policy;
+mod launch;
 mod mcp_cancel_registry;
 mod mcp_response;
 mod release_recovery;
@@ -151,6 +152,9 @@ enum KeyScope {
 #[derive(Debug, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 enum Action {
+    LaunchApp { app: launch::App },
+    EditorOpenProject { project: launch::Project },
+    EditorOpenFile { project: launch::Project, relative_path: String },
     Focus {
         window_id: u64,
     },
@@ -224,6 +228,9 @@ fn default_restore_clipboard() -> bool {
 impl Action {
     fn name(&self) -> &'static str {
         match self {
+            Self::LaunchApp { .. } => "launch_app",
+            Self::EditorOpenProject { .. } => "editor_open_project",
+            Self::EditorOpenFile { .. } => "editor_open_file",
             Self::Focus { .. } => "focus",
             Self::CloseWindow { .. } => "close_window",
             Self::Move { .. } => "move",
@@ -237,6 +244,14 @@ impl Action {
             Self::SemanticClick { .. } => "semantic_click",
             Self::SemanticFocus { .. } => "semantic_focus",
             Self::Wait { .. } => "wait",
+        }
+    }
+    fn launch(&self) -> Option<launch::Request<'_>> {
+        match self {
+            Self::LaunchApp { app } => Some(launch::Request::App(*app)),
+            Self::EditorOpenProject { project } => Some(launch::Request::Project(*project)),
+            Self::EditorOpenFile { project, relative_path } => Some(launch::Request::File(*project, relative_path)),
+            _ => None,
         }
     }
     fn pointer(&self) -> bool {
@@ -593,12 +608,24 @@ fn bounded_command(
     timeout: Duration,
     epoch: Option<u64>,
 ) -> R<Vec<u8>> {
+    bounded_command_with_launch(state, program, args, input, timeout, epoch, None)
+}
+
+fn bounded_command_with_launch(
+    state: &State,
+    program: &str,
+    args: &[String],
+    input: Option<&[u8]>,
+    timeout: Duration,
+    epoch: Option<u64>,
+    mut launch: Option<(&mut dyn FnMut() -> R<()>, &mut launch::Receipt)>,
+) -> R<Vec<u8>> {
     check_epoch(state, epoch)?;
     let mut cmd = Command::new(program);
     // wl-copy intentionally forks a persistent selection owner. Its child keeps
     // inherited output FDs, so pipe EOF is not an acknowledgement of the setter.
     // This command has no consumed output; ordinary commands retain drained pipes.
-    let background_output = program == "wl-copy";
+    let background_output = program == "wl-copy" || launch.is_some();
     cmd.args(args)
         .env_remove("NO_AT_BRIDGE")
         .env_remove("ELECTRON_RUN_AS_NODE")
@@ -618,10 +645,35 @@ fn bounded_command(
         } else {
             Stdio::piped()
         });
+    if launch.is_some() {
+        // Fixed removals avoid host/CLI mode injection into the isolated app.
+        cmd.env_remove("LD_LIBRARY_PATH").env_remove("ZED_ASKPASS_SOCKET");
+    }
+    if let Some((gate, _)) = launch.as_mut() {
+        gate()?;
+    }
+    // Command construction or capability checks can wait. Fence the actual
+    // spawn, not just entry into this helper.
+    check_epoch(state, epoch)?;
     let mut child = cmd
         .spawn()
         .map_err(|e| format!("{program} unavailable: {e}"))?;
     let pid = child.id();
+    if let Some((_, receipt)) = launch {
+        receipt.commit(pid);
+        // Once spawn succeeded, any cancellation/failure is uncertain. Kill
+        // only this owned group; never find or kill a shared application PID.
+        if let Err(error) = check_epoch(state, epoch) {
+            unsafe { libc::kill(-(pid as i32), libc::SIGKILL); }
+            let _ = child.kill();
+            let _ = child.wait();
+            return Err(error);
+        }
+        // A GUI process has no bounded exit ACK. Return its OS spawn receipt
+        // and reap it independently; continued GUI success needs fresh proof.
+        thread::spawn(move || { let _ = child.wait(); });
+        return Ok(Vec::new());
+    }
     let writer = if let Some(bytes) = input {
         let mut p = child.stdin.take().ok_or("Missing child stdin")?;
         let bytes = bytes.to_vec();
@@ -887,6 +939,15 @@ fn preflight(obs: &Observation, action: &Action) -> R<()> {
         }
         _ => {}
     }
+    if action.launch().is_some() {
+        launch::allowed_output(&obs.output)?;
+        if obs.focus_output.as_deref() != Some(obs.output.as_str()) {
+            return Err("Launch requires the observed focused output; no spawn".into());
+        }
+        if let Action::EditorOpenFile { relative_path, .. } = action {
+            launch::relative_path(relative_path)?;
+        }
+    }
     match action {
         Action::Click{button:b,count,..}=>{button(b)?;if count.is_some_and(|n|n==0||n>3){return Err("Click count must be 1..3; no input sent".into());}},
         Action::Scroll{dx,dy,..} if (*dx==0&&*dy==0)||dx.unsigned_abs()>100||dy.unsigned_abs()>100=>return Err("Scroll needs a nonzero dx/dy within -100..100 wheel steps; no input sent".into()),
@@ -1095,6 +1156,9 @@ fn observation_input_readiness(state: &State, input_generation: u64) -> Value {
     json!({"input_ready":input_ready,"action_ready":action_ready,"current_input_generation":current_generation,"input_activity_during_capture":current_generation!=input_generation,"fresh_observation_required_for_input":!action_ready,"takeover_latched":takeover,"note":"Image remains available for reasoning during ordinary activity or held controls. Input readiness is a snapshot, not input permission; desktop_act always freshly revalidates the original generation, released controls, focus and target."})
 }
 fn observe_inner(state: &State, args: &Value, actor_held: bool) -> R<Value> {
+    observe_inner_guarded(state, args, actor_held, false)
+}
+fn observe_inner_guarded(state: &State, args: &Value, actor_held: bool, allowed_output_only: bool) -> R<Value> {
     let start = Instant::now();
     let epoch = state.epoch.load(Ordering::SeqCst);
     record(state, "observe_request", json!({"epoch":epoch}));
@@ -1127,6 +1191,14 @@ fn observe_inner(state: &State, args: &Value, actor_held: bool) -> R<Value> {
             })
         })
         .ok_or("No enabled Niri output")?;
+    if allowed_output_only {
+        launch::allowed_output(&name)?;
+        let focused_output = workspaces.as_array().and_then(|ws| ws.iter().find(|w| w["is_focused"] == true))
+            .and_then(|w| w["output"].as_str());
+        if focused_output != Some(name.as_str()) {
+            return Err("Post-launch/focus output changed; no capture, verify allowed output explicitly".into());
+        }
+    }
     let geometry = outputs[&name]["logical"].clone();
     if !geometry.is_object() {
         return Err("Requested output unavailable or disabled".into());
@@ -1165,7 +1237,7 @@ fn observe_inner(state: &State, args: &Value, actor_held: bool) -> R<Value> {
     } else {
         image.clone()
     };
-    let data = json!({"schema":1,"observation_id":id,"epoch":epoch,"input_generation":input_generation,"input_policy":state.input_policy.status(state.last_human_ms.load(Ordering::SeqCst)),"global_keyboard":global_keyboard_capability(),"observed_unix_ms":SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis(),"monotonic_ms":state.started.elapsed().as_secs_f64()*1000.0,"monotonic_system_ms":system_monotonic_ms(),"expires_after_ms":60000,"desktop":"niri-wayland","focused_window":focus,"windows":windows,"workspaces":workspaces,"outputs":outputs,"capture":{"output":name,"path":image,"mime_type":"image/png","image_width":width,"image_height":height,"scale":1,"coordinate_frame":"output-local screenshot pixels; origin top-left; dimensions are actual PNG dimensions and may differ by rounding from Niri logical size","output_logical":geometry},"capabilities":{"capture":true,"window_focus":true,"window_close_request":close_window_capability(),"pointer":"wlr_virtual_pointer_v2","keyboard":{"shortcuts":"app shortcuts: persistent canonical German evdev Wayland keyboard; keymap refreshed before every chord. key_scope=compositor or chords containing Super/meta/logo use an owned Linux uinput device so Niri compositor bindings can process them; permission/monitor/device-open failures refuse before any batch input. Device creation is a capability side effect; open/write acknowledgement is not UI success","unicode_text":{"auto":"plain clipboard for known Electron app IDs or >1000characters; wtype for shorter text in other apps","keyboard_limit_characters":1000,"max_text_utf8_bytes":65536,"electron_keyboard":"known unreliable due physical DomCode and supplementary Unicode; explicit override requires app-specific proof"}},"clipboard":{"backend":"Rust wlr-data-control helper with an owned user scope","plain_text_restore":"best effort; source ownership checked, no atomic selection CAS; skipped after cancel/takeover","rich_or_nontext_restore":"supported bounded MIME payloads including HTML, COMPOUND_TEXT and original Chromium metadata; no portal handles/password hints","rich_preserve_request":"snapshot same offer before replacement; unknown/oversized/sensitive formats refuse","ignored_transport_mimes":["SAVE_TARGETS","GTK_TEXT_BUFFER_CONTENTS"],"holder_lifetime":"separate user scope; source replacement or graphical session shutdown","potential_change_reported_on_failure":true},"semantic_tree":"desktop_semantic: read-only Cua application/PID tree; unique window inventory mapping does not attest node window scope; Cua bounds are not screenshot coordinates","takeover":"physical Escape or explicit takeover latches; ordinary physical activity only invalidates targets and stops a conflicting batch without task cancellation; fresh observe then deliberate continuation"},"timing_ms":{"capture":capture_start.elapsed().as_secs_f64()*1000.0,"observe_total":start.elapsed().as_secs_f64()*1000.0}});
+    let data = json!({"schema":1,"observation_id":id,"epoch":epoch,"input_generation":input_generation,"input_policy":state.input_policy.status(state.last_human_ms.load(Ordering::SeqCst)),"global_keyboard":global_keyboard_capability(),"observed_unix_ms":SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis(),"monotonic_ms":state.started.elapsed().as_secs_f64()*1000.0,"monotonic_system_ms":system_monotonic_ms(),"expires_after_ms":60000,"desktop":"niri-wayland","focused_window":focus,"windows":windows,"workspaces":workspaces,"outputs":outputs,"capture":{"output":name,"path":image,"mime_type":"image/png","image_width":width,"image_height":height,"scale":1,"coordinate_frame":"output-local screenshot pixels; origin top-left; dimensions are actual PNG dimensions and may differ by rounding from Niri logical size","output_logical":geometry},"capabilities":{"capture":true,"window_focus":true,"window_close_request":close_window_capability(),"desktop_launch":launch::capability(),"pointer":"wlr_virtual_pointer_v2","keyboard":{"shortcuts":"app shortcuts: persistent canonical German evdev Wayland keyboard; keymap refreshed before every chord. key_scope=compositor or chords containing Super/meta/logo use an owned Linux uinput device so Niri compositor bindings can process them; permission/monitor/device-open failures refuse before any batch input. Device creation is a capability side effect; open/write acknowledgement is not UI success","unicode_text":{"auto":"plain clipboard for known Electron app IDs or >1000characters; wtype for shorter text in other apps","keyboard_limit_characters":1000,"max_text_utf8_bytes":65536,"electron_keyboard":"known unreliable due physical DomCode and supplementary Unicode; explicit override requires app-specific proof"}},"clipboard":{"backend":"Rust wlr-data-control helper with an owned user scope","plain_text_restore":"best effort; source ownership checked, no atomic selection CAS; skipped after cancel/takeover","rich_or_nontext_restore":"supported bounded MIME payloads including HTML, COMPOUND_TEXT and original Chromium metadata; no portal handles/password hints","rich_preserve_request":"snapshot same offer before replacement; unknown/oversized/sensitive formats refuse","ignored_transport_mimes":["SAVE_TARGETS","GTK_TEXT_BUFFER_CONTENTS"],"holder_lifetime":"separate user scope; source replacement or graphical session shutdown","potential_change_reported_on_failure":true},"semantic_tree":"desktop_semantic: read-only Cua application/PID tree; unique window inventory mapping does not attest node window scope; Cua bounds are not screenshot coordinates","takeover":"physical Escape or explicit takeover latches; ordinary physical activity only invalidates targets and stops a conflicting batch without task cancellation; fresh observe then deliberate continuation"},"timing_ms":{"capture":capture_start.elapsed().as_secs_f64()*1000.0,"observe_total":start.elapsed().as_secs_f64()*1000.0}});
     check_epoch(state, Some(epoch))?;
     if focused(&niri_epoch(state, "windows", Some(epoch))?)
         .as_ref()
@@ -1642,6 +1714,70 @@ fn semantic_target(state: &State, obs: &Observation, handle: &str) -> R<Semantic
     Ok(target)
 }
 
+fn validate_launch_inventory(obs: &Observation, windows: &Value, workspaces: &Value, outputs: &Value) -> R<()> {
+    launch::allowed_output(&obs.output)?;
+    if obs.focus_output.as_deref() != Some(obs.output.as_str())
+        || focused(windows).as_ref().map(identity) != obs.focused_window.as_ref().map(identity) {
+        return Err("Launch focus identity/output changed; no spawn, reobserve".into());
+    }
+    let focused_workspaces = workspaces.as_array().ok_or("Launch workspace inventory unavailable")?
+        .iter().filter(|w| w["is_focused"] == true).collect::<Vec<_>>();
+    if focused_workspaces.len() != 1 { return Err("Launch active workspace is ambiguous; no spawn".into()); }
+    let workspace = focused_workspaces[0];
+    let expected_window = obs.focused_window.as_ref().and_then(|w| w["id"].as_u64());
+    if workspace["output"].as_str() != Some(obs.output.as_str()) || workspace["is_active"] != true
+        || workspace["active_window_id"].as_u64() != expected_window
+        || obs.focused_window.as_ref().is_some_and(|w| w["workspace_id"] != workspace["id"])
+        || outputs[&obs.output]["logical"] != obs.output_geometry || !obs.output_geometry.is_object() {
+        return Err("Launch observed active workspace/output geometry changed; no spawn".into());
+    }
+    Ok(())
+}
+fn validate_launch_state(state: &State, obs: &Observation, epoch: u64) -> R<()> {
+    validate_launch_state_with_inventory(state, obs, epoch, || Ok((
+        niri_epoch(state, "windows", Some(epoch))?,
+        niri_epoch(state, "workspaces", Some(epoch))?,
+        niri_epoch(state, "outputs", Some(epoch))?,
+    )))
+}
+fn validate_launch_state_with_inventory(state: &State, obs: &Observation, epoch: u64,
+    inventory: impl FnOnce() -> R<(Value, Value, Value)>) -> R<()> {
+    check_epoch(state, Some(epoch))?;
+    validate_retained_observation(state, obs)?;
+    validate_focus_state(state, obs)?;
+    let monitor = state.human_monitor.lock().map_err(|_| "Human monitor status poisoned")?;
+    if monitor["available"] != true || monitor["watched_devices"].as_u64().unwrap_or(0) == 0 || monitor["status"] == "starting" {
+        return Err("Launch capability unavailable: physical Escape monitor is not ready; no spawn".into());
+    }
+    drop(monitor);
+    let (windows, workspaces, outputs) = inventory()?;
+    validate_launch_inventory(obs, &windows, &workspaces, &outputs)?;
+    check_epoch(state, Some(epoch))
+}
+fn execute_launch(state: &State, obs: &Observation, request: launch::Request<'_>, epoch: u64, details: &mut Value) -> R<()> {
+    let mut receipt = launch::Receipt::default();
+    let mut profile_path = None;
+    let result = launch::dispatch(&mut receipt, || validate_launch_state(state, obs, epoch), |gate, receipt| {
+        let path = state.image_dir.join(format!("launch-{}", state.serial.fetch_add(1, Ordering::SeqCst)));
+        // Validate trusted binary/project/path before creating even the profile.
+        let plan = launch::plan(request, &path)?;
+        gate()?;
+        let mut profile = launch::Profile::create(path)?;
+        profile_path = Some(profile.path.clone());
+        let result = bounded_command_with_launch(state, plan.program, &plan.args, None,
+            remaining_timeout(Duration::from_secs(3)), Some(epoch), Some((&mut || {
+                // Recheck filesystem containment immediately before spawn too.
+                launch::plan(request, &profile.path)?;
+                gate()
+            }, receipt)));
+        profile.committed = receipt.spawn_committed;
+        result.map(|_| ())
+    });
+    *details = json!({"launch_revision":launch::REVISION,"spawn":receipt,"profile":profile_path,
+        "ui_success":null,"automatic_retry":false,"verification":"OS spawn receipt only; verify fresh owned PID/profile/window/output. Any failure after spawn is uncertain and must not be automatically retried."});
+    result
+}
+
 fn execute(
     state: &State,
     obs: &Observation,
@@ -1682,6 +1818,9 @@ fn execute(
         .map_err(|e| e.to_string())
     };
     match action {
+        Action::LaunchApp { .. } | Action::EditorOpenProject { .. } | Action::EditorOpenFile { .. } => {
+            execute_launch(state, obs, action.launch().unwrap(), epoch, details)?;
+        }
         Action::Focus { window_id } => {
             bounded_command(
                 state,
@@ -2037,6 +2176,9 @@ fn act_inner(state: &State, args: &Value, epoch: u64) -> R<Value> {
                 .into(),
         );
     }
+    if parsed.actions.iter().any(|a| a.launch().is_some()) && parsed.actions.len() != 1 {
+        return Err("Launch actions must be standalone; obtain a fresh observation before further actions".into());
+    }
     if let Some(window_id) = parsed.actions.iter().find_map(|action| match action {
         Action::CloseWindow { window_id } => Some(*window_id),
         _ => None,
@@ -2186,7 +2328,13 @@ fn act_inner(state: &State, args: &Value, epoch: u64) -> R<Value> {
             if let Action::CloseWindow { window_id } = action {
                 validate_close_target(state, &obs, *window_id)?;
             }
-            if !matches!(action, Action::Focus { .. } | Action::Wait { .. }) {
+            if action.launch().is_some() {
+                if parsed.window_id.is_some() && parsed.window_id != obs.focused_window.as_ref().and_then(|w| w["id"].as_u64()) {
+                    return Err("Launch top-level window_id does not match retained focus; no spawn".into());
+                }
+                validate_launch_state(state, &obs, epoch)?;
+            }
+            if action.launch().is_none() && !matches!(action, Action::Focus { .. } | Action::Wait { .. }) {
                 validate(state, &obs, parsed.window_id, action.pointer())?;
             }
             if action.pointer() {
@@ -2202,7 +2350,7 @@ fn act_inner(state: &State, args: &Value, epoch: u64) -> R<Value> {
             execute(state, &obs, &mut ptr, action, epoch, &mut details)
         })();
         let ok = result.is_ok();
-        effects.push(json!({"kind":action.name(),"dispatch_started":dispatched,"acknowledged":ok,"may_have_partial_effects":!ok && dispatched && !matches!(action,Action::Wait{..}),"details":details,"visual_guard":guard,"dispatch_ack_ms":step.elapsed().as_secs_f64()*1000.0}));
+        effects.push(json!({"kind":action.name(),"dispatch_started":dispatched,"acknowledged":ok,"may_have_partial_effects":!ok && if action.launch().is_some() { details["spawn"]["spawn_committed"] == true } else { dispatched && !matches!(action,Action::Wait{..}) },"details":details,"visual_guard":guard,"dispatch_ack_ms":step.elapsed().as_secs_f64()*1000.0}));
         record(
             state,
             "action",
@@ -2284,10 +2432,10 @@ fn act_inner(state: &State, args: &Value, epoch: u64) -> R<Value> {
             .any(|a| matches!(a, Action::Focus { .. }))
         {
             observe_args["output"] = json!(obs.output);
-            if obs.view.x != 0
+            if !parsed.actions.iter().any(|a| a.launch().is_some()) && (obs.view.x != 0
                 || obs.view.y != 0
                 || obs.view.width != obs.image_width
-                || obs.view.height != obs.image_height
+                || obs.view.height != obs.image_height)
             {
                 observe_args["crop"] = json!(obs.view);
             }
@@ -2297,7 +2445,8 @@ fn act_inner(state: &State, args: &Value, epoch: u64) -> R<Value> {
         let settle_started = Instant::now();
         let settled = delay(state, epoch, parsed.settle_ms);
         settle_wait_ms = settle_started.elapsed().as_secs_f64() * 1000.0;
-        match settled.and_then(|_| observe_inner(state, &observe_args, true)) {
+        let allowed_output_only = parsed.actions.iter().any(|a| a.launch().is_some() || matches!(a, Action::Focus { .. }));
+        match settled.and_then(|_| observe_inner_guarded(state, &observe_args, true, allowed_output_only)) {
             Ok(v) => after = Some(v),
             Err(e) => after_error = Some(e),
         }
@@ -2312,7 +2461,7 @@ fn act_inner(state: &State, args: &Value, epoch: u64) -> R<Value> {
             json!({"task_id":task,"completed_actions":completed,"expected_generation":obs.input_generation,"current_generation":state.input_policy.generation(),"actor_release_confirmed":cleanup_ok,"automatic_replay":false}),
         );
     }
-    let mut data = json!({"schema":1,"task_id":task,"status":if canceled{"canceled"}else if input_conflict{"input_conflict"}else if failure.is_some(){"failed"}else{"dispatched"},"input_conflict":input_conflict,"expected_input_generation":obs.input_generation,"input_generation":state.input_policy.generation(),"fresh_observation_required":input_conflict,"takeover_latched":state.takeover.load(Ordering::SeqCst),"automatic_replay":false,"completed_actions":completed,"requested_actions":parsed.actions.len(),"effects":effects,"error":failure,"actor_release_confirmed":cleanup_ok,"timing_ms":{"dispatch_and_release":dispatch_ms,"post_action_settle_wait":settle_wait_ms,"post_observe":after_start.elapsed().as_secs_f64()*1000.0},"total_ms":start.elapsed().as_secs_f64()*1000.0,"after_observation_error":after_error,"verification":"Input acknowledgement only. after_observation is fresh evidence to inspect, not inferred UI success. Verify the expected UI state or independent artifact before reporting success."});
+    let mut data = json!({"schema":1,"task_id":task,"observation_id":obs.id,"accepted_actions":args["actions"],"status":if canceled{"canceled"}else if input_conflict{"input_conflict"}else if failure.is_some(){"failed"}else{"dispatched"},"input_conflict":input_conflict,"expected_input_generation":obs.input_generation,"input_generation":state.input_policy.generation(),"fresh_observation_required":input_conflict,"takeover_latched":state.takeover.load(Ordering::SeqCst),"automatic_replay":false,"completed_actions":completed,"requested_actions":parsed.actions.len(),"effects":effects,"error":failure,"actor_release_confirmed":cleanup_ok,"timing_ms":{"dispatch_and_release":dispatch_ms,"post_action_settle_wait":settle_wait_ms,"post_observe":after_start.elapsed().as_secs_f64()*1000.0},"total_ms":start.elapsed().as_secs_f64()*1000.0,"after_observation_error":after_error,"verification":"Input acknowledgement only. after_observation is fresh evidence to inspect, not inferred UI success. Verify the expected UI state or independent artifact before reporting success."});
     let mut image_blocks = Vec::new();
     if let Some(after) = after {
         if let Some(content) = after["content"].as_array() {
@@ -2921,6 +3070,7 @@ fn handle(state: &State, tool: &str, args: &Value, epoch: u64) -> R<Value> {
             }
             data["resume_input_readiness"] = readiness;
             data["window_close_request"] = close_window_capability();
+            data["desktop_launch"] = launch::capability();
             Ok(text_result(data))
         }
         "desktop_windows" => Ok(text_result(
@@ -3094,7 +3244,9 @@ fn action_schema() -> Value {
     let number = json!({"type":"number"});
     let string = json!({"type":"string"});
     json!({"anyOf":[
-        variant("focus", json!({"window_id":{"type":"integer","minimum":0,"description":"Destination window ID belongs inside this standalone action."}}), &["window_id"]),
+        variant("launch_app", json!({"app":{"type":"string","enum":["zed","chrome"]}}), &["app"]),
+        variant("editor_open_project", json!({"project":{"type":"string","enum":["jarvis"]}}), &["project"]),
+        variant("editor_open_file", json!({"project":{"type":"string","enum":["jarvis"]},"relative_path":{"type":"string","minLength":1,"maxLength":4096}}), &["project","relative_path"]),        variant("focus", json!({"window_id":{"type":"integer","minimum":0,"description":"Destination window ID belongs inside this standalone action."}}), &["window_id"]),
         variant("close_window", json!({"window_id":{"type":"integer","minimum":0,"description":"Standalone; same top-level window_id."}}), &["window_id"]),
         variant("move", json!({"x":number,"y":number}), &["x","y"]),
         variant("click", json!({"x":number,"y":number,"button":{"type":["string","null"],"enum":["left","right","middle",null],"default":"left"},"count":{"type":["integer","null"],"minimum":1,"maximum":3,"default":1}}), &["x","y"]),
@@ -3127,7 +3279,9 @@ mod action_schema_contract_tests {
     #[test]
     fn variant_fields_and_required_members_match_actual_serde() {
         let samples = [
-            (json!({"kind":"focus","window_id":261}), vec!["window_id"]),
+            (json!({"kind":"launch_app","app":"zed"}), vec!["app"]),
+            (json!({"kind":"editor_open_project","project":"jarvis"}), vec!["project"]),
+            (json!({"kind":"editor_open_file","project":"jarvis","relative_path":"README.md"}), vec!["project", "relative_path"]),            (json!({"kind":"focus","window_id":261}), vec!["window_id"]),
             (
                 json!({"kind":"close_window","window_id":261}),
                 vec!["window_id"],
@@ -3335,7 +3489,7 @@ fn tools() -> Value {
       {"name":"desktop_observe","description":"Capture one actual laptop output via grim at scale1, plus Niri identities. Startup capture_not_attempted=true is expected and permits this first read-only observation. Input always requires accepted fresh observation and action_ready; prior successful capture is not a prerequisite for authorized startup resume. Optional crop uses full-output screenshot pixels x/y/width/height; action x/y then use local pixels of the displayed crop. Core translates crop origin; NEVER add compositor output origin. Actual PNG size can differ from Niri logical size by rounding. Observation expires in60seconds; identity/geometry and fresh target-region guards still run. Observe after focus/workspace/layout changes. include_image=false returns private PNG reference only.","inputSchema":{"type":"object","properties":{"output":{"type":"string"},"include_image":{"type":"boolean"},"crop":crop}}},
       {"name":"desktop_semantic","description":"Read fresh Cua AT-SPI elements for a Niri window. Maps only unique actual PID+title; synthetic Cua IDs are never guessed. Query filters returned elements. Accessibility bounds are app-local and NOT screenshot coordinates; do not directly click them without calibrated mapping. Limited/root-only trees require visual fallback.","inputSchema":{"type":"object","properties":{"window_id":{"type":"integer"},"query":{"type":"string"},"max_elements":{"type":"integer"},"max_depth":{"type":"integer"}},"required":["window_id"]}},
       {"name":"desktop_semantic_direct","description":"Read exact-window AT-SPI labels/tree even during ordinary physical activity or held controls. Returns original/current input generation and explicit input/action readiness. Non-actionable or incomplete snapshots issue no handles (focus/click/set_value=false); obtain a fresh complete snapshot after controls release. Only daemon-owned handles from actionable complete snapshots may be used with desktop_act semantic_set_value, semantic_click or standalone semantic_focus. focusable/FOCUSED flags attest element keyboard focus separately from Niri window focus; semantic_focus requires fresh complete semantics and verifies FOCUSED on the same exact object before returning focus_verified. Reobserve and requery semantics before later keyboard input. No raw object/index/Cua tokens and no pixel fallback. Native GTK candidates need live acceptance; missing/incomplete bridges use visual typed actions.","inputSchema":{"type":"object","properties":{"window_id":{"type":"integer"},"query":{"type":"string"},"max_elements":{"type":"integer"},"max_depth":{"type":"integer"},"include_text_selection":{"type":"boolean","description":"Opt-in bounded selection readback for at most one showing enabled FOCUSED unprotected Text object; unicode codepoint [start,end). Explicit available/unsupported/error, no input authority; check fresh generation, complete tree and text identity separately."}},"required":["window_id"]}},
-      {"name":"desktop_act","description":"Single-writer typed desktop actions against fresh observation. Rejects changed focus/geometry/scaling or changed pixels near pointer targets. x/y are local to displayed screenshot/crop. Every move/click/scroll/drag requires the displayed view to be at most1200 pixels on each axis; an oversized view rejects the whole batch before any input, queue admission or device preparation. Capture a fresh target crop and use its crop-local coordinates. Full images remain usable for overview, focus, keys and semantics. Focus must be standalone. close_window(window_id) is standalone with the same top-level window_id, exact fresh focused target/title/output; caller proves task ownership and safe saved state. Explicit close request acknowledgement is not window disappearance; inspect fresh inventory and any save modal. No PID kill or blind cleanup. Unknown or misplaced fields for an action kind reject the whole batch before input; restore_clipboard belongs only to paste, while type always preserves the prior selection. By default observe_after=true returns a new after_observation ID and image in this same response after dispatch/release and a bounded80ms defaultsettle wait; settle_ms=0..1000 can adjust. Use it for the next act and inspect expected result. A slow/unchanged frame needs another observation/semantic check, not repetition of toggle input. include_image=false omits its image. Acknowledgement is not UI success. Type text_method=auto uses clipboard for known Electron IDs (code/T3) and >1000-character text, keyboard for shorter text in other apps; explicit keyboard/clipboard are available. Electron wtype Unicode is unreliable on this laptop. Clipboard preserves supported text/rich app payloads and original Chromium provenance in bounded RAM from one offer, normalizes duplicate MIME names, omits SAVE_TARGETS and SAME_APP GTK_TEXT_BUFFER_CONTENTS transport markers, preserves serialized GTK rich text, and keeps a separate source holder across actor restarts. Unsupported/sensitive/oversized formats refuse before replacement. Own-source check runs after layout/keymap/window validation and before the first paste modifier press; ownership can still change between reply and input because Wayland has no atomic selection-check-and-paste. No restore after takeover/cancel/ownership loss. Scroll dx/dy are discrete wheel steps (integer -100..100), not pixels; positive dx moves right and positive dy moves down. Smooth-scroll animation needs another fresh observation/settle check before reusing visual targets. Keys are modifiers first e.g.[ctrl,l],[Return]. Explicit key_scope=compositor and Super/meta/logo chords use an owned persistent direct-uinput device because this Niri25.11 Wayland virtual keyboard bypasses compositor bindings; Ctrl/app chords retain the Wayland transport. A fresh proxy check requires backend routing_revision=2 and binds session/epoch/observation before forwarding a global batch; an older backend is refused. Missing permission/takeover monitor/compositor device-open evidence refuses the complete batch before input. Creating the own device is a capability side effect. A kernel input acknowledgement does not verify Niri/UI acceptance; inspect the fresh result. No automatic input fallback. Direct semantic_set_value(handle_id,text,expected_text optional) replaces exact editable contents; semantic_click(handle_id,action_name from direct tree) invokes only AT-SPI named action. Both freshly revalidate context and have no input fallback. Standalone semantic_focus(handle_id) uses Component.GrabFocus, then repeats exact object/window/context validation and freshly queries FOCUSED; acceptance alone is not focus_verified. It sends no keyboard input or fallback. Reobserve and requery the exact focused object before keyboard input. Batch stable edits/shortcuts when intermediate states cannot invalidate later targets; changed-target actions need fresh observation.","inputSchema":{"type":"object","properties":{"observation_id":{"type":"string"},"window_id":{"type":"integer"},"task_id":{"type":"string"},"timeout_ms":{"type":"integer","minimum":100,"maximum":120000,"description":"Whole batch budget including queue, validation, capture, input and post-observe. Bounded release cleanup follows even after timeout."},"observe_after":{"type":"boolean","default":true},"include_image":{"type":"boolean","default":true},"settle_ms":{"type":"integer","default":80,"minimum":0,"maximum":1000,"description":"Bounded post-action settle wait before capture; not a proof of repaint. Slow conditions require fresh observations, never repeated blind input."},"actions":{"type":"array","items":action,"minItems":1,"maxItems":32}},"required":["observation_id","actions"]}},
+      {"name":"desktop_act","description":"Standalone launch_app(app:zed|chrome), editor_open_project(project:jarvis) and editor_open_file(project:jarvis,relative_path) spawn only pinned isolated apps inside this actor on observed active DP-6/eDP-1. OS spawn ACK is not UI success; uncertain spawn requires verification, no auto retry. Single-writer typed desktop actions against fresh observation. Rejects changed focus/geometry/scaling or changed pixels near pointer targets. x/y are local to displayed screenshot/crop. Every move/click/scroll/drag requires the displayed view to be at most1200 pixels on each axis; an oversized view rejects the whole batch before any input, queue admission or device preparation. Capture a fresh target crop and use its crop-local coordinates. Full images remain usable for overview, focus, keys and semantics. Focus must be standalone. close_window(window_id) is standalone with the same top-level window_id, exact fresh focused target/title/output; caller proves task ownership and safe saved state. Explicit close request acknowledgement is not window disappearance; inspect fresh inventory and any save modal. No PID kill or blind cleanup. Unknown or misplaced fields for an action kind reject the whole batch before input; restore_clipboard belongs only to paste, while type always preserves the prior selection. By default observe_after=true returns a new after_observation ID and image in this same response after dispatch/release and a bounded80ms defaultsettle wait; settle_ms=0..1000 can adjust. Use it for the next act and inspect expected result. A slow/unchanged frame needs another observation/semantic check, not repetition of toggle input. include_image=false omits its image. Acknowledgement is not UI success. Type text_method=auto uses clipboard for known Electron IDs (code/T3) and >1000-character text, keyboard for shorter text in other apps; explicit keyboard/clipboard are available. Electron wtype Unicode is unreliable on this laptop. Clipboard preserves supported text/rich app payloads and original Chromium provenance in bounded RAM from one offer, normalizes duplicate MIME names, omits SAVE_TARGETS and SAME_APP GTK_TEXT_BUFFER_CONTENTS transport markers, preserves serialized GTK rich text, and keeps a separate source holder across actor restarts. Unsupported/sensitive/oversized formats refuse before replacement. Own-source check runs after layout/keymap/window validation and before the first paste modifier press; ownership can still change between reply and input because Wayland has no atomic selection-check-and-paste. No restore after takeover/cancel/ownership loss. Scroll dx/dy are discrete wheel steps (integer -100..100), not pixels; positive dx moves right and positive dy moves down. Smooth-scroll animation needs another fresh observation/settle check before reusing visual targets. Keys are modifiers first e.g.[ctrl,l],[Return]. Explicit key_scope=compositor and Super/meta/logo chords use an owned persistent direct-uinput device because this Niri25.11 Wayland virtual keyboard bypasses compositor bindings; Ctrl/app chords retain the Wayland transport. A fresh proxy check requires backend routing_revision=2 and binds session/epoch/observation before forwarding a global batch; an older backend is refused. Missing permission/takeover monitor/compositor device-open evidence refuses the complete batch before input. Creating the own device is a capability side effect. A kernel input acknowledgement does not verify Niri/UI acceptance; inspect the fresh result. No automatic input fallback. Direct semantic_set_value(handle_id,text,expected_text optional) replaces exact editable contents; semantic_click(handle_id,action_name from direct tree) invokes only AT-SPI named action. Both freshly revalidate context and have no input fallback. Standalone semantic_focus(handle_id) uses Component.GrabFocus, then repeats exact object/window/context validation and freshly queries FOCUSED; acceptance alone is not focus_verified. It sends no keyboard input or fallback. Reobserve and requery the exact focused object before keyboard input. Batch stable edits/shortcuts when intermediate states cannot invalidate later targets; changed-target actions need fresh observation.","inputSchema":{"type":"object","properties":{"observation_id":{"type":"string"},"window_id":{"type":"integer"},"task_id":{"type":"string"},"timeout_ms":{"type":"integer","minimum":100,"maximum":120000,"description":"Whole batch budget including queue, validation, capture, input and post-observe. Bounded release cleanup follows even after timeout."},"observe_after":{"type":"boolean","default":true},"include_image":{"type":"boolean","default":true},"settle_ms":{"type":"integer","default":80,"minimum":0,"maximum":1000,"description":"Bounded post-action settle wait before capture; not a proof of repaint. Slow conditions require fresh observations, never repeated blind input."},"actions":{"type":"array","items":action,"minItems":1,"maxItems":32}},"required":["observation_id","actions"]}},
       {"name":"desktop_cancel","description":"Priority epoch cancellation independent of actor lock. Pending batches stop; held buttons release. Already-dispatched effects remain. Wait for desktop_status active=null and actor_release_confirmed=true for full release.","inputSchema":{"type":"object","properties":{}}},
       {"name":"desktop_takeover","description":"Explicit human desktop takeover, persists its cause across backend restarts and latches refusal of future actions and cancels queued/active automation. Only a physical Escape press does this automatically when accessible; ordinary input invalidates stale observations and releases a conflicting batch without latching takeover. Wait active=null and actor_release_confirmed=true for full release. desktop_resume then fresh observation is required.","inputSchema":{"type":"object","properties":{}}},
       {"name":"desktop_recover_release","description":"Explicit bounded recovery of unconfirmed release/receipt on existing owned actuators only. Refuses if writer busy, active task or queue nonempty. Sends only releases of owned held buttons/keys and receipt sync, no press/move/device creation/action replay, no epoch/latch/cause reset, no automatic resume. May finalize effects of already-held input. Default1500ms, maximum2000ms shared budget. Failure remains unconfirmed; original last_result preserved. Success invalidates old observations/semantic handles and requires fresh capture; inspect status queue and follow human return-of-control policy before resume.","inputSchema":{"type":"object","properties":{"timeout_ms":{"type":"integer","minimum":200,"maximum":2000,"default":1500}},"additionalProperties":false}},
@@ -6805,7 +6959,7 @@ mod close_window_contract_tests {
         let variants = schema["properties"]["actions"]["items"]["anyOf"]
             .as_array()
             .unwrap();
-        assert_eq!(variants.len(), 13); // The baseline already has twelve operations.
+        assert_eq!(variants.len(), 16); // Thirteen baseline operations plus three closed launches.
         let close = variants
             .iter()
             .find(|v| v["properties"]["kind"]["enum"] == json!(["close_window"]))
@@ -7004,6 +7158,117 @@ mod close_window_contract_tests {
         assert_eq!(dispatched, ["msg action close-window --id 77"]);
         assert!(state.release_confirmed.load(Ordering::SeqCst));
         assert!(state.actor.lock().unwrap().is_none());
+        fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod launch_contract_tests {
+    use super::*;
+    use release_recovery_tests::{cooperative_fixture, obs};
+    fn fixture(label: &str) -> (Arc<State>, PathBuf, Observation, Value, Value, Value) {
+        let (state, dir) = cooperative_fixture(label);
+        let mut captured = obs(&dir);
+        captured.output = "DP-6".into();
+        captured.focus_output = Some("DP-6".into());
+        captured.output_geometry = json!({"x":0,"y":0,"width":800,"height":600});
+        captured.focused_window = Some(json!({"id":77,"pid":42,"app_id":"owned-editor","workspace_id":33,"is_focused":true}));
+        let reserved = json!({"id":88,"pid":99,"app_id":"google-chrome","title":"YouTube / Alarm protected","workspace_id":55,"is_focused":false});
+        let windows = json!([captured.focused_window.clone().unwrap(), reserved]);
+        let workspaces = json!([{"id":33,"output":"DP-6","is_active":true,"is_focused":true,"active_window_id":77},{"id":55,"output":"DP-5","is_active":true,"is_focused":false,"active_window_id":88}]);
+        let outputs = json!({"DP-6":{"logical":captured.output_geometry},"DP-5":{"logical":{"protected":true}}});
+        captured.windows = windows.clone();
+        state.observations.lock().unwrap().insert(captured.id.clone(), captured.clone());
+        *state.human_monitor.lock().unwrap() = json!({"available":true,"watched_devices":1});
+        (state, dir, captured, windows, workspaces, outputs)
+    }
+    #[test]
+    fn closed_shapes_reject_foreign_apps_projects_arguments_and_mixed_batches() {
+        for request in [
+            json!({"kind":"launch_app","app":"terminal"}),
+            json!({"kind":"launch_app","app":"chrome","argv":["--profile-directory=Default"]}),
+            json!({"kind":"launch_app","app":"zed","executable":"sh"}),
+            json!({"kind":"editor_open_project","project":"other"}),
+            json!({"kind":"editor_open_file","project":"jarvis","relative_path":"x","project_root":"/tmp"}),
+            json!({"kind":"editor_open_file","project":"jarvis"}),
+        ] { assert!(serde_json::from_value::<Action>(request).is_err()); }
+        let (state, dir, captured, _, _, _) = fixture("launch-mixed");
+        let args = json!({"observation_id":captured.id,"actions":[{"kind":"wait","ms":0},{"kind":"launch_app","app":"chrome"}]});
+        assert!(act_inner(&state, &args, 77).unwrap_err().contains("standalone"));
+        assert_eq!(state.capture_attempts.load(Ordering::SeqCst), 0);
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn fake_inventory_gate_rejects_stop_stale_held_forbidden_and_replaced_targets_without_effects() {
+        for failure in ["stop","epoch","generation","held","unretained","expired","monitor","output","workspace","identity","geometry"] {
+            let (state, dir, mut captured, mut windows, mut workspaces, mut outputs) = fixture(failure);
+            let reserved = windows[1].clone();
+            match failure {
+                "stop" => state.takeover.store(true, Ordering::SeqCst),
+                "epoch" => state.epoch.store(78, Ordering::SeqCst),
+                "generation" => { state.input_policy.activity(); },
+                "held" => state.input_policy.update_holds(1, true),
+                "unretained" => state.observations.lock().unwrap().clear(),
+                "expired" => captured.at = Instant::now() - MAX_AGE - Duration::from_secs(1),
+                "monitor" => *state.human_monitor.lock().unwrap() = json!({"available":false}),
+                "output" => { captured.output = "DP-5".into(); captured.focus_output = Some("DP-5".into()); },
+                "workspace" => workspaces[0]["is_active"] = json!(false),
+                "identity" => windows[0]["pid"] = json!(43),
+                "geometry" => outputs["DP-6"]["logical"]["width"] = json!(801),
+                _ => unreachable!(),
+            }
+            let effects = AtomicUsize::new(0);
+            let mut receipt = launch::Receipt::default();
+            let result = launch::dispatch(&mut receipt,
+                || validate_launch_state_with_inventory(&state, &captured, 77, || Ok((windows.clone(), workspaces.clone(), outputs.clone()))),
+                |gate, receipt| { gate()?; effects.fetch_add(1, Ordering::SeqCst); receipt.commit(123); Ok(()) });
+            assert!(result.is_err(), "{failure}");
+            assert_eq!(effects.load(Ordering::SeqCst), 0, "{failure}");
+            assert!(!receipt.spawn_committed);
+            assert_eq!(windows[1], reserved);
+            assert_eq!(state.capture_attempts.load(Ordering::SeqCst), 0);
+            fs::remove_dir_all(dir).unwrap();
+        }
+    }
+    #[test]
+    fn cancel_and_stop_while_queued_never_acquire_or_dispatch_actor() {
+        for cancel_only in [false, true] {
+            let (state, dir, captured, _, _, _) = fixture(if cancel_only {"launch-queue-cancel"} else {"launch-queue-stop"});
+            let actor = state.actor.lock().unwrap();
+            let cancel = Arc::new(AtomicBool::new(false));
+            let worker = {
+                let state = state.clone();
+                let cancel = cancel.clone();
+                thread::spawn(move || {
+                    CURRENT_CANCEL_FLAG.with(|f| *f.borrow_mut() = Some(cancel));
+                    let result = act_inner(&state, &json!({"observation_id":captured.id,"observe_after":false,"actions":[{"kind":"launch_app","app":"chrome"}]}), 77);
+                    CURRENT_CANCEL_FLAG.with(|f| *f.borrow_mut() = None);
+                    result
+                })
+            };
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while state.queued.load(Ordering::SeqCst) == 0 {
+                assert!(Instant::now() < deadline, "queue admission did not reach barrier");
+                thread::yield_now();
+            }
+            if cancel_only { cancel.store(true, Ordering::SeqCst); }
+            else { state.takeover.store(true, Ordering::SeqCst); state.epoch.store(78, Ordering::SeqCst); }
+            assert!(worker.join().unwrap().is_err());
+            assert_eq!(state.queued.load(Ordering::SeqCst), 0);
+            assert_eq!(*state.active.lock().unwrap(), Value::Null);
+            assert!(state.release_confirmed.load(Ordering::SeqCst));
+            assert_eq!(state.capture_attempts.load(Ordering::SeqCst), 0);
+            assert!(state.actor.try_lock().is_err(), "fake writer still owns serialization");
+            drop(actor);
+            fs::remove_dir_all(dir).unwrap();
+        }
+    }
+    #[test]
+    fn unreleased_actor_refuses_before_any_inventory_or_spawn() {
+        let (state, dir, captured, _, _, _) = fixture("launch-unreleased");
+        state.release_confirmed.store(false, Ordering::SeqCst);
+        assert!(act_inner(&state, &json!({"observation_id":captured.id,"actions":[{"kind":"launch_app","app":"zed"}]}), 77).unwrap_err().contains("release/receipt"));
+        assert_eq!(state.queued.load(Ordering::SeqCst), 0);
         fs::remove_dir_all(dir).unwrap();
     }
 }
