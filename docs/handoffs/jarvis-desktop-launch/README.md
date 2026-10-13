@@ -102,3 +102,17 @@ GUI, capture, input, microphone, activation/reboot/service or takeover-marker
 changes through 04:00 UTC or actual merge. Physical Escape is active and must
 never be cleared by this thread. No runtime success is claimed from source or
 fake executor evidence.
+
+### R65 first test receipt
+
+Frozen signed `e475c7f3a6ca7c779b3de820500d0fbaed67807f`, group PID 658280,
+2026-10-13 02:43:17.004 UTC to 02:44:24.447 UTC, 67.44 seconds, peak aggregate
+RSS 969,641,984 bytes. `cargo test --manifest-path packages/computer-use/core/Cargo.toml
+--locked --offline --jobs 2 launch -- --test-threads=2` passed all 9 tests.
+The following same-options `action_schema_contract_tests` suite passed 3 and
+failed the existing <5000-byte ordinary-client schema budget. Exit 101,
+first failure preserved in private cache `r65.log`/`r65-receipt.json`.
+Process group independently empty; reservation explicitly released. No retry
+or Nix/runtime/device call under R65. Follow-up shortens only schema prose,
+preserving action fields/enums/semantics and adding a byte-count failure diagnostic.
+Launch execution source and its passing test evidence are unchanged.
