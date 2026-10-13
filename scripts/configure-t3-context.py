@@ -56,6 +56,21 @@ and the exact `parallel-cli search` or `parallel-cli extract` prefix). Validate
 the saved JSON receipt. Preserve working OAuth; do not copy API keys, loosen
 global sandboxing, add credits, or create monitors automatically.
 
+For every project developed with this owner, use Namespace GitHub Actions runners
+(`namespace-profile-ci-builder`) for compilation, packaging and full test suites.
+Do not move build pressure back to the laptop or Hephaestus. Local read-only
+inspection and bounded syntax checks are allowed. Main GitHub identity is
+EvilWeasel; current shared project organization is morrowbyte. Preserve private
+repositories and existing credentials. Use Fast/priority service tier when
+available; preserve the selected model. Configure Codex PR code reviews through
+the existing account and verify they actually run before reporting them enabled.
+
+Give each development task a concrete goal: desired user behavior, owned paths,
+measurable acceptance checks, and a bounded next signed deliverable. Report real
+source/test/review evidence, not busy status or dispatch as completion. Coordinate
+one writer per path, diagnose stalled work, and continue authorized next work
+without duplicating active owners. Preserve explicit pauses and GUI stops.
+
 For imported document, PDF, presentation and spreadsheet skills, preserve the
 bundled interpreter and renderer required by the skill. On NixOS, invoke local
 artifact commands through `codex-artifact-run` so the bundled LibreOffice finds

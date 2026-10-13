@@ -1349,3 +1349,6 @@ Root independently observed NoNewPrivs 0 and /run/wrappers/bin/sudo -n id -u ret
 - Added pinned T3 fork updater recipe, separate launcher/profile and hourly Home Manager timer on both hosts. Updates verify release SHA-256, retain GC roots and switch versions atomically without restarting sessions; rollback remains available.
 - Namespace app is on morrowbyte, so repos were transferred back there; EvilWeasel remains main identity. Evaluate host before `flake check --no-build` so import-from-derivation sources are realized on a cold runner.
 - Verification: updater five failure/rollback tests + shellcheck; Nix parse, both host drvPath evaluations, laptop system build, locked flake check. Desktop full compilation deliberately remains CI/manual due uncached dependencies.
+
+- Cold CI follow-up: `flake check --no-build` disallows generated sources beyond the chosen host too; CI now uses ordinary locked flake check. Preserve the existing private transcription/account launcher when present.
+- Owner policy now persists in the shared Codex guidance: Namespace-only builds/full suites, priority tier, concrete measurable goals and one writer per path. Installed verified updater unit files directly for immediate laptop use; first service run succeeded and timer is active. Full NixOS activation was not needed. Existing private launcher remains intact.

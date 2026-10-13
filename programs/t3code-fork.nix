@@ -40,7 +40,13 @@ let
   };
   launcher = pkgs.writeShellApplication {
     name = "t3code-weasel";
+    runtimeInputs = [ pkgs.coreutils ];
     text = ''
+      # Preserve the user's existing account/transcription launcher when present.
+      legacy="$HOME/.local/bin/t3code-weasel"
+      if [[ -x "$legacy" && "$(readlink -f "$legacy")" != "$(readlink -f "$0")" ]]; then
+        exec "$legacy" "$@"
+      fi
       export T3CODE_HOME=${lib.escapeShellArg cfg.dataDirectory}
       if [[ ! -x "$T3CODE_HOME/current/bin/t3code-weasel" ]]; then
         echo 'Fork not prepared yet. Run t3code-weasel-update, then launch again.' >&2
