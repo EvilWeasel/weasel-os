@@ -1340,3 +1340,7 @@ Root independently observed NoNewPrivs 0 and /run/wrappers/bin/sudo -n id -u ret
 ### 2026-10-14 — corrected organization to morrowbite
 
 - Owner created morrowbite under sequelweasel; accepted EvilWeasel membership, transferred all three repositories and updated remotes/release repository. Account creation through the integrated browser is suspended until the fork browser issue is fixed. Docs-only destination correction; git diff --check. Previous verification remains valid because workflow/config code is unchanged.
+
+### 2026-10-14 — Namespace runner migration
+
+- Replaced inactive Blacksmith workflow with Namespace profile ci-builder and native Nix cache volume. User performs onboarding manually; Computer Use remains stopped. actionlint and git diff --check passed. Host configuration and flake.lock unchanged; host evaluations are recorded in task evidence.

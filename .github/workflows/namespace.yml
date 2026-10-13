@@ -1,11 +1,11 @@
-name: Blacksmith Nix CI
+name: Namespace Nix CI
 
 on:
   push:
     branches: [main]
-    paths: ['**/*.nix', 'flake.lock', '.github/workflows/blacksmith.yml']
+    paths: ['**/*.nix', 'flake.lock', '.github/workflows/namespace.yml']
   pull_request:
-    paths: ['**/*.nix', 'flake.lock', '.github/workflows/blacksmith.yml']
+    paths: ['**/*.nix', 'flake.lock', '.github/workflows/namespace.yml']
   workflow_dispatch:
     inputs:
       build:
@@ -17,13 +17,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: blacksmith-nix-${{ github.event.pull_request.number || github.ref }}
+  group: namespace-nix-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
   hosts:
-    if: vars.BLACKSMITH_ENABLED == 'true'
-    runs-on: ${{ vars.BLACKSMITH_RUNNER || 'blacksmith-8vcpu-ubuntu-2404' }}
+    if: vars.CI_ENABLED == 'true'
+    runs-on: ${{ vars.CI_RUNNER || 'namespace-profile-ci-builder' }}
     timeout-minutes: 180
     strategy:
       fail-fast: false
@@ -31,18 +31,16 @@ jobs:
         host: [nixy-laptop, nixy-desktop]
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Restore persistent Nix store
+        uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1
+        with:
+          cache: nix
       - uses: cachix/install-nix-action@b85815f71a6de0ddee80b8a80a98d43f4bcc66c7 # v31
         with:
           extra_nix_config: |
             experimental-features = nix-command flakes
             max-jobs = 4
             cores = 2
-      - uses: nix-community/cache-nix-action@d8cff2f74b9341e0d90fbf3c0c0212a161ceaef6 # v6
-        with:
-          primary-key: nix-v1-${{ matrix.host }}-${{ hashFiles('flake.lock', '**/*.nix') }}
-          restore-prefixes-first-match: nix-v1-${{ matrix.host }}-
-          gc-max-store-size-linux: 30G
-          save: ${{ github.event_name != 'pull_request' }}
       - name: Evaluate locked flake and host
         run: |
           nix flake check --no-write-lock-file --no-build
