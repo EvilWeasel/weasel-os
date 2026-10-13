@@ -1357,3 +1357,5 @@ Root independently observed NoNewPrivs 0 and /run/wrappers/bin/sudo -n id -u ret
 - Added a native SVG branch icon for the fork and installed it for the existing launcher, preserving its private account/transcription command.
 - Privately merged T3/MT connection catalogs using their existing unlocked keyring keys; route identity includes environment plus connection ID/type, not environment alone. Retained all routes/credentials, validated encrypted roundtrip/reference integrity and preserved both source profiles with backups. Merged settings/keybindings with existing fork customizations taking precedence; instance identity/server exposure was not cloned.
 - Verification: SVG rendered/viewed, private import receipt and source hashes, Nix parse/evaluation for both hosts; full source builds remain on Namespace.
+
+- Home Manager adopts the existing `t3code-weasel.desktop` ID, so future activation does not add a fourth launcher. The private CLI wrapper remains the credential/settings owner.

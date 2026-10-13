@@ -91,7 +91,7 @@ in
       launcher
       updater
     ];
-    xdg.desktopEntries.t3code-fork = {
+    xdg.desktopEntries.t3code-weasel = {
       name = "T3 Code · Morrowbyte";
       exec = "${launcher}/bin/t3code-weasel %U";
       icon = "${../pictures/t3code-fork.svg}";
@@ -101,6 +101,8 @@ in
         "IDE"
       ];
     };
+    # Adopt the existing installer desktop ID, avoiding a duplicate fork entry.
+    xdg.dataFile."applications/t3code-weasel.desktop".force = true;
     systemd.user.services.t3code-fork-update = lib.mkIf cfg.autoUpdate {
       Unit.Description = "Prepare the next T3 Code fork release without restarting sessions";
       Service = {
