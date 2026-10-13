@@ -1344,3 +1344,8 @@ Root independently observed NoNewPrivs 0 and /run/wrappers/bin/sudo -n id -u ret
 ### 2026-10-14 — Namespace runner migration
 
 - Replaced inactive Blacksmith workflow with Namespace profile ci-builder and native Nix cache volume. User performs onboarding manually; Computer Use remains stopped. actionlint and git diff --check passed. Host configuration and flake.lock unchanged; host evaluations are recorded in task evidence.
+
+## 2026-10-14 — Namespace and declarative fork updates
+- Added pinned T3 fork updater recipe, separate launcher/profile and hourly Home Manager timer on both hosts. Updates verify release SHA-256, retain GC roots and switch versions atomically without restarting sessions; rollback remains available.
+- Namespace app is on morrowbyte, so repos were transferred back there; EvilWeasel remains main identity. Evaluate host before `flake check --no-build` so import-from-derivation sources are realized on a cold runner.
+- Verification: updater five failure/rollback tests + shellcheck; Nix parse, both host drvPath evaluations, laptop system build, locked flake check. Desktop full compilation deliberately remains CI/manual due uncached dependencies.

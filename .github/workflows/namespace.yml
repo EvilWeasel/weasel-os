@@ -43,8 +43,9 @@ jobs:
             cores = 2
       - name: Evaluate locked flake and host
         run: |
-          nix flake check --no-write-lock-file --no-build
           nix eval --no-write-lock-file --raw .#nixosConfigurations.${{ matrix.host }}.config.system.build.toplevel.drvPath > host.drv
+          # Realize import-from-derivation inputs before the read-only flake check.
+          nix flake check --no-write-lock-file --no-build
       - name: Inspect and build evaluated host
         if: github.event_name == 'workflow_dispatch' && inputs.build
         run: |

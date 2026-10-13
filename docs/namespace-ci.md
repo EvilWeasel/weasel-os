@@ -1,6 +1,6 @@
 # Namespace CI
 
-The GitHub repository is `morrowbite/weasel-os`. Namespace runner profile: `namespace-profile-ci-builder`.
+The GitHub repository is `morrowbyte/weasel-os`. Namespace runner profile: `namespace-profile-ci-builder`.
 GitHub App installation and profile readiness must be confirmed before execution.
 
 Set repository variable `CI_ENABLED=true` only after Namespace onboarding.
