@@ -1330,3 +1330,9 @@ Root independently observed NoNewPrivs 0 and /run/wrappers/bin/sudo -n id -u ret
 
 - Updated existing configured sources: flake.lock, flake/modules/shared.nix, lib/mk-host.nix, packages/t3code/source.json, profiles/system/base.nix.
 - Required before submission: all host evaluations, flake checks, the complete laptop build, changed critical app probes, closure inventory and session preservation. Build, activation and background completion require their own receipts.
+
+### 2026-10-14 — morrowbyte / Blacksmith CI
+
+- Moved GitHub ownership to morrowbyte and added gated, cached host evaluation plus manually requested full builds. Blacksmith App installation is distinct from its additional account verification and runner acceptance.
+- Preserve the canonical checkout's unrelated MIME edits; implement CI in an isolated worktree. Workflow never updates flake.lock or activates a host. Validation is recorded in the task result; a disabled job is not build acceptance.
+- Validation: actionlint (both new workflows), git diff --check, nix flake check --no-write-lock-file --no-build and both host drvPath evaluations passed. Substitution-aware dry plans found 13 laptop derivations and 134 desktop derivations; desktop realization deferred to CI to avoid local heavy compilation.
