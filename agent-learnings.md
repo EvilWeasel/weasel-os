@@ -1336,3 +1336,7 @@ Root independently observed NoNewPrivs 0 and /run/wrappers/bin/sudo -n id -u ret
 - Moved GitHub ownership to morrowbyte and added gated, cached host evaluation plus manually requested full builds. Blacksmith App installation is distinct from its additional account verification and runner acceptance.
 - Preserve the canonical checkout's unrelated MIME edits; implement CI in an isolated worktree. Workflow never updates flake.lock or activates a host. Validation is recorded in the task result; a disabled job is not build acceptance.
 - Validation: actionlint (both new workflows), git diff --check, nix flake check --no-write-lock-file --no-build and both host drvPath evaluations passed. Substitution-aware dry plans found 13 laptop derivations and 134 desktop derivations; desktop realization deferred to CI to avoid local heavy compilation.
+
+### 2026-10-14 — corrected organization to morrowbite
+
+- Owner created morrowbite under sequelweasel; accepted EvilWeasel membership, transferred all three repositories and updated remotes/release repository. Account creation through the integrated browser is suspended until the fork browser issue is fixed. Docs-only destination correction; git diff --check. Previous verification remains valid because workflow/config code is unchanged.

@@ -1,6 +1,6 @@
 # Blacksmith CI
 
-The GitHub repository is `morrowbyte/weasel-os`. Blacksmith's GitHub App is
+The GitHub repository is `morrowbite/weasel-os`. Blacksmith's GitHub App is
 installed on the organization. Runner execution requires Blacksmith account
 verification; installation alone does not prove that a runner is available.
 
