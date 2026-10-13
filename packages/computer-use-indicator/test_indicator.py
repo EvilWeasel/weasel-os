@@ -62,7 +62,9 @@ class IndicatorLifecycle(unittest.TestCase):
             "schema": 1, "session_id": "fixture-session", "epoch": 2,
             "takeover_latched": False, "active": None,
             "queued_batches": 0, "actor_release_confirmed": True,
+            "task_scope_active": False,
         }
+        self.task_scopes = set()
         self.actor_lock = threading.Lock()
         self.receipt_runs = []
         self.control_requests = []
@@ -127,18 +129,26 @@ class IndicatorLifecycle(unittest.TestCase):
                 request = json.loads(raw)
                 if request["tool"] != "desktop_indicator_lifecycle":
                     raise AssertionError("unexpected tool instead of lightweight lifecycle")
+                event = request.get("arguments", {}).get("event", "status")
+                task_id = request.get("arguments", {}).get("task_id")
                 with self.actor_lock:
                     index = len(self.actor_requests)
                     record = {"index":index,"at":time.monotonic(),"tool":request["tool"]}
-                    self.actor_requests.append(record)
-                    plan = dict(self.actor_plan.get(index, {}))
+                    if event == "status":
+                        self.actor_requests.append(record)
+                    plan = dict(self.actor_plan.get(index, {})) if event == "status" else {}
                     state = copy.deepcopy(self.actor_state)
+                    if event == "begin":
+                        self.task_scopes.add(task_id)
+                    elif event == "end":
+                        self.task_scopes.discard(task_id)
+                    state["task_scope_active"] = task_id in self.task_scopes
                 if plan.get("eof"):
                     return
                 if plan.get("delay"):
                     self.server_stop.wait(plan["delay"])
                 state["actor_active"] = state.pop("active") is not None
-                state["lifecycle_revision"] = 1
+                state["lifecycle_revision"] = 2
                 state["complete"] = True
                 state.update(plan.get("status", {}))
                 response = {"content": [{"type": "text", "text": json.dumps(state)}], "isError": False}
@@ -230,6 +240,14 @@ class IndicatorLifecycle(unittest.TestCase):
         with self.actor_lock:
             self.actor_state["takeover_latched"] = True
         self.assertEqual(self.ended(process)["reason"], "actor_takeover_latched")
+
+    def test_expired_actor_task_scope_hides_indicator_without_resuming_work(self):
+        process = self.launch()
+        self.ready(process)
+        with self.actor_lock:
+            self.task_scopes.discard("fixture-task")
+        self.assertEqual(self.ended(process)["reason"], "actor_task_scope_expired_or_ended")
+        self.assertNotIn("v1 heartbeat", [item["line"] for item in self.protocol()])
 
     def test_backend_restart_does_not_silently_reconnect(self):
         process = self.launch()
@@ -442,7 +460,7 @@ class IndicatorLifecycle(unittest.TestCase):
         self.assertEqual(len(self.actor_requests), 2)
 
     def test_non_timeout_failures_never_retry_or_fallback(self):
-        for plan in ({"eof":True}, {"raw":b"not-json\n"}, {"envelope":{"isError":True}}, {"status":{"lifecycle_revision":2}}, {"status":{"complete":False}}, {"status":{"actor_active":None}}):
+        for plan in ({"eof":True}, {"raw":b"not-json\n"}, {"envelope":{"isError":True}}, {"status":{"lifecycle_revision":1}}, {"status":{"complete":False}}, {"status":{"actor_active":None}}):
             with self.subTest(plan=plan):
                 self.actor_plan = {1:plan}
                 self.actor_requests.clear()

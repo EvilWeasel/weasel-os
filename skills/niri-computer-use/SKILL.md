@@ -76,13 +76,22 @@ restart preserves any prior takeover cause. Inspect
 `takeover_persistence.reason.source`: for `backend_startup`, a current user
 request authorizing desktop work permits an explicit `desktop_resume` once the
 actor is released and its input monitor is ready and quiet. Do not request a
-second generic permission for that already authorized work. A physical or
-explicit takeover waits for the user to return control; a backend restart does
-not grant that return. Never automatically clear `physical_escape` or
-`explicit_desktop_takeover`. Older `physical_input_activity` markers remain
-preserved across upgrade and need one current user-authorized explicit resume;
-ordinary input under the new policy does not create them. Controlled evdev
-simulation is test evidence only.
+second generic permission for that already authorized work. An idle physical
+Esc invalidates old observations without creating a stop. While the
+task-owned Computer Use indicator scope is open, Esc cancels the whole task and
+persists `physical_escape`, including across backend restart. Only a newly and
+explicitly requested Computer Use task with a fresh task ID may clear that
+cause. The first current session/epoch-bound `desktop_resume` returns a visible
+2-second warning; wait the reported interval, then retry once with the same
+task ID and binding. Use that exact fresh task ID to start the task indicator.
+Esc during that warning aborts and retains the stop.
+Released controls, the quiet-input gate and a fresh observation remain
+required. A backend restart alone never
+clears the cause. `explicit_desktop_takeover` remains a separate stronger stop
+that waits for the user's return of control. Older `physical_input_activity`
+markers remain preserved across upgrade and keep their explicit resume
+requirement; ordinary input under the new policy does not create them.
+Controlled evdev simulation is test evidence only.
 Use the current `takeover_latched` and `takeover_persistence.marker_active`
 booleans to decide whether a stop is active. Historical `last_reason` or an
 older backend's retained `reason` with both booleans false is not a live stop.
@@ -346,8 +355,9 @@ than escalating clicks or counting two failed frames as an abort. True Esc,
 explicit cancellation and actual capability loss still stop promptly.
 Never replay an uncertain edit, copy, move or submission without checking its
 actual state. Keep recovery bounded and report sustained contention instead of
-fighting for focus. Physical Esc or an explicit takeover stops the task and
-requires the user to request continuation before resume. Synthetic agent Esc
+fighting for focus. Physical Esc stops the task; continuation after
+`physical_escape` requires a newly requested task and its warning-bound resume.
+Explicit takeover still requires the user to return control. Synthetic agent Esc
 for dialogs does not count as physical abort. Backend startup/legacy takeover
 markers remain explicit and require the current user-authorized resume.
 The independent emergency chord **Ctrl+Alt+Escape** remains available.

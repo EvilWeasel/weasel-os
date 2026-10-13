@@ -10,15 +10,30 @@ or unsaved buffers. A request acknowledgement is not window disappearance:
 inspect a fresh full inventory and any save dialog. Never use shared process
 termination as window cleanup. This source path still needs live qualification.
 
-The cooperative desktop policy reserves physical Esc for explicit abort.
-Ordinary local keyboard/mouse activity advances an input generation without
-latching takeover. Old observations/semantic handles become stale; a collision
-with an executing batch stops that batch and releases owned inputs. The result
-reports completed and possibly partial effects. The planner then reads fresh
-state and continues the remaining work without automatically replaying edits
-or submissions. Physical Esc, explicit takeover and client cancellation still
-stop pending input. Shared desktop focus and physical input have an unavoidable
-race; fresh state and release are required after a collision.
+The cooperative desktop policy treats physical Esc as an abort only while a
+Computer Use task is live: its actor action is queued/preparing/running, or its
+task-owned indicator scope is open across model-thinking gaps. An idle Esc still
+advances the physical input generation and invalidates old observations, but
+does not latch a takeover or persist a marker. An in-scope Esc advances the
+cancel epoch immediately, stops preparation and queued actions, releases owned
+keys/buttons, and persists `physical_escape`. Completed/partial effects remain
+reported and are never replayed. A real explicit desktop takeover remains a
+separate, stronger persistent stop.
+
+The indicator opens an actor-owned task scope when it begins and closes it on
+end, disconnect, stop or lease expiry. Its fixed 20-minute bound is not renewed;
+expiry only drops stale scope ownership and never resumes work. A latched
+`physical_escape` can be cleared only by a fresh, explicitly requested Computer
+Use task with a new task ID and current backend session/epoch binding. The first
+resume call returns a visible two-second `rearm_warning`; wait that interval and
+retry once with the same task ID and binding. Esc during the warning keeps or
+refreshes the stop. A successful resume binds the indicator scope to the new
+task before clearing the old stop; start the indicator with that same task ID.
+Resume also requires released controls and
+the existing 300 ms quiet gate, and always requires a fresh observation before
+input. Explicit takeover
+and legacy persisted markers keep their existing explicit-return policy. No
+stopped task or queued action is resumed or replayed.
 Authoritative bounded evdev key snapshots retain only the aggregate number of
 held physical controls. Held modifiers/buttons or unknown input state temporarily
 refuse dispatch, without latching takeover; release and fresh observation allow
@@ -276,11 +291,15 @@ weasel-computer-use call desktop_cancel '{}'
 weasel-computer-use call desktop_takeover '{}'
 ```
 
-Physical **Esc** requests abort; **Ctrl+Alt+Escape** also requests takeover
-through Niri. Synthetic agent Escape for dialogs does not trigger physical
-abort. Check confirmed
-input release; completed effects persist. Resume only when the user returns
-control, then obtain a fresh observation. Repair only this owned backend; do not
+Physical **Esc** requests abort only during a live Computer Use task scope;
+idle Esc invalidates old observations without latching the actor.
+**Ctrl+Alt+Escape** remains a separate explicit takeover through Niri.
+Synthetic agent Escape for dialogs does not trigger physical abort. Check
+confirmed input release; completed effects persist. A latched physical Escape
+can be cleared only for a newly requested task after its 2-second warning,
+current session/epoch binding and quiet/released gates; then obtain a fresh
+observation. An explicit takeover still requires the user's return of control.
+Repair only this owned backend; do not
 restart T3, the compositor or foreign clients as chaos tests.
 
 Typical requests: edit and save a specified test document in an identified app;

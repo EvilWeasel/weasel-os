@@ -27,9 +27,8 @@ MAX_RUNTIME_SECONDS = 20 * 60
 POLL_SECONDS = 0.1
 STATUS_TIMEOUT_SECONDS = 0.3
 MAX_STATUS_BYTES = 16 * 1024
-LIFECYCLE_REVISION = 1
+LIFECYCLE_REVISION = 2
 STATUS_FRESH_SECONDS = POLL_SECONDS + STATUS_TIMEOUT_SECONDS
-LIFECYCLE_REQUEST = b'{"tool":"desktop_indicator_lifecycle","arguments":{}}\n'
 IDENTIFIER = re.compile(r"[A-Za-z0-9_.-]{1,128}\Z")
 
 
@@ -118,12 +117,12 @@ def parse_lifecycle(result):
         raise CapabilityError("actor lifecycle identity unavailable")
     if any(type(status.get(key)) is not int or status[key] < 0 for key in ("epoch", "queued_batches")):
         raise CapabilityError("actor lifecycle counters unavailable")
-    if any(type(status.get(key)) is not bool for key in ("takeover_latched", "actor_active", "actor_release_confirmed")):
+    if any(type(status.get(key)) is not bool for key in ("takeover_latched", "actor_active", "actor_release_confirmed", "task_scope_active")):
         raise CapabilityError("actor lifecycle cancellation/release unavailable")
     return status
 
 
-def desktop_lifecycle(actor_socket):
+def actor_call(actor_socket, tool, arguments):
     # Startup fails closed without a renderer. Total connect/send/read budget,
     # not a fresh timeout for every chunk or phase; no full-status fallback.
     deadline = time.monotonic() + STATUS_TIMEOUT_SECONDS
@@ -132,16 +131,27 @@ def desktop_lifecycle(actor_socket):
             stream.settimeout(max(0.001, deadline - time.monotonic()))
             stream.connect(str(actor_socket))
             stream.settimeout(max(0.001, deadline - time.monotonic()))
-            stream.sendall(LIFECYCLE_REQUEST)
+            stream.sendall(json.dumps({"tool": tool, "arguments": arguments}, separators=(",", ":")).encode() + b"\n")
             result = read_line(stream, MAX_STATUS_BYTES, deadline)
         except TimeoutError as error:
             raise LifecycleTimeout("lifecycle startup deadline elapsed") from error
+    return result
+
+
+def desktop_lifecycle(actor_socket, task_id=None, event="status", binding=None):
+    arguments = {"event": event}
+    if task_id:
+        arguments["task_id"] = task_id
+    if binding is not None:
+        arguments["session_id"] = binding["session_id"]
+        arguments["expected_epoch"] = binding["epoch"]
+    result = actor_call(actor_socket, "desktop_indicator_lifecycle", arguments)
     return parse_lifecycle(result)
 
 
 class LifecycleProbe:
     """Exactly one nonblocking read; main-loop end/owner events remain reachable."""
-    def __init__(self, selector, actor_socket):
+    def __init__(self, selector, actor_socket, task_id):
         self.selector = selector
         self.stream = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         self.stream.setblocking(False)
@@ -149,6 +159,7 @@ class LifecycleProbe:
         self.deadline = self.started + STATUS_TIMEOUT_SECONDS
         self.sent = 0
         self.buffer = bytearray()
+        self.request = json.dumps({"tool":"desktop_indicator_lifecycle","arguments":{"event":"status","task_id":task_id}}, separators=(",", ":")).encode() + b"\n"
         self.closed = False
         try:
             result = self.stream.connect_ex(str(actor_socket))
@@ -168,10 +179,10 @@ class LifecycleProbe:
             if error:
                 raise OSError(error, "actor lifecycle connection unavailable")
             try:
-                self.sent += self.stream.send(LIFECYCLE_REQUEST[self.sent:])
+                self.sent += self.stream.send(self.request[self.sent:])
             except BlockingIOError:
                 return None
-            if self.sent == len(LIFECYCLE_REQUEST):
+            if self.sent == len(self.request):
                 self.selector.modify(self.stream, selectors.EVENT_READ, self)
         if mask & selectors.EVENT_READ:
             try:
@@ -222,6 +233,8 @@ def status_stop_reason(status, initial):
         return "actor_cancel_epoch_changed"
     if status["takeover_latched"]:
         return "actor_takeover_latched"
+    if not status["task_scope_active"]:
+        return "actor_task_scope_expired_or_ended"
     if not status["actor_active"] and not status["actor_release_confirmed"]:
         return "idle_release_unconfirmed"
     return None
@@ -270,6 +283,7 @@ def run(args):
     owned_lease_identity = None
     old_signals = {}
     probe = None
+    scope_begun = False
     stop_signal = [None]
     metadata = {
         "revision": REVISION, "task_id": args.task_id, "output": args.output,
@@ -306,6 +320,8 @@ def run(args):
             selector.register(sys.stdin, selectors.EVENT_READ, "stdin")
         for signum in (signal.SIGINT, signal.SIGTERM, signal.SIGHUP):
             old_signals[signum] = signal.signal(signum, lambda received, _frame: stop_signal.__setitem__(0, received))
+        desktop_lifecycle(actor_socket, args.task_id, "begin", initial)
+        scope_begun = True
         renderer.stdin.write("v1 begin\n")
         renderer.stdin.flush()
         emit("starting", task_id=args.task_id, output=args.output, pid=os.getpid(), geometry=geometry)
@@ -436,7 +452,7 @@ def run(args):
                 timeout_retry = 0
                 next_poll = now + POLL_SECONDS
             if probe is None and now >= next_poll:
-                probe = LifecycleProbe(selector, actor_socket)
+                probe = LifecycleProbe(selector, actor_socket, args.task_id)
                 last_valid_at = None  # no renewal while authority is unknown
             if probe is None and now >= next_geometry:
                 new_geometry, new_logical = selected_geometry(args.output)
@@ -465,6 +481,12 @@ def run(args):
         cleanup_started = time.monotonic()
         if probe is not None:
             probe.close()
+        if scope_begun:
+            try:
+                desktop_lifecycle(actor_socket, args.task_id, "end")
+                emit("task_scope_ended", task_id=args.task_id)
+            except (OSError, ValueError, CapabilityError):
+                emit("task_scope_end_unconfirmed", task_id=args.task_id)
         # Closing the owned pipe hides the renderer even if writing end fails.
         if renderer:
             try:

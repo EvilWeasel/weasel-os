@@ -91,9 +91,14 @@ The helper's private control socket uses one bounded JSON line per connection:
 Stdout events include a monotonic timestamp; timeout events additionally report
 the owned request start/elapsed time without exporting the actor payload.
 
-The helper reads the actor's internal `desktop_indicator_lifecycle` contract,
-revision 1 with `complete=true`: session, cancellation epoch, takeover latch,
-active flag, queue count and confirmed release. It excludes full `last_result`,
+The helper registers one actor-owned task scope when its visible indicator
+starts and closes it on normal end, disconnect, stop or expiry. That scope
+keeps physical Escape effective across model-thinking gaps. The fixed 20-minute
+scope is never renewed; expiry only drops stale scope ownership and cannot
+resume any task. The helper reads the actor's internal
+`desktop_indicator_lifecycle` contract, revision 2 with `complete=true`:
+session, cancellation epoch, takeover latch, active flag, task-scope state,
+queue count and confirmed release. It excludes full `last_result`,
 images, display modes and capture/input-readiness inventories. Unknown endpoint,
 revision, incomplete or malformed replies fail closed; there is no full-status
 fallback. This endpoint is internal, not another agent action tool.

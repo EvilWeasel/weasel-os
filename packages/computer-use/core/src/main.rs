@@ -14,7 +14,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::{
     cell::RefCell,
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     env, fs,
     io::{self, BufRead, BufReader, Read, Write},
     os::{
@@ -104,6 +104,14 @@ struct SemanticTarget {
     snapshot: Arc<atspi::Snapshot>,
     object: atspi::Object,
 }
+#[derive(Clone)]
+struct RearmWarning {
+    task_id: String,
+    session_id: String,
+    epoch: u64,
+    resume_after: Instant,
+    expires: Instant,
+}
 
 struct State {
     started: Instant,
@@ -121,6 +129,13 @@ struct State {
     capture_attempts: AtomicU64,
     capture_failure: Mutex<Option<String>>,
     active: Mutex<Value>,
+    // One explicit Computer Use task owns this scope across model-thinking gaps.
+    // The task indicator registers it and removes it on every normal shutdown;
+    // a fixed lifetime bound only expires stale ownership and never resumes it.
+    task_scopes: Mutex<HashMap<String, Instant>>,
+    task_scope_ids: Mutex<HashSet<String>>,
+    task_scope_gate: Mutex<()>,
+    rearm_warning: Mutex<Option<RearmWarning>>,
     last_result: Mutex<Value>,
     observations: Mutex<HashMap<String, Observation>>,
     reference_cache: ReferenceCache,
@@ -344,14 +359,70 @@ fn check_epoch(state: &State, epoch: Option<u64>) -> R<()> {
 }
 
 fn physical_activity(state: &State, escape: bool, simulation: bool) {
+    if !escape {
+        let now = state.started.elapsed().as_millis() as u64;
+        state.last_human_ms.store(now.max(1), Ordering::SeqCst);
+        // A normal mouse/key event invalidates old targets and stops any batch
+        // bound to that generation. It never cancels the task or persists stop.
+        state.input_policy.activity();
+        state.reference_cache.invalidate();
+        return;
+    }
+    // Serialize Escape with task/scope admission and queued->active handoff.
+    // An Escape outside a live Computer Use task still invalidates observations,
+    // but cannot create a persistent stop for a later unrelated task.
+    let _scope_gate = match state.task_scope_gate.lock() {
+        Ok(gate) => gate,
+        Err(_) => {
+            // Scope state is unknown after poisoning; fail closed for Escape
+            // while preserving the ordinary invalidation behavior.
+            let now = state.started.elapsed().as_millis() as u64;
+            state.last_human_ms.store(now.max(1), Ordering::SeqCst);
+            state.input_policy.activity();
+            state.reference_cache.invalidate();
+            state.takeover.store(true, Ordering::SeqCst);
+            state.epoch.fetch_add(1, Ordering::SeqCst);
+            if let Ok(mut marker) = state.takeover_marker.lock() {
+                let _ = marker.set(
+                    if simulation { "controlled_evdev_simulation" } else { "physical_escape" },
+                    &state.session_id,
+                );
+            }
+            return;
+        }
+    };
     let now = state.started.elapsed().as_millis() as u64;
     state.last_human_ms.store(now.max(1), Ordering::SeqCst);
-    // A normal mouse/key event invalidates old targets and stops any batch bound
-    // to that generation. It never cancels the whole task or persists takeover.
     state.input_policy.activity();
     state.reference_cache.invalidate();
-    if !escape {
+    let active_live = match state.active.lock() {
+        Ok(active) => !active.is_null(),
+        Err(_) => true,
+    };
+    let scope_live = match state.task_scopes.lock() {
+        Ok(mut scopes) => {
+            scopes.retain(|_, expires| *expires > Instant::now());
+            !scopes.is_empty()
+        }
+        Err(_) => true,
+    };
+    let task_live = active_live
+        || state.queued.load(Ordering::SeqCst) != 0
+        || scope_live
+        || state.rearm_warning.lock().map_or(true, |warning| {
+            warning.as_ref().is_some_and(|pending| pending.expires > Instant::now())
+        });
+    if !task_live {
+        record(state, "physical_escape_idle", json!({"source":if simulation{"controlled_evdev_simulation"}else{"physical_escape"},"takeover_latched":false,"task_canceled":false}));
         return;
+    }
+    // The stopped workflow loses ownership immediately. Its indicator end or
+    // disconnect is cleanup only and can never keep the canceled task live.
+    if let Ok(mut scopes) = state.task_scopes.lock() {
+        scopes.clear();
+    }
+    if let Ok(mut warning) = state.rearm_warning.lock() {
+        *warning = None;
     }
     let newly_latched = !state.takeover.swap(true, Ordering::SeqCst);
     // Persist only after the priority cancellation is visible to every writer.
@@ -1237,7 +1308,7 @@ fn observe_inner_guarded(state: &State, args: &Value, actor_held: bool, allowed_
     } else {
         image.clone()
     };
-    let data = json!({"schema":1,"observation_id":id,"epoch":epoch,"input_generation":input_generation,"input_policy":state.input_policy.status(state.last_human_ms.load(Ordering::SeqCst)),"global_keyboard":global_keyboard_capability(),"observed_unix_ms":SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis(),"monotonic_ms":state.started.elapsed().as_secs_f64()*1000.0,"monotonic_system_ms":system_monotonic_ms(),"expires_after_ms":60000,"desktop":"niri-wayland","focused_window":focus,"windows":windows,"workspaces":workspaces,"outputs":outputs,"capture":{"output":name,"path":image,"mime_type":"image/png","image_width":width,"image_height":height,"scale":1,"coordinate_frame":"output-local screenshot pixels; origin top-left; dimensions are actual PNG dimensions and may differ by rounding from Niri logical size","output_logical":geometry},"capabilities":{"capture":true,"window_focus":true,"window_close_request":close_window_capability(),"desktop_launch":launch::capability(),"pointer":"wlr_virtual_pointer_v2","keyboard":{"shortcuts":"app shortcuts: persistent canonical German evdev Wayland keyboard; keymap refreshed before every chord. key_scope=compositor or chords containing Super/meta/logo use an owned Linux uinput device so Niri compositor bindings can process them; permission/monitor/device-open failures refuse before any batch input. Device creation is a capability side effect; open/write acknowledgement is not UI success","unicode_text":{"auto":"plain clipboard for known Electron app IDs or >1000characters; wtype for shorter text in other apps","keyboard_limit_characters":1000,"max_text_utf8_bytes":65536,"electron_keyboard":"known unreliable due physical DomCode and supplementary Unicode; explicit override requires app-specific proof"}},"clipboard":{"backend":"Rust wlr-data-control helper with an owned user scope","plain_text_restore":"best effort; source ownership checked, no atomic selection CAS; skipped after cancel/takeover","rich_or_nontext_restore":"supported bounded MIME payloads including HTML, COMPOUND_TEXT and original Chromium metadata; no portal handles/password hints","rich_preserve_request":"snapshot same offer before replacement; unknown/oversized/sensitive formats refuse","ignored_transport_mimes":["SAVE_TARGETS","GTK_TEXT_BUFFER_CONTENTS"],"holder_lifetime":"separate user scope; source replacement or graphical session shutdown","potential_change_reported_on_failure":true},"semantic_tree":"desktop_semantic: read-only Cua application/PID tree; unique window inventory mapping does not attest node window scope; Cua bounds are not screenshot coordinates","takeover":"physical Escape or explicit takeover latches; ordinary physical activity only invalidates targets and stops a conflicting batch without task cancellation; fresh observe then deliberate continuation"},"timing_ms":{"capture":capture_start.elapsed().as_secs_f64()*1000.0,"observe_total":start.elapsed().as_secs_f64()*1000.0}});
+    let data = json!({"schema":1,"observation_id":id,"epoch":epoch,"input_generation":input_generation,"input_policy":state.input_policy.status(state.last_human_ms.load(Ordering::SeqCst)),"global_keyboard":global_keyboard_capability(),"observed_unix_ms":SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis(),"monotonic_ms":state.started.elapsed().as_secs_f64()*1000.0,"monotonic_system_ms":system_monotonic_ms(),"expires_after_ms":60000,"desktop":"niri-wayland","focused_window":focus,"windows":windows,"workspaces":workspaces,"outputs":outputs,"capture":{"output":name,"path":image,"mime_type":"image/png","image_width":width,"image_height":height,"scale":1,"coordinate_frame":"output-local screenshot pixels; origin top-left; dimensions are actual PNG dimensions and may differ by rounding from Niri logical size","output_logical":geometry},"capabilities":{"capture":true,"window_focus":true,"window_close_request":close_window_capability(),"desktop_launch":launch::capability(),"pointer":"wlr_virtual_pointer_v2","keyboard":{"shortcuts":"app shortcuts: persistent canonical German evdev Wayland keyboard; keymap refreshed before every chord. key_scope=compositor or chords containing Super/meta/logo use an owned Linux uinput device so Niri compositor bindings can process them; permission/monitor/device-open failures refuse before any batch input. Device creation is a capability side effect; open/write acknowledgement is not UI success","unicode_text":{"auto":"plain clipboard for known Electron app IDs or >1000characters; wtype for shorter text in other apps","keyboard_limit_characters":1000,"max_text_utf8_bytes":65536,"electron_keyboard":"known unreliable due physical DomCode and supplementary Unicode; explicit override requires app-specific proof"}},"clipboard":{"backend":"Rust wlr-data-control helper with an owned user scope","plain_text_restore":"best effort; source ownership checked, no atomic selection CAS; skipped after cancel/takeover","rich_or_nontext_restore":"supported bounded MIME payloads including HTML, COMPOUND_TEXT and original Chromium metadata; no portal handles/password hints","rich_preserve_request":"snapshot same offer before replacement; unknown/oversized/sensitive formats refuse","ignored_transport_mimes":["SAVE_TARGETS","GTK_TEXT_BUFFER_CONTENTS"],"holder_lifetime":"separate user scope; source replacement or graphical session shutdown","potential_change_reported_on_failure":true},"semantic_tree":"desktop_semantic: read-only Cua application/PID tree; unique window inventory mapping does not attest node window scope; Cua bounds are not screenshot coordinates","takeover":"physical Escape aborts only a live queued/preparing/running action or indicator-owned task scope; idle Escape only invalidates observations. Active Escape cancels the task, drops queued work and persists physical_escape; re-arm requires a new explicit task and a 2-second Escape-abortable warning. Explicit takeover remains a separate persistent stop."},"timing_ms":{"capture":capture_start.elapsed().as_secs_f64()*1000.0,"observe_total":start.elapsed().as_secs_f64()*1000.0}});
     check_epoch(state, Some(epoch))?;
     if focused(&niri_epoch(state, "windows", Some(epoch))?)
         .as_ref()
@@ -2223,7 +2294,13 @@ fn act_inner(state: &State, args: &Value, epoch: u64) -> R<Value> {
         "action_batch_request",
         json!({"task_id":task,"epoch":epoch,"action_count":parsed.actions.len()}),
     );
+    let admission_gate = state
+        .task_scope_gate
+        .lock()
+        .map_err(|_| "Task scope gate poisoned")?;
+    check_epoch(state, Some(epoch))?;
     state.queued.fetch_add(1, Ordering::SeqCst);
+    drop(admission_gate);
     let mut ptr = loop {
         if let Err(e) = check_epoch(state, Some(epoch)) {
             state.queued.fetch_sub(1, Ordering::SeqCst);
@@ -2238,6 +2315,12 @@ fn act_inner(state: &State, args: &Value, epoch: u64) -> R<Value> {
             }
         }
     };
+    // Serialize the queued-to-active handoff with physical Escape. Until the
+    // active record is published this request remains counted as live work.
+    let _scope_gate = state
+        .task_scope_gate
+        .lock()
+        .map_err(|_| "Task scope gate poisoned")?;
     state.queued.fetch_sub(1, Ordering::SeqCst);
     check_epoch(state, Some(epoch))?;
     check_epoch(state, Some(obs.epoch))?;
@@ -2255,6 +2338,7 @@ fn act_inner(state: &State, args: &Value, epoch: u64) -> R<Value> {
         .lock()
         .map_err(|_| "Active task lock poisoned")? = json!({"task_id":task,"completed_actions":0,"total_actions":parsed.actions.len(),"epoch":epoch,"output":obs.output,"input_generation":obs.input_generation,"phase":"preparing_global_keyboard"});
     state.release_confirmed.store(false, Ordering::SeqCst);
+    drop(_scope_gate);
     let mut completed = 0usize;
     let mut effects = Vec::new();
     // Prepare a required global device before ANY earlier batch input. Creation
@@ -2974,16 +3058,32 @@ fn resume_input_readiness(state: &State) -> R<Value> {
         json!({"ready":startup_quiet&&monitor_ready&&controls_released&&activity_quiet,"monitor_ready":monitor_ready,"controls_released":controls_released,"startup_quiet_interval_complete":startup_quiet,"recent_activity_quiet_interval_complete":activity_quiet,"required_quiet_ms":300,"wait_remaining_ms":wait_remaining,"last_activity_monotonic_ms":last,"last_activity_age_ms":activity_age,"input_generation":state.input_policy.generation(),"snapshot_only":true,"note":"This shared input-readiness snapshot neither authorizes resume nor confirms actor/queue release. desktop_resume rechecks all gates and the exact observed backend session/epoch."}),
     )
 }
+fn rearm_warning_status(state: &State) -> Value {
+    let mut warning = match state.rearm_warning.lock() {
+        Ok(value) => value,
+        Err(_) => return json!({"active":false,"pending":true,"state":"unknown","escape_aborts":true}),
+    };
+    if warning.as_ref().is_some_and(|pending| pending.expires <= Instant::now()) {
+        *warning = None;
+    }
+    warning.as_ref().map_or_else(
+        || json!({"active":false,"pending":false,"remaining_ms":0,"required_ms":2000,"escape_aborts":true}),
+        |pending| {
+            let now = Instant::now();
+            json!({"active":pending.resume_after>now,"pending":true,"remaining_ms":pending.resume_after.saturating_duration_since(now).as_millis() as u64,"expires_in_ms":pending.expires.saturating_duration_since(now).as_millis() as u64,"required_ms":2000,"escape_aborts":true,"task_id":pending.task_id,"session_id":pending.session_id,"epoch":pending.epoch,"note":"Rearm commits only on a second explicitly bound resume request after the warning. Escape retains the stop and cancels this pending request."})
+        },
+    )
+}
 fn validate_resume_arguments(args: &Value) -> R<()> {
     let fields = args
         .as_object()
         .ok_or("Desktop resume arguments must be an object")?;
     if fields
         .keys()
-        .any(|k| k != "expected_epoch" && k != "expected_session_id")
+        .any(|k| k != "expected_epoch" && k != "expected_session_id" && k != "task_id")
     {
         return Err(
-            "Unknown desktop resume field; only expected_epoch and expected_session_id are allowed"
+            "Unknown desktop resume field; only expected_epoch, expected_session_id and task_id are allowed"
                 .into(),
         );
     }
@@ -2995,6 +3095,9 @@ fn validate_resume_arguments(args: &Value) -> R<()> {
             .is_some_and(|v| v.as_str().is_none_or(|v| v.is_empty()))
     {
         return Err("Invalid desktop resume binding field types; expected positive integer epoch and nonempty session string".into());
+    }
+    if fields.get("task_id").is_some_and(|v| v.as_str().is_none_or(|id| id.is_empty() || id.len() > 128 || id.chars().any(char::is_control))) {
+        return Err("Invalid task_id; expected a nonempty printable identifier of at most 128 bytes".into());
     }
     Ok(())
 }
@@ -3043,15 +3146,63 @@ fn validate_resume_binding(state: &State, args: &Value, request_epoch: u64) -> R
 
 // Internal read-only indicator contract. Do not copy full status, app content,
 // capture/readiness state or input device capability locks into this small reply.
-fn indicator_lifecycle(state: &State) -> R<Value> {
+fn indicator_lifecycle(state: &State, args: &Value) -> R<Value> {
+    let event = args["event"].as_str().unwrap_or("status");
+    let task_id = args["task_id"].as_str();
+    if event == "begin" {
+        let task_id = task_id.ok_or("Task scope ID is required")?;
+        if task_id.is_empty() || task_id.len() > 128 || task_id.chars().any(char::is_control) {
+            return Err("Task scope ID must be a nonempty printable identifier of at most 128 bytes".into());
+        }
+        let _gate = state.task_scope_gate.lock().map_err(|_| "Task scope gate poisoned")?;
+        if args["session_id"].as_str() != Some(state.session_id.as_str())
+            || args["expected_epoch"].as_u64() != Some(state.epoch.load(Ordering::SeqCst))
+        {
+            return Err("Task indicator binding is stale; canceled or older tasks cannot reopen their scope".into());
+        }
+        if state.takeover.load(Ordering::SeqCst)
+            || !state.release_confirmed.load(Ordering::SeqCst)
+            || !state.active.lock().map_err(|_| "Active task poisoned")?.is_null()
+            || state.queued.load(Ordering::SeqCst) != 0
+        {
+            return Err("Task scope requires an unlatched, idle, released actor; it cannot resume a stopped task".into());
+        }
+        let mut scopes = state.task_scopes.lock().map_err(|_| "Task scopes poisoned")?;
+        scopes.retain(|_, expires| *expires > Instant::now());
+        if !scopes.is_empty() && !scopes.contains_key(task_id) {
+            return Err("Another Computer Use task scope is already live; end or release it before starting a new task".into());
+        }
+        let mut used = state.task_scope_ids.lock().map_err(|_| "Task scope IDs poisoned")?;
+        if used.contains(task_id) {
+            if scopes.contains_key(task_id) {
+                return Ok(text_result(json!({"schema":1,"lifecycle_revision":2,"complete":true,"session_id":state.session_id,"epoch":state.epoch.load(Ordering::SeqCst),"takeover_latched":false,"actor_active":false,"task_scope_active":true,"queued_batches":state.queued.load(Ordering::SeqCst),"actor_release_confirmed":true})));
+            }
+            return Err("Task scope ID was already used in this backend session; choose a fresh ID".into());
+        }
+        used.insert(task_id.to_string());
+        scopes.insert(task_id.to_string(), Instant::now() + Duration::from_secs(20 * 60));
+    } else if event == "end" {
+        let _gate = state.task_scope_gate.lock().map_err(|_| "Task scope gate poisoned")?;
+        let task_id = task_id.ok_or("Task scope ID is required")?;
+        state.task_scopes.lock().map_err(|_| "Task scopes poisoned")?.remove(task_id);
+    } else if event != "status" {
+        return Err("Indicator lifecycle event must be status, begin, or end".into());
+    }
     let active = state.active.lock().map_err(|_| "Active state poisoned")?;
     let actor_active = !active.is_null();
     let release_confirmed = state.release_confirmed.load(Ordering::SeqCst);
     let queued = state.queued.load(Ordering::SeqCst);
+    let task_scope_active = task_id.is_some_and(|task_id| {
+        state.task_scopes.lock().is_ok_and(|mut scopes| {
+            scopes.retain(|_, expires| *expires > Instant::now());
+            scopes.contains_key(task_id)
+        })
+    });
     drop(active);
     Ok(text_result(json!({
-        "schema":1,"lifecycle_revision":1,"complete":true,
+        "schema":1,"lifecycle_revision":2,"complete":true,
         "session_id":state.session_id,
+        "task_scope_active":task_scope_active,
         "epoch":state.epoch.load(Ordering::SeqCst),
         "takeover_latched":state.takeover.load(Ordering::SeqCst),
         "actor_active":actor_active,"queued_batches":queued,
@@ -3061,7 +3212,7 @@ fn indicator_lifecycle(state: &State) -> R<Value> {
 
 fn handle(state: &State, tool: &str, args: &Value, epoch: u64) -> R<Value> {
     match tool {
-        "desktop_indicator_lifecycle" => indicator_lifecycle(state),
+        "desktop_indicator_lifecycle" => indicator_lifecycle(state, args),
         "desktop_status" => {
             let capture = capture_status(state)?;
             let readiness = resume_input_readiness(state)?;
@@ -3070,6 +3221,7 @@ fn handle(state: &State, tool: &str, args: &Value, epoch: u64) -> R<Value> {
                 data[key] = value.clone();
             }
             data["resume_input_readiness"] = readiness;
+            data["rearm_warning"] = rearm_warning_status(state);
             data["window_close_request"] = close_window_capability();
             data["desktop_launch"] = launch::capability();
             Ok(text_result(data))
@@ -3083,11 +3235,14 @@ fn handle(state: &State, tool: &str, args: &Value, epoch: u64) -> R<Value> {
         "desktop_act" => act(state, args, epoch),
         "desktop_recover_release" => recover_release(state, args),
         "desktop_cancel" | "desktop_takeover" => {
+            let _scope_gate = state.task_scope_gate.lock().map_err(|_| "Task scope gate poisoned")?;
             if tool == "desktop_takeover" {
                 state.takeover.store(true, Ordering::SeqCst);
             }
             let start = Instant::now();
             let next = state.epoch.fetch_add(1, Ordering::SeqCst) + 1;
+            state.task_scopes.lock().map_err(|_| "Task scopes poisoned")?.clear();
+            *state.rearm_warning.lock().map_err(|_| "Re-arm warning state poisoned")? = None;
             state.reference_cache.invalidate();
             if tool == "desktop_takeover" {
                 if let Err(error) = state
@@ -3167,6 +3322,50 @@ fn handle(state: &State, tool: &str, args: &Value, epoch: u64) -> R<Value> {
                 return Err("Physical human input is still recent; wait until desktop is idle before resuming".into());
             }
             let expected_epoch = validate_resume_binding(state, args, epoch)?;
+            let physical_escape_stop = state
+                .takeover_marker
+                .lock()
+                .map_err(|_| "Takeover marker state poisoned")?
+                .reason
+                .source
+                == "physical_escape";
+            if physical_escape_stop {
+                let task_id = args["task_id"].as_str().ok_or("A newly requested physical-Escape re-arm requires a fresh task_id. Keep the stop latched and start a new task identity.")?;
+                if !state.task_scope_ids.lock().map_err(|_| "Task scope IDs poisoned")?.contains(task_id) {
+                    // A fresh ID is required for the new request. IDs from the
+                    // stopped task remain tombstoned for this daemon session.
+                } else if state.rearm_warning.lock().map_err(|_| "Re-arm warning state poisoned")?.as_ref().is_none_or(|pending| pending.task_id != task_id) {
+                    return Err("Physical-Escape re-arm requires a fresh task_id that was not used by the canceled task".into());
+                }
+                let mut warning = state.rearm_warning.lock().map_err(|_| "Re-arm warning state poisoned")?;
+                if let Some(existing) = warning.as_ref() {
+                    if existing.session_id != state.session_id || existing.epoch != expected_epoch || existing.task_id != task_id {
+                        return Err("Re-arm warning binding belongs to a different task or stop; the physical Escape remains latched".into());
+                    }
+                    if existing.expires <= Instant::now() {
+                        *warning = None;
+                        return Err("The 2-second warning expired without a matching resume; start a fresh explicitly requested task with a new binding".into());
+                    }
+                    if Instant::now() < existing.resume_after {
+                        let remaining = existing.resume_after.saturating_duration_since(Instant::now()).as_millis() as u64;
+                        return Ok(text_result(json!({"schema":1,"status":"rearm_warning","epoch":expected_epoch,"session_id":state.session_id,"task_id":task_id,"takeover_latched":true,"remaining_ms":remaining,"required_ms":2000,"escape_aborts":true,"retry_same_binding_after_ms":remaining,"automatic_resume":false,"old_task_or_queue_resumed":false})));
+                    }
+                } else {
+                    let now = Instant::now();
+                    if !state.task_scope_ids.lock().map_err(|_| "Task scope IDs poisoned")?.insert(task_id.to_string()) {
+                        return Err("Physical-Escape re-arm task_id was already used; choose a fresh identity for a new explicit request".into());
+                    }
+                    *warning = Some(RearmWarning {
+                        task_id: task_id.to_string(),
+                        session_id: state.session_id.clone(),
+                        epoch: expected_epoch,
+                        resume_after: now + Duration::from_secs(2),
+                        expires: now + Duration::from_secs(30),
+                    });
+                    record(state, "physical_escape_rearm_warning", json!({"epoch":expected_epoch,"duration_ms":2000,"task_id":task_id,"escape_aborts":true,"automatic_resume":false}));
+                    return Ok(text_result(json!({"schema":1,"status":"rearm_warning","epoch":expected_epoch,"session_id":state.session_id,"task_id":task_id,"takeover_latched":true,"remaining_ms":2000,"required_ms":2000,"escape_aborts":true,"retry_same_binding_after_ms":2000,"automatic_resume":false,"old_task_or_queue_resumed":false})));
+                }
+            }
             let last = readiness["last_activity_monotonic_ms"]
                 .as_u64()
                 .ok_or("Input readiness timestamp missing")?;
@@ -3201,6 +3400,18 @@ fn handle(state: &State, tool: &str, args: &Value, epoch: u64) -> R<Value> {
                 .epoch
                 .compare_exchange(expected_epoch, next, Ordering::SeqCst, Ordering::SeqCst)
                 .map_err(|_| "New stop/cancellation arrived while resuming; refusal retained")?;
+            if physical_escape_stop {
+                let task_id = args["task_id"].as_str().ok_or("Physical-Escape re-arm task identity missing")?;
+                if !state.task_scope_ids.lock().map_err(|_| "Task scope IDs poisoned")?.contains(task_id)
+                    || state.task_scopes.lock().map_err(|_| "Task scopes poisoned")?.contains_key(task_id)
+                {
+                    return Err("New task identity was not reserved by this warning or is already active; physical Escape remains latched".into());
+                }
+                state.task_scopes.lock().map_err(|_| "Task scopes poisoned")?.insert(
+                    task_id.to_string(),
+                    Instant::now() + Duration::from_secs(20 * 60),
+                );
+            }
             state.reference_cache.invalidate();
             marker.clear()?;
             state.takeover.store(false, Ordering::SeqCst);
@@ -3212,6 +3423,13 @@ fn handle(state: &State, tool: &str, args: &Value, epoch: u64) -> R<Value> {
                 || deadline_elapsed()
             {
                 state.takeover.store(true, Ordering::SeqCst);
+                if physical_escape_stop {
+                    if let Some(task_id) = args["task_id"].as_str() {
+                        if let Ok(mut scopes) = state.task_scopes.lock() {
+                            scopes.remove(task_id);
+                        }
+                    }
+                }
                 if let Err(error) = marker.restore() {
                     record(
                         state,
@@ -3224,9 +3442,12 @@ fn handle(state: &State, tool: &str, args: &Value, epoch: u64) -> R<Value> {
                         .into(),
                 );
             }
+            if physical_escape_stop {
+                *state.rearm_warning.lock().map_err(|_| "Re-arm warning state poisoned")? = None;
+            }
             record(state, "desktop_resume", json!({"epoch":next}));
             Ok(text_result(
-                json!({"schema":1,"status":"resumed","epoch":next,"fresh_observation_required":true,"backend_restart_requires_explicit_resume":true}),
+                json!({"schema":1,"status":"resumed","epoch":next,"fresh_observation_required":true,"backend_restart_requires_explicit_resume":true,"physical_escape_warning_ms":if physical_escape_stop {2000} else {0},"old_task_or_queue_resumed":false}),
             ))
         }
         _ => Err(format!("Unknown tool {tool}")),
@@ -3486,16 +3707,16 @@ fn tools() -> Value {
     let action = action_schema();
     let crop = json!({"type":"object","properties":{"x":{"type":"integer","minimum":0},"y":{"type":"integer","minimum":0},"width":{"type":"integer","minimum":1},"height":{"type":"integer","minimum":1}},"required":["x","y","width","height"]});
     let mut catalog = json!([
-      {"name":"desktop_status","description":"Persistent Niri desktop actor status, active/preparing task, queued batches and cancel epoch. Reports independent capture attempt/failure evidence and shared resume_input_readiness; capture_available=false alone is not capture failure. Startup capture_not_attempted=true is expected. Readiness is only a snapshot, not user permission or actor release. Advertises global_keyboard routing_revision=2 only when this software implements scoped owned-uinput routing; this is not a live device/UI-success attestation. Does not capture or act.","inputSchema":{"type":"object","properties":{}}},
+      {"name":"desktop_status","description":"Persistent Niri desktop actor status, active/preparing task, queued batches, cancel epoch and any 2-second physical-Escape re-arm warning. Reports independent capture attempt/failure evidence and shared resume_input_readiness; capture_available=false alone is not capture failure. Startup capture_not_attempted=true is expected. Readiness is only a snapshot, not user permission or actor release. Advertises global_keyboard routing_revision=2 only when this software implements scoped owned-uinput routing; this is not a live device/UI-success attestation. Does not capture or act.","inputSchema":{"type":"object","properties":{}}},
       {"name":"desktop_windows","description":"Read actual Niri windows, outputs and workspaces. Window layout may lack global app bounds; never invent bounds.","inputSchema":{"type":"object","properties":{}}},
       {"name":"desktop_observe","description":"Capture one actual laptop output via grim at scale1, plus Niri identities. Startup capture_not_attempted=true is expected and permits this first read-only observation. Input always requires accepted fresh observation and action_ready; prior successful capture is not a prerequisite for authorized startup resume. Optional crop uses full-output screenshot pixels x/y/width/height; action x/y then use local pixels of the displayed crop. Core translates crop origin; NEVER add compositor output origin. Actual PNG size can differ from Niri logical size by rounding. Observation expires in60seconds; identity/geometry and fresh target-region guards still run. Observe after focus/workspace/layout changes. include_image=false returns private PNG reference only.","inputSchema":{"type":"object","properties":{"output":{"type":"string"},"include_image":{"type":"boolean"},"crop":crop}}},
       {"name":"desktop_semantic","description":"Read fresh Cua AT-SPI elements for a Niri window. Maps only unique actual PID+title; synthetic Cua IDs are never guessed. Query filters returned elements. Accessibility bounds are app-local and NOT screenshot coordinates; do not directly click them without calibrated mapping. Limited/root-only trees require visual fallback.","inputSchema":{"type":"object","properties":{"window_id":{"type":"integer"},"query":{"type":"string"},"max_elements":{"type":"integer"},"max_depth":{"type":"integer"}},"required":["window_id"]}},
       {"name":"desktop_semantic_direct","description":"Read exact-window AT-SPI labels/tree even during ordinary physical activity or held controls. Returns original/current input generation and explicit input/action readiness. Non-actionable or incomplete snapshots issue no handles (focus/click/set_value=false); obtain a fresh complete snapshot after controls release. Only daemon-owned handles from actionable complete snapshots may be used with desktop_act semantic_set_value, semantic_click or standalone semantic_focus. focusable/FOCUSED flags attest element keyboard focus separately from Niri window focus; semantic_focus requires fresh complete semantics and verifies FOCUSED on the same exact object before returning focus_verified. Reobserve and requery semantics before later keyboard input. No raw object/index/Cua tokens and no pixel fallback. Native GTK candidates need live acceptance; missing/incomplete bridges use visual typed actions.","inputSchema":{"type":"object","properties":{"window_id":{"type":"integer"},"query":{"type":"string"},"max_elements":{"type":"integer"},"max_depth":{"type":"integer"},"include_text_selection":{"type":"boolean","description":"Opt-in bounded selection readback for at most one showing enabled FOCUSED unprotected Text object; unicode codepoint [start,end). Explicit available/unsupported/error, no input authority; check fresh generation, complete tree and text identity separately."}},"required":["window_id"]}},
       {"name":"desktop_act","description":"Standalone launch_app(app:zed|chrome), editor_open_project(project:jarvis) and editor_open_file(project:jarvis,relative_path) spawn only pinned isolated apps inside this actor on observed active DP-6/eDP-1. OS spawn ACK is not UI success; uncertain spawn requires verification, no auto retry. Single-writer typed desktop actions against fresh observation. Rejects changed focus/geometry/scaling or changed pixels near pointer targets. x/y are local to displayed screenshot/crop. Every move/click/scroll/drag requires the displayed view to be at most1200 pixels on each axis; an oversized view rejects the whole batch before any input, queue admission or device preparation. Capture a fresh target crop and use its crop-local coordinates. Full images remain usable for overview, focus, keys and semantics. Focus must be standalone. close_window(window_id) is standalone with the same top-level window_id, exact fresh focused target/title/output; caller proves task ownership and safe saved state. Explicit close request acknowledgement is not window disappearance; inspect fresh inventory and any save modal. No PID kill or blind cleanup. Unknown or misplaced fields for an action kind reject the whole batch before input; restore_clipboard belongs only to paste, while type always preserves the prior selection. By default observe_after=true returns a new after_observation ID and image in this same response after dispatch/release and a bounded80ms defaultsettle wait; settle_ms=0..1000 can adjust. Use it for the next act and inspect expected result. A slow/unchanged frame needs another observation/semantic check, not repetition of toggle input. include_image=false omits its image. Acknowledgement is not UI success. Type text_method=auto uses clipboard for known Electron IDs (code/T3) and >1000-character text, keyboard for shorter text in other apps; explicit keyboard/clipboard are available. Electron wtype Unicode is unreliable on this laptop. Clipboard preserves supported text/rich app payloads and original Chromium provenance in bounded RAM from one offer, normalizes duplicate MIME names, omits SAVE_TARGETS and SAME_APP GTK_TEXT_BUFFER_CONTENTS transport markers, preserves serialized GTK rich text, and keeps a separate source holder across actor restarts. Unsupported/sensitive/oversized formats refuse before replacement. Own-source check runs after layout/keymap/window validation and before the first paste modifier press; ownership can still change between reply and input because Wayland has no atomic selection-check-and-paste. No restore after takeover/cancel/ownership loss. Scroll dx/dy are discrete wheel steps (integer -100..100), not pixels; positive dx moves right and positive dy moves down. Smooth-scroll animation needs another fresh observation/settle check before reusing visual targets. Keys are modifiers first e.g.[ctrl,l],[Return]. Explicit key_scope=compositor and Super/meta/logo chords use an owned persistent direct-uinput device because this Niri25.11 Wayland virtual keyboard bypasses compositor bindings; Ctrl/app chords retain the Wayland transport. A fresh proxy check requires backend routing_revision=2 and binds session/epoch/observation before forwarding a global batch; an older backend is refused. Missing permission/takeover monitor/compositor device-open evidence refuses the complete batch before input. Creating the own device is a capability side effect. A kernel input acknowledgement does not verify Niri/UI acceptance; inspect the fresh result. No automatic input fallback. Direct semantic_set_value(handle_id,text,expected_text optional) replaces exact editable contents; semantic_click(handle_id,action_name from direct tree) invokes only AT-SPI named action. Both freshly revalidate context and have no input fallback. Standalone semantic_focus(handle_id) uses Component.GrabFocus, then repeats exact object/window/context validation and freshly queries FOCUSED; acceptance alone is not focus_verified. It sends no keyboard input or fallback. Reobserve and requery the exact focused object before keyboard input. Batch stable edits/shortcuts when intermediate states cannot invalidate later targets; changed-target actions need fresh observation.","inputSchema":{"type":"object","properties":{"observation_id":{"type":"string"},"window_id":{"type":"integer"},"task_id":{"type":"string"},"timeout_ms":{"type":"integer","minimum":100,"maximum":120000,"description":"Whole batch deadline; release cleanup follows timeout."},"observe_after":{"type":"boolean","default":true},"include_image":{"type":"boolean","default":true},"settle_ms":{"type":"integer","default":80,"minimum":0,"maximum":1000,"description":"Post-action wait before capture; reobserve slow states, never replay blindly."},"actions":{"type":"array","items":action,"minItems":1,"maxItems":32}},"required":["observation_id","actions"]}},
       {"name":"desktop_cancel","description":"Priority epoch cancellation independent of actor lock. Pending batches stop; held buttons release. Already-dispatched effects remain. Wait for desktop_status active=null and actor_release_confirmed=true for full release.","inputSchema":{"type":"object","properties":{}}},
-      {"name":"desktop_takeover","description":"Explicit human desktop takeover, persists its cause across backend restarts and latches refusal of future actions and cancels queued/active automation. Only a physical Escape press does this automatically when accessible; ordinary input invalidates stale observations and releases a conflicting batch without latching takeover. Wait active=null and actor_release_confirmed=true for full release. desktop_resume then fresh observation is required.","inputSchema":{"type":"object","properties":{}}},
+      {"name":"desktop_takeover","description":"Explicit human desktop takeover, persists its cause across backend restarts and latches refusal of future actions and cancels queued/active automation. Physical Escape aborts only queued/preparing/running work or a live task-indicator scope; idle Escape only invalidates stale observations. Ordinary input invalidates stale observations and releases a conflicting batch without latching takeover. Wait active=null and actor_release_confirmed=true for full release. desktop_resume then fresh observation is required.","inputSchema":{"type":"object","properties":{}}},
       {"name":"desktop_recover_release","description":"Explicit bounded recovery of unconfirmed release/receipt on existing owned actuators only. Refuses if writer busy, active task or queue nonempty. Sends only releases of owned held buttons/keys and receipt sync, no press/move/device creation/action replay, no epoch/latch/cause reset, no automatic resume. May finalize effects of already-held input. Default1500ms, maximum2000ms shared budget. Failure remains unconfirmed; original last_result preserved. Success invalidates old observations/semantic handles and requires fresh capture; inspect status queue and follow human return-of-control policy before resume.","inputSchema":{"type":"object","properties":{"timeout_ms":{"type":"integer","minimum":200,"maximum":2000,"default":1500}},"additionalProperties":false}},
-      {"name":"desktop_resume","description":"Backend startup is always latched and preserves any prior human/explicit cause. An active transition requires expected_epoch=status.epoch and expected_session_id=status.session_id for the stop the user has authorized resuming (not its historical reason.session_id); the proxy requires backend resume_binding_revision=1 and uses a new internal bound wire method so an old replacement backend cannot ignore the fence fields. An idle/unlatched older backend may return only a read-only no-op snapshot, never receive an unbound resume; stale binding refuses, never blindly refresh/retry after a new real stop. Explicitly release only after the user returns control, actor stopped, queue empty and physical input idle. Controlled tests and explicit takeover calls cannot establish ownership of a human stop. No successful capture is needed before authorized startup resume; inspect resume_input_readiness, then obtain a fresh observation before input. Do not automatically undo human takeover. If already unlatched with idle/released actor and empty queue, empty arguments return already_resumed without epoch/generation/cache changes or quiet checks. last_reason is historical; reason is null when marker_active=false.","inputSchema":{"type":"object","properties":{"expected_epoch":{"type":"integer","minimum":1},"expected_session_id":{"type":"string","minLength":1}},"additionalProperties":false}}
+      {"name":"desktop_resume","description":"Backend startup is always latched and preserves any prior human/explicit cause. An active transition requires expected_epoch=status.epoch and expected_session_id=status.session_id for the stop the user has authorized resuming (not its historical reason.session_id); the proxy requires backend resume_binding_revision=1 and uses a new internal bound wire method so an old replacement backend cannot ignore the fence fields. An idle/unlatched older backend may return only a read-only no-op snapshot, never receive an unbound resume; stale binding refuses, never blindly refresh/retry after a new stop. A physical_escape stop requires a new explicit task_id: the first call returns a visible 2-second Escape-abortable warning; after the warning, retry once with the same task_id/session/epoch. On success the new task scope is bound before the stop clears. The old task and queue never resume. Explicit takeover still requires the user's return of control. No successful capture is needed before authorized startup resume; inspect resume_input_readiness, then obtain a fresh observation before input. If already unlatched with idle/released actor and empty queue, empty arguments return already_resumed without epoch/generation/cache changes or quiet checks. last_reason is historical; reason is null when marker_active=false.","inputSchema":{"type":"object","properties":{"expected_epoch":{"type":"integer","minimum":1},"expected_session_id":{"type":"string","minLength":1},"task_id":{"type":"string","minLength":1,"maxLength":128}},"additionalProperties":false}}
     ]);
     // These hints describe desktop/app effects; private read caches do not
     // grant input. The managed client policy authorizes only this server.
@@ -3817,6 +4038,10 @@ fn serve(socket: &Path) -> R<()> {
         capture_attempts: AtomicU64::new(0),
         capture_failure: Mutex::new(None),
         active: Mutex::new(Value::Null),
+        task_scopes: Mutex::new(HashMap::new()),
+        task_scope_ids: Mutex::new(HashSet::new()),
+        task_scope_gate: Mutex::new(()),
+        rearm_warning: Mutex::new(None),
         last_result: Mutex::new(Value::Null),
         observations: Mutex::new(HashMap::new()),
         reference_cache: ReferenceCache::default(),
@@ -4071,6 +4296,10 @@ mod regression {
             capture_attempts: AtomicU64::new(0),
             capture_failure: Mutex::new(None),
             active: Mutex::new(Value::Null),
+            task_scopes: Mutex::new(HashMap::new()),
+            task_scope_ids: Mutex::new(HashSet::new()),
+            task_scope_gate: Mutex::new(()),
+            rearm_warning: Mutex::new(None),
             last_result: Mutex::new(Value::Null),
             observations: Mutex::new(HashMap::new()),
             reference_cache: ReferenceCache::default(),
@@ -4169,6 +4398,10 @@ mod regression {
             capture_attempts: AtomicU64::new(0),
             capture_failure: Mutex::new(None),
             active: Mutex::new(Value::Null),
+            task_scopes: Mutex::new(HashMap::new()),
+            task_scope_ids: Mutex::new(HashSet::new()),
+            task_scope_gate: Mutex::new(()),
+            rearm_warning: Mutex::new(None),
             last_result: Mutex::new(Value::Null),
             observations: Mutex::new(HashMap::new()),
             reference_cache: ReferenceCache::default(),
@@ -4679,9 +4912,9 @@ mod indicator_lifecycle_tests {
         let result = data(&handle(&state, "desktop_indicator_lifecycle", &json!({}), 77).unwrap());
         assert_eq!(
             result,
-            json!({"schema":1,"lifecycle_revision":1,"complete":true,
+            json!({"schema":1,"lifecycle_revision":2,"complete":true,
             "session_id":state.session_id,"epoch":77,"takeover_latched":false,
-            "actor_active":false,"queued_batches":0,"actor_release_confirmed":true})
+            "actor_active":false,"task_scope_active":false,"queued_batches":0,"actor_release_confirmed":true})
         );
         assert_eq!(state.input_policy.generation(), generation);
         assert_eq!(state.serial.load(Ordering::SeqCst), serial);
@@ -4697,7 +4930,7 @@ mod indicator_lifecycle_tests {
         state.queued.store(2, Ordering::SeqCst);
         state.epoch.store(78, Ordering::SeqCst);
         state.takeover.store(true, Ordering::SeqCst);
-        let result = data(&indicator_lifecycle(&state).unwrap());
+        let result = data(&indicator_lifecycle(&state, &json!({})).unwrap());
         assert_eq!(result["actor_active"], true);
         assert_eq!(result["actor_release_confirmed"], false);
         assert_eq!(result["queued_batches"], 2);
@@ -4710,7 +4943,7 @@ mod indicator_lifecycle_tests {
         assert!(result.get("task_id").is_none());
         assert!(result.get("phase").is_none());
         *state.active.lock().unwrap() = Value::Null;
-        let idle = data(&indicator_lifecycle(&state).unwrap());
+        let idle = data(&indicator_lifecycle(&state, &json!({})).unwrap());
         assert_eq!(idle["actor_active"], false);
         assert_eq!(idle["actor_release_confirmed"], false);
         fs::remove_dir_all(dir).unwrap();
@@ -4752,6 +4985,10 @@ mod release_recovery_tests {
                 capture_attempts: AtomicU64::new(0),
                 capture_failure: Mutex::new(None),
                 active: Mutex::new(Value::Null),
+                task_scopes: Mutex::new(HashMap::new()),
+                task_scope_ids: Mutex::new(HashSet::new()),
+                task_scope_gate: Mutex::new(()),
+                rearm_warning: Mutex::new(None),
                 last_result: Mutex::new(
                     json!({"status":"failed","error":"original timeout preserved"}),
                 ),
@@ -4798,6 +5035,12 @@ mod release_recovery_tests {
         let o = obs(&dir);
         state.observations.lock().unwrap().insert(o.id.clone(), o);
         (Arc::new(state), dir)
+    }
+    fn test_live_scope(state: &State, task_id: &str) {
+        state.task_scopes.lock().unwrap().insert(
+            task_id.to_string(),
+            Instant::now() + Duration::from_secs(60),
+        );
     }
     fn result_data(result: &Value) -> Value {
         serde_json::from_str(result["content"][0]["text"].as_str().unwrap()).unwrap()
@@ -4993,6 +5236,7 @@ mod release_recovery_tests {
             .contains("client request was canceled"));
         CURRENT_CANCEL_FLAG.with(|f| *f.borrow_mut() = None);
         assert!(validate_focus_state(&state, &captured).is_ok());
+        test_live_scope(&state, "focus-escape");
         physical_activity(&state, true, false);
         assert!(validate_focus_state(&state, &captured).is_err());
         assert!(state.takeover.load(Ordering::SeqCst));
@@ -5078,12 +5322,14 @@ mod release_recovery_tests {
 
     #[test]
     fn r8_stale_resume_cannot_clear_a_new_real_escape_or_change_its_persisted_cause() {
-        let (mut state, dir) = fixture("r8-stale-resume");
+        let (mut state, dir) = cooperative_fixture("r8-stale-resume");
         state.started = Instant::now() - Duration::from_secs(2);
         *state.human_monitor.lock().unwrap() = json!({"available":true,"watched_devices":1});
         state.release_confirmed.store(true, Ordering::SeqCst);
         let expected = state.epoch.load(Ordering::SeqCst);
+        *state.active.lock().unwrap() = json!({"task_id":"newer-live-task"});
         physical_activity(&state, true, false);
+        *state.active.lock().unwrap() = Value::Null;
         state.last_human_ms.store(0, Ordering::SeqCst); // private elapsed-quiet fixture
         let actual = state.epoch.load(Ordering::SeqCst);
         let marker = fs::read(dir.join("takeover.json")).unwrap();
@@ -5135,7 +5381,7 @@ mod release_recovery_tests {
     }
 
     #[test]
-    fn r8_resume_waiting_on_marker_cannot_erase_a_concurrent_real_escape() {
+    fn r8_resume_waiting_on_marker_refuses_concurrent_input_without_erasing_explicit_takeover() {
         let (mut raw, dir) = fixture("r8-marker-race");
         raw.started = Instant::now() - Duration::from_secs(2);
         raw.release_confirmed.store(true, Ordering::SeqCst);
@@ -5164,25 +5410,18 @@ mod release_recovery_tests {
             thread::sleep(Duration::from_millis(1));
         }
         let worker = state.clone();
-        let escape = thread::spawn(move || physical_activity(&worker, true, false));
-        while state.epoch.load(Ordering::SeqCst) == epoch {
-            assert!(
-                Instant::now() < until,
-                "Escape did not latch before marker persistence"
-            );
-            thread::sleep(Duration::from_millis(1));
-        }
+        let activity = thread::spawn(move || physical_activity(&worker, false, false));
+        activity.join().unwrap();
         drop(marker_guard);
         assert!(resume.join().unwrap().is_err());
-        escape.join().unwrap();
         assert!(state.takeover.load(Ordering::SeqCst));
         assert_eq!(
             state.epoch.load(Ordering::SeqCst),
-            epoch + 1,
-            "resume must not advance a newer stop epoch"
+            epoch,
+            "concurrent ordinary activity does not create a stop epoch"
         );
         let marker = state.takeover_marker.lock().unwrap();
-        assert_eq!(marker.reason.source, "physical_escape");
+        assert_eq!(marker.reason.source, "explicit_desktop_takeover");
         assert_eq!(marker.reason.session_id, state.session_id);
         assert!(!marker.reason.cause_id.is_empty());
         assert_eq!(
@@ -5196,12 +5435,13 @@ mod release_recovery_tests {
     #[test]
     fn r8_real_escape_cause_survives_actual_simulation_and_explicit_callers() {
         let (state, dir) = cooperative_fixture("r8-caller-precedence");
+        test_live_scope(&state, "real-escape-task");
         physical_activity(&state, true, false);
         let original = fs::read(dir.join("takeover.json")).unwrap();
         let epoch = state.epoch.load(Ordering::SeqCst);
         physical_activity(&state, true, true);
         assert_eq!(fs::read(dir.join("takeover.json")).unwrap(), original);
-        assert!(state.epoch.load(Ordering::SeqCst) > epoch);
+        assert_eq!(state.epoch.load(Ordering::SeqCst), epoch, "the canceled scope is not revived by a simulation event");
         let current = state.epoch.load(Ordering::SeqCst);
         handle(&state, "desktop_takeover", &json!({}), current).unwrap();
         assert_eq!(fs::read(dir.join("takeover.json")).unwrap(), original);
@@ -5212,6 +5452,7 @@ mod release_recovery_tests {
         );
         fs::remove_dir_all(dir).unwrap();
         let (state, dir) = cooperative_fixture("r8-fresh-controlled-cause");
+        test_live_scope(&state, "simulation-task");
         physical_activity(&state, true, true);
         assert_eq!(
             state.takeover_marker.lock().unwrap().reason.source,
@@ -5446,6 +5687,125 @@ mod release_recovery_tests {
         )
         .unwrap_err()
         .contains("latched"));
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn physical_escape_while_idle_only_invalidates_targets_and_does_not_persist() {
+        let (state, dir) = cooperative_fixture("escape-idle-is-not-a-takeover");
+        let epoch = state.epoch.load(Ordering::SeqCst);
+        let generation = state.input_policy.generation();
+        physical_activity(&state, true, false);
+        assert!(!state.takeover.load(Ordering::SeqCst));
+        assert_eq!(state.epoch.load(Ordering::SeqCst), epoch);
+        assert_eq!(state.input_policy.generation(), generation + 1);
+        assert!(!dir.join("takeover.json").exists());
+        assert!(state.active.lock().unwrap().is_null());
+        assert_eq!(state.queued.load(Ordering::SeqCst), 0);
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn task_indicator_scope_makes_escape_abort_the_whole_request_across_model_gaps() {
+        let (state, dir) = cooperative_fixture("escape-task-scope");
+        let initial = result_data(&handle(
+            &state,
+            "desktop_indicator_lifecycle",
+            &json!({"event":"begin","task_id":"owned-task-gap","session_id":state.session_id,"expected_epoch":77}),
+            77,
+        ).unwrap());
+        assert_eq!(initial["task_scope_active"], true);
+        assert_eq!(initial["epoch"], 77);
+        // No actor action is active here: the visible task-owned indicator
+        // keeps the explicit workflow scope live across model-thinking gaps.
+        physical_activity(&state, true, false);
+        assert!(state.takeover.load(Ordering::SeqCst));
+        assert_eq!(state.epoch.load(Ordering::SeqCst), 78);
+        assert_eq!(state.takeover_marker.lock().unwrap().reason.source, "physical_escape");
+        let ended = result_data(&handle(
+            &state,
+            "desktop_indicator_lifecycle",
+            &json!({"event":"end","task_id":"owned-task-gap"}),
+            78,
+        ).unwrap());
+        assert_eq!(ended["task_scope_active"], false);
+        assert!(state.takeover.load(Ordering::SeqCst), "ending the indicator never resumes a stopped task");
+        assert!(handle(
+            &state,
+            "desktop_indicator_lifecycle",
+            &json!({"event":"begin","task_id":"owned-task-gap","session_id":state.session_id,"expected_epoch":78}),
+            78,
+        ).is_err(), "a stopped/ended task identity cannot reopen its scope");
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn escape_during_new_task_warning_cancels_rearm_and_keeps_stop_persisted() {
+        let (mut state, dir) = cooperative_fixture("escape-rearm-countdown");
+        state.started = Instant::now() - Duration::from_secs(4);
+        *state.human_monitor.lock().unwrap() = json!({"available":true,"watched_devices":1});
+        state.release_confirmed.store(true, Ordering::SeqCst);
+        *state.active.lock().unwrap() = json!({"task_id":"current-task"});
+        physical_activity(&state, true, false); // running task in the fixture
+        *state.active.lock().unwrap() = Value::Null;
+        let expected = state.epoch.load(Ordering::SeqCst);
+        let args = json!({"expected_epoch":expected,"expected_session_id":state.session_id,"task_id":"fresh-request-2"});
+        let warning = handle(&state,"desktop_resume",&args,expected).unwrap();
+        assert_eq!(result_data(&warning)["status"], "rearm_warning");
+        assert_eq!(rearm_warning_status(&state)["pending"], true);
+        physical_activity(&state, true, false);
+        assert!(handle(&state,"desktop_resume",&args,expected).unwrap_err().contains("Canceled"));
+        assert!(state.takeover.load(Ordering::SeqCst));
+        assert_eq!(state.takeover_marker.lock().unwrap().reason.source, "physical_escape");
+        assert_eq!(rearm_warning_status(&state)["pending"], false);
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn physical_escape_rearm_requires_second_bound_call_and_opens_only_the_new_task_scope() {
+        let (mut state, dir) = cooperative_fixture("escape-rearm-success");
+        state.started = Instant::now() - Duration::from_secs(4);
+        *state.human_monitor.lock().unwrap() = json!({"available":true,"watched_devices":1});
+        *state.active.lock().unwrap() = json!({"task_id":"canceled-old-task"});
+        physical_activity(&state, true, false);
+        *state.active.lock().unwrap() = Value::Null;
+        state.last_human_ms.store(0, Ordering::SeqCst);
+        let expected = state.epoch.load(Ordering::SeqCst);
+        let args = json!({"expected_epoch":expected,"expected_session_id":state.session_id,"task_id":"new-explicit-task"});
+        let warning = handle(&state,"desktop_resume",&args,expected).unwrap();
+        assert_eq!(result_data(&warning)["status"], "rearm_warning");
+        assert!(state.takeover.load(Ordering::SeqCst));
+        let early = handle(&state,"desktop_resume",&args,expected).unwrap();
+        assert_eq!(result_data(&early)["status"], "rearm_warning");
+        assert!(result_data(&early)["remaining_ms"].as_u64().unwrap() > 0);
+        thread::sleep(Duration::from_millis(2050));
+        let resumed = handle(&state,"desktop_resume",&args,expected).unwrap();
+        let resumed = result_data(&resumed);
+        assert_eq!(resumed["status"], "resumed");
+        assert_eq!(state.takeover.load(Ordering::SeqCst), false);
+        assert!(state.task_scopes.lock().unwrap().contains_key("new-explicit-task"));
+        let indicator = result_data(&handle(
+            &state,
+            "desktop_indicator_lifecycle",
+            &json!({"event":"begin","task_id":"new-explicit-task","session_id":state.session_id,"expected_epoch":resumed["epoch"]}),
+            expected + 1,
+        ).unwrap());
+        assert_eq!(indicator["task_scope_active"], true, "the indicator adopts the newly authorized task scope");
+        assert!(handle(
+            &state,
+            "desktop_indicator_lifecycle",
+            &json!({"event":"begin","task_id":"wrong-indicator-id","session_id":state.session_id,"expected_epoch":resumed["epoch"]}),
+            expected + 1,
+        ).is_err(), "a different indicator cannot orphan the authorized task scope");
+        assert!(state.takeover_marker.lock().unwrap().status()["marker_active"] == false);
+        handle(
+            &state,
+            "desktop_indicator_lifecycle",
+            &json!({"event":"end","task_id":"new-explicit-task"}),
+            expected + 1,
+        ).unwrap();
+        assert!(handle(
+            &state,
+            "desktop_indicator_lifecycle",
+            &json!({"event":"begin","task_id":"new-explicit-task","session_id":state.session_id,"expected_epoch":resumed["epoch"]}),
+            expected + 1,
+        ).is_err(), "ended task IDs remain tombstoned against delayed stale begins");
         fs::remove_dir_all(dir).unwrap();
     }
     #[test]
@@ -6002,6 +6362,7 @@ mod release_recovery_tests {
             .unwrap_err()
             .contains("deadline"));
         }
+        test_live_scope(&state, "semantic-readiness-escape");
         physical_activity(&state, true, false);
         assert!(semantic_snapshot_result(
             &state,
@@ -6058,7 +6419,10 @@ mod release_recovery_tests {
                 "held" => state.input_policy.update_holds(2, true),
                 "cancel" => CURRENT_CANCEL_FLAG
                     .with(|f| *f.borrow_mut() = Some(Arc::new(AtomicBool::new(true)))),
-                "escape" => physical_activity(&state, true, false),
+                "escape" => {
+                    test_live_scope(&state, "semantic-handle-escape");
+                    physical_activity(&state, true, false)
+                }
                 _ => {}
             }
             let result = finalize_semantic_handles(
