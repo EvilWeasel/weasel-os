@@ -7,6 +7,7 @@ let
     cp ${../scripts/weasel-update-gates.py} "$out/weasel-update-gates.py"
     cp ${../scripts/weasel-update-activate.py} "$out/weasel-update-activate.py"
     cp ${../scripts/weasel-update-bootstrap.py} "$out/weasel-update-bootstrap.py"
+    cp ${../scripts/weasel-update-prebuilt.py} "$out/weasel-update-prebuilt.py"
     cp ${../scripts/weasel-update-batch.py} "$out/weasel-update-batch.py"
     cp ${../scripts/weasel-update-migration.py} "$out/weasel-update-migration.py"
     cp ${../scripts/weasel-update-niri.py} "$out/weasel-update-niri.py"
@@ -53,6 +54,13 @@ let
       exec ${pkgs.python3}/bin/python3 ${runfiles}/weasel-update-bootstrap.py "$@"
     '';
   };
+  prebuilt = pkgs.writeShellApplication {
+    name = "weasel-update-prebuilt";
+    inherit runtimeInputs;
+    text = ''
+      exec ${pkgs.python3}/bin/python3 ${runfiles}/weasel-update-prebuilt.py "$@"
+    '';
+  };
 in
 {
   # Package updates must not terminate the compositor hosting the scheduler.
@@ -65,6 +73,7 @@ in
   environment.systemPackages = [
     prepare
     bootstrap
+    prebuilt
   ];
 
   # Only the inbox is writable by the model's ordinary user. Sources, durable

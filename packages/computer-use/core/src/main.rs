@@ -4138,7 +4138,7 @@ mod regression {
         let dir = env::temp_dir().join(format!("weasel-core-regression-{}", std::process::id()));
         private_dir(&dir).unwrap();
         let script = dir.join("wl-copy");
-        fs::write(&script, b"#!/bin/sh\nsleep 0.4 &\nexit 0\n").unwrap();
+        fs::write(&script, b"#!/bin/sh\ncat >/dev/null\nsleep 0.4 &\nexit 0\n").unwrap();
         fs::set_permissions(&script, fs::Permissions::from_mode(0o700)).unwrap();
         let old_path = env::var_os("PATH").unwrap_or_default();
         env::set_var(

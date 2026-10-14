@@ -1,0 +1,126 @@
+name: Namespace Nixy prebuilt migration
+
+on:
+  workflow_dispatch:
+    inputs:
+      source_sha:
+        description: Exact signed migration commit on this workflow ref
+        required: true
+        type: string
+      baseline_commit:
+        description: Source of the currently active Nixy system
+        required: true
+        default: 54c1c00364bfffc23307d8e0521f65facaf4f106
+        type: string
+      baseline_system:
+        description: Exact currently active Nixy system Store path
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: namespace-nixy-prebuilt-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  nixy:
+    # This one full-system export exceeds the ordinary profile's root disk.
+    # Namespace's documented 8x32 shape provides 160 GB without changing it.
+    runs-on: nscloud-ubuntu-24.04-amd64-8x32
+    timeout-minutes: 180
+    env:
+      SOURCE_SHA: ${{ inputs.source_sha }}
+      BASELINE_COMMIT: ${{ inputs.baseline_commit }}
+      BASELINE_SYSTEM: ${{ inputs.baseline_system }}
+    steps:
+      - name: Require storage for the full system and export
+        run: |
+          set -euo pipefail
+          df -h / /tmp
+          available="$(df -B1 --output=avail / | tail -n1 | tr -d ' ')"
+          test "$available" -ge "$((120 * 1024 * 1024 * 1024))"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          ref: ${{ inputs.source_sha }}
+          fetch-depth: 0
+      - uses: cachix/install-nix-action@b85815f71a6de0ddee80b8a80a98d43f4bcc66c7
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            max-jobs = 4
+            cores = 2
+            # Existing Unix-socket tests need a short temporary path (SUN_LEN).
+            build-dir = /tmp
+      - name: Verify source and run bounded transport tests
+        run: |
+          set -euo pipefail
+          test "$GITHUB_SHA" = "$SOURCE_SHA"
+          test "$(git rev-parse HEAD)" = "$SOURCE_SHA"
+          test "$(git show -s --format=%P HEAD)" = "$BASELINE_COMMIT"
+          test "$(git show "$BASELINE_COMMIT":flake.lock | sha256sum | cut -d' ' -f1)" = "$(sha256sum flake.lock | cut -d' ' -f1)"
+          python3 scripts/test-weasel-update-prebuilt.py
+          sudo apt-get update
+          sudo apt-get install -y zstd
+      - name: Evaluate and build only the Nixy laptop system
+        env:
+          # Use the ephemeral Actions credential only in the evaluator process;
+          # public GitHub flake fetches otherwise share anonymous runner limits.
+          NIX_CONFIG: access-tokens = github.com=${{ github.token }}
+        run: |
+          set -euo pipefail
+          # The GitHub API tarball endpoint rate-limits this large public input
+          # on shared runners. Seed the identical locked NAR from codeload.
+          mapfile -t hermes < <(python3 - <<'PY'
+          import json
+          lock=json.load(open('flake.lock'))
+          node=lock['nodes'][lock['nodes']['root']['inputs']['hermes-agent']]['locked']
+          assert node['type']=='github' and node['owner']=='NousResearch' and node['repo']=='hermes-agent'
+          print('https://codeload.github.com/'+node['owner']+'/'+node['repo']+'/tar.gz/'+node['rev'])
+          print(node['narHash'])
+          PY
+          )
+          test "${#hermes[@]}" = 2
+          nix store prefetch-file --unpack --name source --expected-hash "${hermes[1]}" "${hermes[0]}"
+          nix eval --no-write-lock-file --raw .#nixosConfigurations.nixy-laptop.config.system.build.toplevel.drvPath > host.drv
+          nix build --no-link --print-build-logs --print-out-paths "$(cat host.drv)^*" > system.path
+          test "$(wc -l < system.path)" = 1
+          test -x "$(cat system.path)/bin/switch-to-configuration"
+          git diff --exit-code -- flake.lock
+      - name: Export the complete prebuilt system and exact source receipt
+        run: |
+          set -euo pipefail
+          mkdir -p prebuilt
+          system_path="$(cat system.path)"
+          nix-store --query --requisites "$system_path" > closure.paths
+          mapfile -t paths < closure.paths
+          test "${#paths[@]}" -gt 0
+          nix-store --export "${paths[@]}" | zstd -T0 -3 > prebuilt/nixy-laptop.nar.zst
+          zstd --test prebuilt/nixy-laptop.nar.zst
+          export SYSTEM_PATH="$system_path"
+          export SYSTEM_DRV="$(cat host.drv)"
+          python3 - <<'PY'
+          import hashlib,json,os,pathlib,re,subprocess
+          assert re.fullmatch(r'/nix/store/[a-z0-9]{32}-nixos-system-nixy-laptop-[A-Za-z0-9.+_-]+',os.environ['BASELINE_SYSTEM'])
+          def digest(path):
+              h=hashlib.sha256()
+              with open(path,'rb') as f:
+                  for chunk in iter(lambda:f.read(1048576),b''):h.update(chunk)
+              return h.hexdigest()
+          receipt=dict(schema=1,host='nixy-laptop',sourceCommit=os.environ['SOURCE_SHA'],
+              sourceTree=subprocess.check_output(['git','rev-parse','HEAD^{tree}'],text=True).strip(),
+              baselineCommit=os.environ['BASELINE_COMMIT'],baselineSystem=os.environ['BASELINE_SYSTEM'],
+              systemPath=os.environ['SYSTEM_PATH'],systemDrv=os.environ['SYSTEM_DRV'],
+              flakeLockSha256=digest('flake.lock'),archive='nixy-laptop.nar.zst',
+              archiveSha256=digest('prebuilt/nixy-laptop.nar.zst'),githubRepository=os.environ['GITHUB_REPOSITORY'],
+              githubRunId=os.environ['GITHUB_RUN_ID'],githubRunAttempt=os.environ['GITHUB_RUN_ATTEMPT'])
+          pathlib.Path('prebuilt/receipt.json').write_text(json.dumps(receipt,sort_keys=True,indent=2)+'\n')
+          PY
+          (cd prebuilt && sha256sum nixy-laptop.nar.zst receipt.json > SHA256SUMS)
+      - uses: actions/upload-artifact@v4
+        with:
+          name: nixy-prebuilt-${{ inputs.source_sha }}
+          path: prebuilt/*
+          if-no-files-found: error
+          retention-days: 3
