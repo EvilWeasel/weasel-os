@@ -21,7 +21,7 @@ let
     codex = {
       version = codex.version;
       storePath = toString codex;
-      sourceRevision = "c1382380de69521303b416720a52f42d51af6248";
+      sourceRevision = "092d3acd6bec3e3a14bdc7e7a2810ab628ab759d";
       patches = {
         "codex-v0162-scoped-cancel.patch" =
           builtins.hashFile "sha256" ../codex-source/codex-v0162-scoped-cancel.patch;

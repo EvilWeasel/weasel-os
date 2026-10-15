@@ -70,6 +70,7 @@ def atomic_bytes(path, value):
             output.flush()
             os.fsync(output.fileno())
         os.replace(temporary, path)
+        sync_directory(path.parent)
     finally:
         if os.path.lexists(temporary):
             os.unlink(temporary)
@@ -77,6 +78,14 @@ def atomic_bytes(path, value):
 
 def atomic_json(path, value):
     atomic_bytes(path, (json.dumps(value, sort_keys=True, indent=2) + "\n").encode())
+
+
+def sync_directory(path):
+    fd = os.open(path, os.O_RDONLY | os.O_DIRECTORY)
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
 
 
 def link_target(path):
@@ -93,6 +102,7 @@ def atomic_link(path, target):
     try:
         temporary.symlink_to(target)
         os.replace(temporary, path)
+        sync_directory(path.parent)
     finally:
         if os.path.lexists(temporary):
             temporary.unlink()
@@ -204,7 +214,9 @@ def selected_receipt(state, identifier):
 
 
 def activate(args, state):
+    require(state.is_dir() and not state.is_symlink(), "no prepared provider state")
     with locked(state):
+        private_directory(state / "prepared")
         require(not (state / "transaction.json").exists(), "activation recovery is required")
         old = link_target(state / "current")
         prior = link_target(state / "previous")
@@ -244,6 +256,7 @@ def activate(args, state):
             # status exposes it and later activations fail closed for Root review.
             raise
         (state / "transaction.json").unlink()
+        sync_directory(state)
         return {"current": target, "previous": old, "changed": True,
                 "newProcessesOnly": True}
 

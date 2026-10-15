@@ -19,10 +19,10 @@ let
   # package input. Libraries still use the caller's configured package set.
   toolchain = import ./toolchain.nix { };
   src = fetchzip {
-    name = "codex-c1382380de69521303b416720a52f42d51af6248";
+    name = "codex-092d3acd6bec3e3a14bdc7e7a2810ab628ab759d";
     extension = "tar.gz";
-    url = "https://codeload.github.com/openai/codex/tar.gz/c1382380de69521303b416720a52f42d51af6248";
-    hash = "sha256-YG/9hFOCl4cMYzjaH/3gBid4osxcrvCYQUDDzdbIygo=";
+    url = "https://codeload.github.com/openai/codex/tar.gz/092d3acd6bec3e3a14bdc7e7a2810ab628ab759d";
+    hash = "sha256-vYVQoXQdaK0bejUzcpf9uVrzNWWWAct9AsO/t261FAs=";
   };
   v8 = fetchurl {
     name = "librusty_v8-ptrcomp-sandbox-150.4.0";
@@ -38,7 +38,7 @@ in
 assert toolchain.rustc.version == "1.95.0";
 toolchain.rustPlatform.buildRustPackage {
   pname = "codex-scoped-cancel";
-  version = "0.162.0";
+  version = "0.162.1";
   inherit src;
   cargoHash = "sha256-UTu+ws1DqL375C+1jaVI9HBqDHnTuAQr7/h1rSzsEzg=";
   sourceRoot = "${src.name}/codex-rs";
@@ -74,7 +74,7 @@ toolchain.rustPlatform.buildRustPackage {
     LIBCLANG_PATH = "${lib.getLib libclang}/lib";
     RUSTY_V8_ARCHIVE = v8;
     RUSTY_V8_SRC_BINDING_PATH = v8Binding;
-    STABLE_GIT_COMMIT = "c1382380de69521303b416720a52f42d51af6248";
+    STABLE_GIT_COMMIT = "092d3acd6bec3e3a14bdc7e7a2810ab628ab759d";
     CC = "${clang}/bin/clang";
     CXX = "${clang}/bin/clang++";
     CARGO_BUILD_JOBS = "2";
@@ -112,11 +112,11 @@ toolchain.rustPlatform.buildRustPackage {
   '';
   doInstallCheck = true;
   installCheckPhase = ''
-    "$out/bin/codex" --version | grep -F '0.162.0'
+    "$out/bin/codex" --version | grep -F '0.162.1'
     "$out/bin/codex-code-mode-host" --help > /dev/null
   '';
   meta = {
-    description = "Pinned Codex 0.162.0 with request-scoped MCP cancellation";
+    description = "Pinned Codex 0.162.1 with request-scoped MCP cancellation";
     homepage = "https://github.com/openai/codex";
     license = lib.licenses.asl20;
     platforms = [ "x86_64-linux" ];
