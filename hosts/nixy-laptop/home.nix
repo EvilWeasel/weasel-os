@@ -52,6 +52,7 @@ in
     ../../programs/ui-decisions.nix
     ../../programs/vps-ssh.nix
     ../../programs/proton-infra-ssh.nix
+    ../../programs/proton-mail-bridge.nix
     ../../programs/cloud-backup.nix
     ../../programs/storage-health.nix
   ];
