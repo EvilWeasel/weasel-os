@@ -20,6 +20,10 @@ on:
         description: Build, check and export only the desktop indicator package
         type: boolean
         default: false
+      provider_only:
+        description: Check and export only reviewed provider bundles and manager
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -30,7 +34,7 @@ concurrency:
 
 jobs:
   hosts:
-    if: vars.CI_ENABLED == 'true' && !inputs.indicator_only
+    if: vars.CI_ENABLED == 'true' && !inputs.indicator_only && !inputs.provider_only
     runs-on: ${{ vars.CI_RUNNER || 'namespace-profile-ci-builder' }}
     timeout-minutes: 180
     strategy:
@@ -78,7 +82,8 @@ jobs:
         env:
           BUILD_HOSTS: ${{ inputs.build }}
           PROBE_ONLY: ${{ inputs.probe_only }}
-        run: test "$BUILD_HOSTS" != true && test "$PROBE_ONLY" != true
+          PROVIDER_ONLY: ${{ inputs.provider_only }}
+        run: test "$BUILD_HOSTS" != true && test "$PROBE_ONLY" != true && test "$PROVIDER_ONLY" != true
       - name: Restore persistent Nix store
         uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1
         with:
@@ -142,5 +147,106 @@ jobs:
         with:
           name: indicator-${{ github.sha }}
           path: indicator-artifact
+          if-no-files-found: error
+          retention-days: 7
+
+  providers:
+    if: vars.CI_ENABLED == 'true' && github.event_name == 'workflow_dispatch' && inputs.provider_only
+    runs-on: ${{ vars.CI_RUNNER || 'namespace-profile-ci-builder' }}
+    timeout-minutes: 180
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Bind source and reject incompatible modes
+        env:
+          BUILD_HOSTS: ${{ inputs.build }}
+          PROBE_ONLY: ${{ inputs.probe_only }}
+          INDICATOR_ONLY: ${{ inputs.indicator_only }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = morrowbyte/weasel-os
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$BUILD_HOSTS" != true && test "$PROBE_ONLY" != true && test "$INDICATOR_ONLY" != true
+          mkdir provider-artifact
+          printf '%s\n' "$GITHUB_SHA" > provider-artifact/source-commit
+          sha256sum flake.lock > provider-artifact/lock.sha256
+      - name: Restore persistent Nix store
+        uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1
+        with:
+          cache: nix
+      - uses: cachix/install-nix-action@b85815f71a6de0ddee80b8a80a98d43f4bcc66c7 # v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            max-jobs = 4
+            cores = 2
+      - name: Exercise real Store transport and atomic selection fixtures
+        run: |
+          set -euo pipefail
+          command -v nix-store && command -v zstd
+          python3 scripts/test-weasel-provider-tools.py -v 2>&1 | tee provider-artifact/protocol-tests.log
+      - name: Build only candidate providers and selection tools
+        run: |
+          set -euo pipefail
+          nix build --no-write-lock-file --no-link --print-out-paths --print-build-logs \
+            .#provider-tools .#provider-tools-manager .#provider-tools-launchers \
+            > provider-artifact/candidate.store-paths 2> >(tee provider-artifact/candidate-build.log >&2)
+          git diff --exit-code -- flake.lock
+      - name: Checkout exact original baseline source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: morrowbyte/weasel-os
+          ref: 63fe072cff266da0b7252a58e9e5659f1493cc0c
+          path: provider-baseline
+      - name: Assemble original baseline without recompiling qualified Codex
+        run: |
+          set -euo pipefail
+          old_codex=/nix/store/pw2kq99s5sq6vfgrb258p9y4j22w8xd6-codex-scoped-cancel-0.162.0
+          if ! nix-store --check-validity "$old_codex"; then
+            echo 'BLOCKED: qualified Codex leaf from Namespace38641336529 absent; import existing qualified closure, never recompile baseline.' | tee provider-artifact/baseline-blocker.txt
+            exit 1
+          fi
+          nix-store --verify-path "$old_codex"
+          test "$(git -C provider-baseline rev-parse HEAD)" = 63fe072cff266da0b7252a58e9e5659f1493cc0c
+          nix build --no-write-lock-file --no-link --print-out-paths --print-build-logs \
+            ./provider-baseline#provider-tools-baseline \
+            > provider-artifact/baseline.store-paths 2> >(tee provider-artifact/baseline-build.log >&2)
+          git -C provider-baseline diff --exit-code -- flake.lock
+      - name: Export exact bundles and provenance
+        run: |
+          set -euo pipefail
+          python3 - <<'PYRECEIPT'
+          import hashlib,json,os,pathlib,subprocess
+          out=pathlib.Path('provider-artifact')
+          def run(*a): return subprocess.check_output(a,text=True).strip()
+          for role,source in [('candidate',os.environ['GITHUB_SHA']),('baseline','63fe072cff266da0b7252a58e9e5659f1493cc0c')]:
+              roots=(out/(role+'.store-paths')).read_text().splitlines()
+              bundles=[p for p in roots if (pathlib.Path(p)/'provider-tools.json').is_file()]
+              assert len(bundles)==1
+              root=bundles[0]
+              manifest=(pathlib.Path(root)/'provider-tools.json').read_bytes()
+              metadata=json.loads(manifest)
+              assert metadata['role']==role
+              if role=='baseline':
+                  assert metadata['codex']['storePath']=='/nix/store/pw2kq99s5sq6vfgrb258p9y4j22w8xd6-codex-scoped-cancel-0.162.0'
+                  assert metadata['claude']['version']=='2.1.223'
+              paths=run('nix-store','--query','--requisites',*roots).splitlines()
+              (out/(role+'.closure-paths')).write_text('\n'.join(paths)+'\n')
+              archive=out/(role+'.nar.zst')
+              with archive.open('wb') as f, subprocess.Popen(['nix-store','--export',*paths],stdout=subprocess.PIPE) as export:
+                  subprocess.run(['zstd','-T0','-6','-c'],stdin=export.stdout,stdout=f,check=True)
+                  export.stdout.close()
+                  assert export.wait()==0
+              with archive.open('rb') as f: digest=hashlib.file_digest(f,'sha256').hexdigest()
+              receipt=dict(schema=1,repository='morrowbyte/weasel-os',system='x86_64-linux',sourceCommit=source,ciRunId=int(os.environ['GITHUB_RUN_ID']),role=role,storePath=root,narHash=run('nix','hash','path','--type','sha256','--sri',root),archiveSha256=digest,bundleManifestSha256=hashlib.sha256(manifest).hexdigest(),providers=metadata)
+              (out/(role+'.receipt.json')).write_text(json.dumps(receipt,indent=2)+'\n')
+          PYRECEIPT
+          (cd provider-artifact && sha256sum *.nar.zst *.receipt.json > SHA256SUMS)
+          git diff --exit-code -- flake.lock
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: provider-tools-${{ github.sha }}
+          path: provider-artifact
+          include-hidden-files: true
           if-no-files-found: error
           retention-days: 7

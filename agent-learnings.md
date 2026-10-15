@@ -1379,3 +1379,9 @@ Root independently observed NoNewPrivs 0 and /run/wrappers/bin/sudo -n id -u ret
 
 ## 2026-10-15 — Provider-only update checkpoint
 - Added isolated provider bundle/selector/helper and ten Namespace-only real-Store transport fixtures with fake providers. Bootstrap requires the actual selected 0.162.0/2.1.223 baseline from signed 63fe072; candidate 67b1a14 pins patched Codex 0.162.1 and Claude 2.1.300 using the stable Claude recipe. Both existing Codex patches, Cargo lock/hash, Rust/V8 pins and four check groups remain intact; zero-fuzz patch application, source hashes, syntax and package/laptop evaluations passed. Existing Namespace 38641336529 already qualified selected Codex pw2...0.162.0. No local tests/build/activation; fixture imports share one Store and do not prove fresh-destination import, real provider behavior or live cancellation. Integration owns Namespace execution and new-process/ACP selection proof.
+
+### 2026-10-15 — Provider-only Namespace qualification
+
+- Added an exclusive provider_only dispatch mode to the existing Namespace workflow; no host build, activation, runner or permission change. Protocol fixtures and candidate builds are separate from the original 63fe baseline assembly.
+- Baseline requires the exact previously qualified pw2 Codex Store leaf before assembly; missing cache fails closed instead of recompiling it. Candidate and baseline receipts bind independent sources, run, manifests, NAR and archive hashes.
+- Verification: actionlint, YAML parse, embedded bash syntax/Python AST and diff checks pass. Both affected-host evaluations pass with builders disabled (laptop dd446pzj..., desktop z35jaf6...). Namespace execution and activation remain unperformed.
