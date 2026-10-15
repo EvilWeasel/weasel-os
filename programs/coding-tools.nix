@@ -4,12 +4,18 @@
   pkgs,
   pkgsUnstable,
   inputs,
+  host ? "",
   ...
 }:
 let
   p = pkgsUnstable;
+  providerTools = import ../packages/provider-tools { inherit pkgs pkgsUnstable; };
   codexPackage = pkgsUnstable.callPackage ../packages/codex-source { };
-  codexAcp = p.callPackage ../packages/codex-acp.nix { inherit codexPackage; };
+  codexAcp =
+    if host == "nixy-laptop" then
+      providerTools.launchers
+    else
+      p.callPackage ../packages/codex-acp.nix { inherit codexPackage; };
   serena = inputs.serena.packages.${pkgs.stdenv.hostPlatform.system}.default;
   languagePackages = with p; [
     nixd

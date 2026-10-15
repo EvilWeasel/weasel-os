@@ -7,7 +7,8 @@
 }:
 let
   hermesDesktop = inputs.hermes-agent.packages.${pkgs.stdenv.hostPlatform.system}.desktop;
-  codexLatest = pkgsUnstable.callPackage ../../packages/codex-source { };
+  providerTools = import ../../packages/provider-tools { inherit pkgs pkgsUnstable; };
+  codexLatest = providerTools.launchers;
   codexPathInit = ''
     case ":$PATH:" in
       ":${lib.getBin codexLatest}/bin:"*) ;;

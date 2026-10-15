@@ -9,11 +9,19 @@
     let
       env = mkDevEnvironment system;
       screenpipeApp = env.pkgsUnstable.callPackage ../../packages/screenpipe/default.nix { };
+      providerTools = import ../../packages/provider-tools {
+        pkgs = env.pkgsStable;
+        pkgsUnstable = env.pkgsUnstable;
+      };
     in
     {
       formatter = env.pkgsStable.nixfmt-tree;
 
       packages = {
+        provider-tools = providerTools;
+        provider-tools-baseline = providerTools.baseline;
+        provider-tools-manager = providerTools.manager;
+        provider-tools-launchers = providerTools.launchers;
         screenpipe-app = screenpipeApp;
         screenpipe-xcap-probe =
           env.pkgsStable.callPackage ../../packages/screenpipe-xcap-probe/default.nix
