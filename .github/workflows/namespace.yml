@@ -184,13 +184,6 @@ jobs:
           set -euo pipefail
           command -v nix-store && command -v zstd
           python3 scripts/test-weasel-provider-tools.py -v 2>&1 | tee provider-artifact/protocol-tests.log
-      - name: Build only candidate providers and selection tools
-        run: |
-          set -euo pipefail
-          nix build --no-write-lock-file --no-link --print-out-paths --print-build-logs \
-            .#provider-tools .#provider-tools-manager .#provider-tools-launchers \
-            > provider-artifact/candidate.store-paths 2> >(tee provider-artifact/candidate-build.log >&2)
-          git diff --exit-code -- flake.lock
       - name: Checkout exact original baseline source
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
@@ -207,10 +200,19 @@ jobs:
           fi
           nix-store --verify-path "$old_codex"
           test "$(git -C provider-baseline rev-parse HEAD)" = 63fe072cff266da0b7252a58e9e5659f1493cc0c
+          selected_codex="$(nix eval --no-write-lock-file --option max-jobs 0 --option builders '' --raw ./provider-baseline#provider-tools-baseline.codex.outPath)"
+          test "$selected_codex" = "$old_codex"
           nix build --no-write-lock-file --no-link --print-out-paths --print-build-logs \
             ./provider-baseline#provider-tools-baseline \
             > provider-artifact/baseline.store-paths 2> >(tee provider-artifact/baseline-build.log >&2)
           git -C provider-baseline diff --exit-code -- flake.lock
+      - name: Build only candidate providers and selection tools
+        run: |
+          set -euo pipefail
+          nix build --no-write-lock-file --no-link --print-out-paths --print-build-logs \
+            .#provider-tools .#provider-tools-manager .#provider-tools-launchers \
+            > provider-artifact/candidate.store-paths 2> >(tee provider-artifact/candidate-build.log >&2)
+          git diff --exit-code -- flake.lock
       - name: Export exact bundles and provenance
         run: |
           set -euo pipefail
@@ -226,6 +228,8 @@ jobs:
               manifest=(pathlib.Path(root)/'provider-tools.json').read_bytes()
               metadata=json.loads(manifest)
               assert metadata['role']==role
+              assert metadata['codex']['version']==('0.162.0' if role=='baseline' else '0.162.1')
+              assert metadata['claude']['version']==('2.1.223' if role=='baseline' else '2.1.300')
               if role=='baseline':
                   assert metadata['codex']['storePath']=='/nix/store/pw2kq99s5sq6vfgrb258p9y4j22w8xd6-codex-scoped-cancel-0.162.0'
                   assert metadata['claude']['version']=='2.1.223'
