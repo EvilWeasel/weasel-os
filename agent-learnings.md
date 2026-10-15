@@ -1369,3 +1369,7 @@ Root independently observed NoNewPrivs 0 and /run/wrappers/bin/sudo -n id -u ret
 ## 2026-10-15 — Narrow indicator lifecycle package candidate
 - Live read-only actor lifecycle is revision 3/complete, while the installed 0.1.0 indicator still requires revision 1. Source already implements revision 3; package 0.1.1 now includes and runs its existing Python lifecycle fixtures alongside the C check. No actor/GUI/service changes.
 - Verification: Nix parse, nixfmt and diff checks passed; locked package drvPath and nixy-laptop toplevel drvPath evaluated with local builders disabled. Disabling all import-from-derivation initially refused an existing generated source; ordinary evaluation with max-jobs=0/builders empty succeeded. Publication stop forbids new CI dispatch/push, so Namespace fixture/build/READY success remains unproven. Root's dirty programs/mimeapps.list is preserved.
+
+## 2026-10-15 — Indicator-only Namespace export
+- Added indicator_only to the existing workflow for the exact locked package build/check/export. It excludes both host jobs, rejects build/probe combinations and retains source, lock, closure hash and logs. No system activation or actor mutation.
+- Verification: workflow diff reviewed; actionlint unavailable locally. Namespace qualification follows on the signed fork branch.

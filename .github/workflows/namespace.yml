@@ -16,6 +16,10 @@ on:
         description: Measure runner storage without evaluating or building hosts
         type: boolean
         default: false
+      indicator_only:
+        description: Build, check and export only the desktop indicator package
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -26,7 +30,7 @@ concurrency:
 
 jobs:
   hosts:
-    if: vars.CI_ENABLED == 'true'
+    if: vars.CI_ENABLED == 'true' && !inputs.indicator_only
     runs-on: ${{ vars.CI_RUNNER || 'namespace-profile-ci-builder' }}
     timeout-minutes: 180
     strategy:
@@ -64,3 +68,50 @@ jobs:
           nix build --no-link --print-build-logs "$(cat host.drv)^*"
       - name: Confirm lockfile preservation
         run: git diff --exit-code -- flake.lock
+  indicator:
+    if: vars.CI_ENABLED == 'true' && github.event_name == 'workflow_dispatch' && inputs.indicator_only
+    runs-on: ${{ vars.CI_RUNNER || 'namespace-profile-ci-builder' }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Reject incompatible modes
+        env:
+          BUILD_HOSTS: ${{ inputs.build }}
+          PROBE_ONLY: ${{ inputs.probe_only }}
+        run: test "$BUILD_HOSTS" != true && test "$PROBE_ONLY" != true
+      - name: Restore persistent Nix store
+        uses: namespacelabs/nscloud-cache-action@1124a6f3ce44e5cf84cc22111530961f4d2a15f9 # v1
+        with:
+          cache: nix
+      - uses: cachix/install-nix-action@b85815f71a6de0ddee80b8a80a98d43f4bcc66c7 # v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            max-jobs = 4
+            cores = 2
+      - name: Build and check only the locked indicator package
+        run: |
+          set -euo pipefail
+          mkdir indicator-artifact
+          nix build --impure --no-link --print-out-paths --print-build-logs --expr '
+            let
+              flake = builtins.getFlake (toString ./.);
+              pkgs = import flake.inputs.nixpkgs { system = "x86_64-linux"; };
+            in pkgs.callPackage ./packages/computer-use-indicator { }
+          ' > indicator-artifact/indicator.store-path 2> >(tee indicator-artifact/build.log >&2)
+          indicator_path="$(cat indicator-artifact/indicator.store-path)"
+          test -x "$indicator_path/bin/weasel-computer-use-indicator"
+          nix-store --query --requisites "$indicator_path" > indicator-artifact/indicator.closure-paths
+          mapfile -t closure_paths < indicator-artifact/indicator.closure-paths
+          nix-store --export "${closure_paths[@]}" | zstd -T0 -6 > indicator-artifact/indicator.nar.zst
+          (cd indicator-artifact && sha256sum indicator.nar.zst > indicator.nar.zst.sha256)
+          nix path-info --json "$indicator_path" > indicator-artifact/indicator.path-info.json
+          git rev-parse HEAD > indicator-artifact/indicator.source-commit
+          sha256sum flake.lock packages/computer-use-indicator/{default.nix,indicator.py} > indicator-artifact/source.sha256
+          git diff --exit-code -- flake.lock
+      - uses: actions/upload-artifact@v4
+        with:
+          name: indicator-${{ github.sha }}
+          path: indicator-artifact
+          if-no-files-found: error
+          retention-days: 7
