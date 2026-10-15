@@ -6,20 +6,11 @@
 }:
 let
   cfg = config.weasel.t3Fork;
-  recipeRevision = "a37df4a04247fea01340b2546e99bb4c4f6ffb1b";
+  recipeRevision = "18729368e840543aa1375948da849b184ddd95bd";
   installer = pkgs.fetchurl {
     url = "https://raw.githubusercontent.com/morrowbyte/t3code/${recipeRevision}/packaging/nixos/install.sh";
-    hash = "sha256-vWrvJyvrF8bwSzNZ1qX2B+KOZ7I0mOR9QmirT7hqH1c=";
+    hash = "sha256-xgE1hyKti5HPHnq9vRKGPosxxG4zdgtO9Jww9YUVznE=";
   };
-  recipe = pkgs.fetchurl {
-    url = "https://raw.githubusercontent.com/morrowbyte/t3code/${recipeRevision}/packaging/nixos/flake.nix";
-    hash = "sha256-YNJM5sEHIHS2G9cPS5jc6L/HhCp0PH8eQq6XMDFnjUc=";
-  };
-  bundle = pkgs.runCommand "t3code-fork-updater-source" { } ''
-    mkdir -p "$out"
-    cp ${installer} "$out/install.sh"
-    cp ${recipe} "$out/flake.nix"
-  '';
   updater = pkgs.writeShellApplication {
     name = "t3code-weasel-update";
     runtimeInputs = with pkgs; [
@@ -29,13 +20,16 @@ let
       coreutils
       util-linux
       nix
+      zstd
     ];
     text = ''
       export T3_WEASEL_REPOSITORY=${lib.escapeShellArg cfg.repository}
       export T3_WEASEL_CHANNEL=${lib.escapeShellArg cfg.channel}
       export T3_WEASEL_DATA_DIR=${lib.escapeShellArg cfg.dataDirectory}
       export T3_WEASEL_MANAGED=1
-      exec bash ${bundle}/install.sh "$@"
+      # Import the release closure built on Namespace. The helper also exposes
+      # separate --prepare/--activate verbs for the desktop updater.
+      exec bash ${installer} "$@"
     '';
   };
   launcher = pkgs.writeShellApplication {
