@@ -1365,3 +1365,7 @@ Root independently observed NoNewPrivs 0 and /run/wrappers/bin/sudo -n id -u ret
 ## 2026-10-14 — Overnight CI storage diagnosis
 - Both full Namespace host builds evaluated successfully but exhausted the 50-GB Nix cache during realization (desktop substitution alone: 41.8 GiB unpacked, before temporary/output space). Cache-backed evaluation remains enabled; full builds use the runner filesystem instead. Added a bounded storage-only dispatch to measure capacity before retrying compilation, with no purchased storage or laptop fallback.
 - Verification: actionlint and both unchanged host drvPath evaluations; remote probe pending. Original failed run 38484408376 retained.
+
+## 2026-10-15 — Narrow indicator lifecycle package candidate
+- Live read-only actor lifecycle is revision 3/complete, while the installed 0.1.0 indicator still requires revision 1. Source already implements revision 3; package 0.1.1 now includes and runs its existing Python lifecycle fixtures alongside the C check. No actor/GUI/service changes.
+- Verification: Nix parse, nixfmt and diff checks passed; locked package drvPath and nixy-laptop toplevel drvPath evaluated with local builders disabled. Disabling all import-from-derivation initially refused an existing generated source; ordinary evaluation with max-jobs=0/builders empty succeeded. Publication stop forbids new CI dispatch/push, so Namespace fixture/build/READY success remains unproven. Root's dirty programs/mimeapps.list is preserved.

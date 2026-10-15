@@ -155,6 +155,44 @@ it; the bounded retry does not redefine such release/capability uncertainty.
 Root must still prove the real monitor rendering, click-through and task Stop
 including a model-thinking gap from ordinary T3/Codex sessions.
 
+## Narrow package delivery
+
+Package version `0.1.1` includes the revision-3 actor client and runs both the
+C monitor matcher and the Python lifecycle fixtures in its Nix `checkPhase`.
+The helper/renderer control protocol remains revision 1; that is separate from
+the actor's `lifecycle_revision=3`, `complete=true` requirement.
+
+Build this package on the existing Namespace `namespace-profile-ci-builder`
+runner from the exact reviewed candidate commit, without a host-system build:
+
+```sh
+nix build --impure --no-link --print-out-paths --expr '
+  let
+    flake = builtins.getFlake (toString ./.);
+    pkgs = import flake.inputs.nixpkgs { system = "x86_64-linux"; };
+  in pkgs.callPackage ./packages/computer-use-indicator { }
+' > indicator.store-path
+```
+
+Retain the commit, locked input hashes, build/check log, exact output path and
+closure transport checksum with the CI artifact. Export the complete closure
+on that runner using `nix-store --export` and its `--query --requisites` list;
+Integration imports those verified bytes on the laptop. This package does not
+need a NixOS switch, actor restart, microphone service or local compilation.
+The current `namespace.yml` workflow has only both-host evaluation/build and
+storage-probe inputs; it does not export this targeted closure. A workflow
+dispatch acknowledgement is therefore not evidence of package delivery.
+
+Integration must give its sole desktop worker the qualified output's absolute
+`bin/weasel-computer-use-indicator` path and verify that exact executable. A
+different `command -v` result still identifies the old installed package and
+must be reported as such. Before input, the worker must observe a real READY
+event on the selected output using the current desktop skill. Fixture success
+alone does not establish READY, rendering, input readiness or permission to
+clear a physical Escape/explicit takeover. Keep the existing package path for
+rollback; selecting another indicator binary must never restart or resume the
+actor. End the owned helper normally before any binary selection change.
+
 Primary API references:
 [GTK layer-shell](https://github.com/wmww/gtk-layer-shell),
 [layer-shell API](https://wmww.github.io/gtk-layer-shell/),

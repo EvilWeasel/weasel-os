@@ -10,7 +10,7 @@
 }:
 stdenv.mkDerivation {
   pname = "weasel-computer-use-indicator";
-  version = "0.1.0";
+  version = "0.1.1";
   src = lib.fileset.toSource {
     root = ./.;
     fileset = lib.fileset.unions [
@@ -18,6 +18,7 @@ stdenv.mkDerivation {
       ./monitor-match.h
       ./test-monitor-match.c
       ./indicator.py
+      ./test_indicator.py
     ];
   };
   strictDeps = true;
@@ -48,10 +49,13 @@ stdenv.mkDerivation {
     runHook postInstall
   '';
   doCheck = true;
+  nativeCheckInputs = [ python3 ];
   checkPhase = ''
     runHook preCheck
     $CC -std=c11 -O2 -Wall -Wextra -Werror test-monitor-match.c -o test-monitor-match
     ./test-monitor-match
+    # Exercise the shipped lifecycle contract without a desktop or actor.
+    ${python3}/bin/python3 -m unittest -v test_indicator
     runHook postCheck
   '';
   meta = {
