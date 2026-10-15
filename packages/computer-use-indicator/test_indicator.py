@@ -53,7 +53,10 @@ class StatusDeadline(unittest.TestCase):
 
 class IndicatorLifecycle(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
+        # Nix TMPDIR can be long enough that the nested control socket exceeds
+        # Linux's 107-byte AF_UNIX pathname limit. Keep this private fixture
+        # under the sandbox's short /tmp, like the real /run/user/... runtime.
+        self.temp = tempfile.TemporaryDirectory(prefix="wi-", dir="/tmp")
         self.runtime = Path(self.temp.name)
         self.actor_dir = self.runtime / "weasel-computer-use"
         self.actor_dir.mkdir(mode=0o700)
@@ -222,14 +225,19 @@ class IndicatorLifecycle(unittest.TestCase):
 
     def ready(self, process):
         deadline = time.monotonic() + 2
+        observed = []
+        stderr = ""
         while time.monotonic() < deadline:
             if select.select([process.stdout], [], [], 0.1)[0]:
                 line = process.stdout.readline()
+                if line:
+                    observed.append(line.strip())
                 if line and json.loads(line).get("event") == "ready":
                     return
             if process.poll() is not None:
+                stderr = process.stderr.read()
                 break
-        self.fail("fixture indicator was not ready")
+        self.fail(f"fixture indicator was not ready: events={observed!r}, stderr={stderr!r}")
 
     def ended(self, process):
         stdout, stderr = process.communicate(timeout=2)
