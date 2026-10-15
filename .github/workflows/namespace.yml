@@ -109,6 +109,35 @@ jobs:
           git rev-parse HEAD > indicator-artifact/indicator.source-commit
           sha256sum flake.lock packages/computer-use-indicator/{default.nix,indicator.py} > indicator-artifact/source.sha256
           git diff --exit-code -- flake.lock
+      - name: Build only the pinned immutable updater wrapper
+        run: |
+          set -euo pipefail
+          nix build --impure --no-link --print-out-paths --print-build-logs --expr '
+            let
+              f = builtins.getFlake (toString ./.);
+              ps = f.nixosConfigurations.nixy-laptop.config.home-manager.users.evilweasel.home.packages;
+            in builtins.head (builtins.filter (p: p.name == "t3code-weasel-update") ps)
+          ' > indicator-artifact/updater.store-path 2> >(tee indicator-artifact/updater-build.log >&2)
+          updater_path="$(cat indicator-artifact/updater.store-path)"
+          test -x "$updater_path/bin/t3code-weasel-update"
+          nix-store --query --requisites "$updater_path" > indicator-artifact/updater.closure-paths
+          mapfile -t updater_paths < indicator-artifact/updater.closure-paths
+          nix-store --export "${updater_paths[@]}" | zstd -T0 -6 > indicator-artifact/updater.nar.zst
+          (cd indicator-artifact && sha256sum updater.nar.zst > updater.nar.zst.sha256)
+          sha256sum programs/t3code-fork.nix >> indicator-artifact/source.sha256
+          git diff --exit-code -- flake.lock
+      - name: Checkout the exact reviewed updater regression source
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: morrowbyte/t3code
+          ref: 18729368e840543aa1375948da849b184ddd95bd
+          path: updater-fixture
+          sparse-checkout: packaging/nixos
+      - name: Verify updater preparation and activation with real Nix fixture paths
+        run: |
+          set -euo pipefail
+          echo 'c601358722ad8b91cf1e7abdbd12863e8b31c46e33760b4ef49c30f58515ce71  updater-fixture/packaging/nixos/install.sh' | sha256sum -c -
+          python3 updater-fixture/packaging/nixos/test-updater.py 2>&1 | tee indicator-artifact/updater-tests.log
       - uses: actions/upload-artifact@v4
         with:
           name: indicator-${{ github.sha }}
