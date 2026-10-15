@@ -1373,3 +1373,7 @@ Root independently observed NoNewPrivs 0 and /run/wrappers/bin/sudo -n id -u ret
 ## 2026-10-15 — Headless Proton Mail Bridge
 - Added a laptop Home Manager user service using the pinned Bridge executable in noninteractive mode, so remote terminal users need no laptop GUI and Bridge does not depend on the login terminal. The unit uses the existing D-Bus keyring and loopback mail endpoints; no credentials enter Nix or Git.
 - Verification: Nix parse, nixfmt, locked laptop toplevel drvPath evaluation. Bootstrap installs only the same evaluated task-owned unit before a future full system activation. Mail authentication and delivery are separate runtime evidence.
+
+## 2026-10-15 — Blacksmith CI migration
+- Owner superseded Namespace-only policy for the current Morrowbyte repositories after account verification/billing setup. Nix CI now uses Blacksmith, bounded upstream Actions-backed Nix caching, and a larger-disk runner only for full builds; no host activation or laptop compilation.
+- Verification: actionlint and diff check; shared Blacksmith acceptance run 38740107584 passed Linux x64/ARM64, Windows x64 and macOS. Per-repository Nix execution remains separately reported.
