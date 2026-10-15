@@ -245,13 +245,15 @@ class IndicatorLifecycle(unittest.TestCase):
     def ended(self, process):
         stdout, stderr = process.communicate(timeout=2)
         events = [json.loads(line) for line in stdout.splitlines()]
-        ended = next(item for item in reversed(events) if item.get("event") == "ended")
+        self.last_events = events
+        self.receipt_runs.append({"observed_process_end_monotonic":time.monotonic(), "events":events, "renderer_protocol":self.protocol() if self.renderer_log.exists() else None, "renderer_log_exists":self.renderer_log.exists(), "actor_requests":copy.deepcopy(self.actor_requests), "returncode":process.returncode})
+        terminal = [item for item in events if item.get("event") == "ended"]
+        self.assertTrue(terminal, f"missing ended event: returncode={process.returncode!r}, events={events!r}, stderr={stderr!r}")
+        self.assertTrue(self.renderer_log.is_file(), "begun renderer lifetime has no protocol log")
         self.assertEqual(stderr, "")
         self.assertFalse(list((self.actor_dir / "indicators").glob("task-*")))
-        self.last_events = events
-        self.receipt_runs.append({"observed_process_end_monotonic":time.monotonic(), "events":events, "renderer_protocol":self.protocol(), "actor_requests":copy.deepcopy(self.actor_requests), "returncode":process.returncode})
         self.assertTrue(all(type(x.get("monotonic")) in (float, int) for x in events))
-        return ended
+        return terminal[-1]
 
     def three_displays(self):
         self.niri_state.update({
@@ -305,8 +307,23 @@ class IndicatorLifecycle(unittest.TestCase):
         self.niri_state["DP-5"]["logical"]["width"] = 0
         self.niri_state_path.write_text(json.dumps(self.niri_state))
         process = self.launch()
-        self.assertEqual(self.ended(process)["reason"], "capability_unavailable")
+        # Inventory validation precedes scope/renderer creation. The outer CLI
+        # reports error + Exit 1; no presentation lifetime began to emit ended.
+        stdout, stderr = process.communicate(timeout=2)
+        events = [json.loads(line) for line in stdout.splitlines()]
+        self.last_events = events
+        self.receipt_runs.append({"observed_process_end_monotonic":time.monotonic(), "events":events, "renderer_protocol":self.protocol() if self.renderer_log.exists() else None, "renderer_log_exists":self.renderer_log.exists(), "actor_requests":copy.deepcopy(self.actor_requests), "returncode":process.returncode})
+        self.assertEqual(process.returncode, 1, events)
+        self.assertEqual(stderr, "")
+        self.assertEqual([event.get("event") for event in events], ["error"])
+        self.assertEqual(events[0].get("kind"), "CapabilityError")
+        self.assertEqual(events[0].get("detail"), "output logical geometry unavailable")
+        self.assertFalse(self.renderer_log.exists(), "pre-begin refusal must not create renderer protocol")
+        self.assertTrue(all(type(event.get("monotonic")) in (float, int) for event in events))
         self.assertFalse(self.render_started.exists())
+        self.assertFalse(list((self.actor_dir / "indicators").glob("task-*")))
+        self.assertEqual(self.task_scopes, {})
+        self.assertFalse(any(event["arguments"].get("event") in ("begin", "end") for event in self.actor_events))
 
     def test_lost_begin_ack_cleanup_uses_exact_owner_and_removes_committed_scope(self):
         self.drop_begin_ack_once = True
