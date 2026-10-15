@@ -17,6 +17,15 @@ on:
         type: boolean
         default: false
 
+      actor_only:
+        description: Build, test and export only the reviewed desktop actor
+        type: boolean
+        default: false
+      actor_source_sha:
+        description: Exact reviewed actor candidate commit
+        type: string
+        default: ""
+
 permissions:
   contents: read
 
@@ -26,7 +35,7 @@ concurrency:
 
 jobs:
   hosts:
-    if: vars.CI_ENABLED == 'true'
+    if: vars.CI_ENABLED == 'true' && !inputs.actor_only
     runs-on: ${{ inputs.build && 'blacksmith-16vcpu-ubuntu-2404' || vars.CI_RUNNER || 'blacksmith-8vcpu-ubuntu-2404' }}
     timeout-minutes: 180
     strategy:
@@ -66,3 +75,103 @@ jobs:
           nix build --no-link --print-build-logs "$(cat host.drv)^*"
       - name: Confirm lockfile preservation
         run: git diff --exit-code -- flake.lock
+
+  actor:
+    if: vars.CI_ENABLED == 'true' && github.event_name == 'workflow_dispatch' && inputs.actor_only
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-8vcpu-ubuntu-2404' }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Bind reviewed actor source and reject host modes
+        env:
+          EXPECTED_SOURCE: ${{ inputs.actor_source_sha }}
+          BUILD_HOSTS: ${{ inputs.build }}
+          PROBE_ONLY: ${{ inputs.probe_only }}
+        run: |
+          set -euo pipefail
+          test "$GITHUB_REPOSITORY" = morrowbyte/weasel-os
+          test "$BUILD_HOSTS" != true
+          test "$PROBE_ONLY" != true
+          [[ "$EXPECTED_SOURCE" =~ ^[0-9a-f]{40}$ ]]
+          test "$(git rev-parse HEAD)" = "$GITHUB_SHA"
+          test "$GITHUB_SHA" = "$EXPECTED_SOURCE"
+          mkdir actor-artifact
+          printf '%s\n' "$GITHUB_SHA" > actor-artifact/source-commit
+          printf '%s\n' "$GITHUB_RUN_ID" > actor-artifact/run-id
+          sha256sum flake.lock > actor-artifact/lock.sha256
+          printf '%s\n' "$GITHUB_JOB" > actor-artifact/job-key
+          find packages/computer-use-indicator -type f -print0 | sort -z | xargs -0 sha256sum > actor-artifact/indicator-source.sha256
+          find packages/computer-use -type f -print0 | sort -z | xargs -0 sha256sum > actor-artifact/source.sha256
+          sha256sum programs/computer-use.nix packages/cua-driver-bin.nix .github/workflows/namespace.yml >> actor-artifact/source.sha256
+      - uses: cachix/install-nix-action@b85815f71a6de0ddee80b8a80a98d43f4bcc66c7 # v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            max-jobs = 4
+            cores = 2
+      - name: Build and test only the canonical locked actor
+        run: |
+          set -euo pipefail
+          nix build --no-write-lock-file --impure --no-link --print-out-paths --print-build-logs --expr '
+            let
+              f = builtins.getFlake (toString ./.);
+              ps = f.nixosConfigurations.nixy-laptop.config.home-manager.users.evilweasel.home.packages;
+              actors = builtins.filter (p: (p.pname or "") == "weasel-computer-use") ps;
+            in assert builtins.length actors == 1;
+              (builtins.head actors).overrideAttrs (_: { doCheck = true; })
+          ' > actor-artifact/actor.store-path 2> >(tee actor-artifact/build.log >&2)
+          actor_path="$(cat actor-artifact/actor.store-path)"
+          test -x "$actor_path/bin/weasel-computer-use"
+          nix path-info --derivation "$actor_path" > actor-artifact/actor.drv
+          nix log "$(cat actor-artifact/actor.drv)" > actor-artifact/tests.log
+          grep -E 'test result: ok.*[1-9][0-9]* passed' actor-artifact/tests.log
+          sha256sum "$actor_path/bin/weasel-computer-use" "$actor_path/bin/.weasel-computer-use-wrapped" > actor-artifact/binary.sha256
+          nix-store --query --requisites "$actor_path" > actor-artifact/actor.closure-paths
+          mapfile -t actor_closure < actor-artifact/actor.closure-paths
+          nix-store --export "${actor_closure[@]}" | zstd -T0 -6 > actor-artifact/actor.nar.zst
+          nix path-info --json "$actor_path" > actor-artifact/actor.path-info.json
+          (cd actor-artifact && sha256sum actor.nar.zst > actor.nar.zst.sha256)
+          git diff --exit-code -- flake.lock
+      - name: Build canonical indicator C renderer and run all lifecycle fixtures
+        run: |
+          set -euo pipefail
+          nix build --no-write-lock-file --impure --no-link --print-out-paths --print-build-logs --expr '
+            let
+              f = builtins.getFlake (toString ./.);
+              ps = f.nixosConfigurations.nixy-laptop.config.home-manager.users.evilweasel.home.packages;
+              indicators = builtins.filter (p: (p.pname or "") == "weasel-computer-use-indicator") ps;
+            in assert builtins.length indicators == 1;
+              (builtins.head indicators).overrideAttrs (old: {
+                doCheck = true;
+                checkPhase = old.checkPhase + "\necho CANONICAL_INDICATOR_C_AND_PYTHON_CHECKS_COMPLETED\n";
+              })
+          ' > actor-artifact/indicator.store-path 2> >(tee actor-artifact/indicator-build.log >&2)
+          indicator_path="$(cat actor-artifact/indicator.store-path)"
+          test -x "$indicator_path/bin/weasel-computer-use-indicator"
+          test -x "$indicator_path/libexec/weasel-computer-use-indicator-renderer"
+          nix path-info --derivation "$indicator_path" > actor-artifact/indicator.drv
+          nix log "$(cat actor-artifact/indicator.drv)" > actor-artifact/indicator-tests.log
+          grep -F CANONICAL_INDICATOR_C_AND_PYTHON_CHECKS_COMPLETED actor-artifact/indicator-tests.log
+          grep -E 'Ran [1-9][0-9]* tests?' actor-artifact/indicator-tests.log
+          for required_indicator_case in \
+            test_aggregate_ready_waits_for_every_connected_display \
+            test_one_wrong_renderer_identity_never_reports_aggregate_ready \
+            test_nonanchor_output_unplug_ends_the_whole_display_scope \
+            test_new_output_requires_new_aggregate_readiness \
+            test_nonanchor_malformed_geometry_refuses_before_renderer_start; do
+            grep -E "${required_indicator_case} .*\.\.\. ok$" actor-artifact/indicator-tests.log
+          done
+          sha256sum "$indicator_path/bin/weasel-computer-use-indicator" "$indicator_path/libexec/weasel-computer-use-indicator-renderer" "$indicator_path/libexec/indicator.py" > actor-artifact/indicator-binary.sha256
+          nix-store --query --requisites "$indicator_path" > actor-artifact/indicator.closure-paths
+          mapfile -t indicator_closure < actor-artifact/indicator.closure-paths
+          nix-store --export "${indicator_closure[@]}" | zstd -T0 -6 > actor-artifact/indicator.nar.zst
+          nix path-info --json "$indicator_path" > actor-artifact/indicator.path-info.json
+          (cd actor-artifact && sha256sum indicator.nar.zst > indicator.nar.zst.sha256)
+          git diff --exit-code -- flake.lock
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: actor-${{ github.sha }}
+          path: actor-artifact
+          if-no-files-found: error
+          retention-days: 7

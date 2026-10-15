@@ -356,3 +356,142 @@ Offline Rust subprocess/deadline/capture/transport regression is reproducible
 with the locked Cargo files. Nix host builds check packaging. Real application,
 client, restart, takeover and multi-display evidence belongs to the private
 acceptance matrix and demo; builds and fixtures alone do not complete acceptance.
+
+### Connected-output admission
+
+Observation and normal post-focus capture accept any connected, enabled output
+in the current Niri inventory with a nonempty valid name and positive integer
+logical dimensions. Launch admission rechecks current inventory membership,
+focus identity, active workspace and exact observed geometry immediately before
+spawn. Post-focus capture still requires the selected output to be focused.
+`desktop_status.desktop_launch` reports `output_policy` as
+`all_connected_enabled_niri_outputs`, the current valid `outputs`, and whether
+the inventory was available; unavailable inventory reports no allowed outputs.
+This policy does not change task/indicator ownership, privacy, physical Escape
+or explicit takeover, generation checks, or the single desktop writer.
+
+### Shared ESC-only lifecycle contract: source boundary checkpoint
+
+Authoritative requirement: `COMPUTER-USE-ALL-DISPLAYS-ESC-ONLY-01` (2026-10-15).
+The monitor admission checkpoint is independent of this contract. The following
+mapping describes current source, not installed acceptance or new public APIs.
+
+| Existing boundary | Actual ownership/fence | Missing shared-contract behavior |
+| --- | --- | --- |
+| `core/src/main.rs::indicator_lifecycle`, public `desktop_indicator_lifecycle` | Revision 3; events `begin/status/end`; `task_id`, `scope_token`, `session_id`, `expected_epoch`; begin requires unlatched idle/released actor; end removes only its matching scope and never clears takeover | Responsible thread/run/turn, exact target binding, all-display renderer readiness and external per-action admission |
+| `main.rs::authorize_action_task`, `act_inner`, public `desktop_act` | Current task ID, retained observation, epoch/input generation, focused window/workspace/output geometry; same admission for pointer/keys and typed `semantic_click`, `semantic_set_value`, `semantic_focus` | No external CDP/MCP/HTTP/A2A app-control permit; task ID alone does not authenticate an external adapter |
+| `main.rs::physical_activity`, `core/src/input_policy.rs` | Physical Escape fences epoch/latch and clears live scopes; synthetic events excluded; ordinary activity invalidates observation generation and currently ends a bound batch | Ordinary activity must only require target revalidation, without task abort; separate stop generation from target generation |
+| `main.rs::record`, `core/src/takeover.rs` | JSONL envelope `schema`, `monotonic_ms`, `monotonic_system_ms`, `event`, `data`; stop data includes epoch/source/cause ID/persistence; marker retains cause across startup | No responsible-agent delivery/acknowledgement or retained stopped-scope owner; JSONL alone is not notification |
+| `main.rs::desktop_resume` handler | Explicit session/epoch-bound operation; physical-Escape rearm currently has two-call 2-second warning | New policy requires a distinct explicit user decision, never elapsed time as permission; current runtime latch cannot be inferred away |
+| `../computer-use-indicator/indicator.py`, `renderer.c` | One selected `--output`, process-identity ownership, renderer READY, click-through surfaces, lifetime/heartbeat checks | All-connected-output aggregate READY, blue border/ESC hint and hotplug coverage |
+
+Proposed transport-independent envelope (contract revision 1, **not yet a public
+implemented endpoint**):
+
+```json
+{
+  "contract_revision": 1,
+  "scope_id": "unique-never-replayed",
+  "scope_token": "opaque-owner-capability",
+  "session_id": "actor-instance",
+  "stop_generation": 1,
+  "target_generation": 1,
+  "responsible": {"thread_id": "actual-thread", "run_id": "actual-run", "turn_id": "actual-turn"},
+  "target": {"adapter": "actual-transport", "identity": "adapter-specific-exact-target"},
+  "action_id": "unique-within-scope"
+}
+```
+
+`stop_generation` fences every transport of the same scope. `target_generation`
+is independent: normal human activity invalidates old targets but does not stop
+the ownership scope. Target identity must include the actual authority boundary
+(window/process/session for desktop; actual application/connection/document or
+resource identity for semantic/API control). A URL or model-supplied label alone
+is insufficient. Ownership comes from the real consumer thread/run/turn; an
+adapter must not invent native origin metadata. Tokens are private capabilities,
+not fields for logs. No existing token or task ID is implicitly upgraded.
+
+The bounded consumer handshake is:
+
+1. Begin a single owned scope while the shared stop fence permits it. Bind real
+   responsible identity and exact target; obtain scope/session/generation binding.
+2. Wait for aggregate indicator READY covering every currently connected enabled
+   display with click-through blue border and ESC hint. Missing renderer, output
+   hotplug coverage or renderer failure refuses new mutations until readiness is
+   established. READY is presentation evidence, never successful app control.
+3. Immediately before each mutation, revalidate scope/session/stop generation,
+   target generation/identity and shared single-writer ownership. Ordinary stale
+   targets require a fresh target observation; they do not terminate the task.
+   External adapters need shared fenced admission spanning the actual dispatch
+   boundary and an in-flight receipt. A precheck followed by an unfenced external
+   request cannot claim this contract. Unsupported adapters remain unsupported;
+   direct CDP/HTTP/A2A calls cannot bypass the fence.
+4. Physical ESC first fences new mutations and releases owned held controls, then
+   emits a durable scoped stop event containing event/cause ID, physical source,
+   session, prior/new stop generation, affected scope, real responsible owner,
+   target/action identity and in-flight disposition. Controlled simulation and
+   agent-synthesized Escape remain distinct; neither proves physical acceptance.
+   Stop delivery failure retains the fence and pending notification. The owning
+   agent acknowledges the event, stops further affected task tools and asks the
+   user before continuing. Background reads/builds are outside this scope.
+5. Receipts distinguish `not_dispatched`, `possibly_dispatched`,
+   `cancel_supported` (capability only, with separate cancel attempt/outcome), and
+   `completed` (transport completion, with independent result verification).
+   Uncertain network/transport outcomes never imply rollback or safe replay.
+6. End/release is terminal cleanup only and cannot clear a stopped latch. Only a
+   separately explicit authorized resume decision bound to the current stop may
+   create a new scope/generation; no timer, cooldown or old queue revival.
+
+Implementation split, requiring exact Root leases before broader edits:
+`main.rs` ownership/admission/stop-delivery and resume handlers plus embedded
+fixtures; `input_policy.rs` separate target invalidation from stop fencing;
+`takeover.rs` only if durable stopped-owner/event identity is added to its
+validated marker schema. Indicator work separately needs `indicator.py`,
+`renderer.c`, `test_indicator.py`, and `README.md`; existing monitor matcher is
+reused unless an evidenced mismatch requires its own lease. Consumer adapters
+and app-owned stop notification delivery remain their respective owners' paths.
+No queue, workflow, system configuration, dependencies or runtime mutation is
+part of this contract checkpoint. Hosted actor tests and indicator fixtures,
+then separately authorized runtime/visual acceptance, are required before
+claiming the shared contract implemented.
+
+### Shared-control state core, revision 1 (host bridge unavailable)
+
+The inline `core/src/main.rs::control_scope` module now implements typed state
+transitions: `Fence::begin(TrustedOwner, ExplicitContinuation, scope_id, token,
+Target) -> Binding`, `indicator_ready(Binding, mapped, current)`,
+`admit(Binding, Target, action_id, outputs, cancel_supported)`,
+`crossing_send_boundary(Binding, action_id, Target, current_outputs)`, `complete(Binding, action_id)`,
+`cancel_result(Binding, action_id, outcome)`, `stop(source) -> StopEvent`,
+`delivered(event_id, TrustedOwner)`, `acknowledge(event_id, TrustedOwner)` and
+`end(Binding)`. These are internal Rust methods, **not public JSON endpoints or
+remote dispatch permits**. Private trusted owner/explicit continuation types
+have no production JSON constructors. A model cannot register a trusted owner.
+
+`desktop_status.shared_control` exposes revision 1 with `available=false`, no
+supported transports, and explicit unavailable trusted-host, dispatch-bridge and
+responsible-turn-delivery fields. Existing lifecycle revision 3 is not silently
+upgraded. The state core separates stop generation from target invalidation,
+requires exact aggregate display coverage before admission, retains in-flight
+uncertainty and makes delivery/ACK independent from resumption. Existing legacy
+batch input guards and resume warning remain unchanged until the authenticated
+consumer bridge and per-action revalidation path are composed and qualified;
+this checkpoint does not claim the complete new ESC-only behavior.
+
+`core/src/takeover.rs` persists optional validated `control_stop` metadata in the
+existing private stop marker, with responsible thread/run/author-turn, exact
+target, operation disposition and delivery/ACK state. Startup restores only the
+stop, never its live scope/token. Pending events cannot be replaced or regressed,
+and unacknowledged control events prevent clearing the marker. Acknowledgement
+persistence itself never clears the latch. Ten new embedded state/Store-free
+marker tests are for hosted execution, not real host identity or GUI proof.
+
+The real T3 seam identified by Integration is authenticated
+`McpInvocationContext` from `McpHttpServer`/registry: it binds thread/provider
+session/instance/environment, but lacks current run and author-turn. Direct
+`weasel_desktop` is currently outside that authenticated context. T3 must supply
+the canonical live producer binding and durable active-turn delivery, potentially
+through its existing `ThreadManagementService.dispatch` steering path with exact
+target run and inactive rejection. Queue acceptance alone is not stop delivery
+or acknowledgement. Consumer adapters must not build against provisional wire
+signatures or bypass this missing bridge.

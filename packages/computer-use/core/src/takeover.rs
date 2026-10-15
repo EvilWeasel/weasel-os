@@ -23,6 +23,8 @@ pub(super) struct Marker {
     #[serde(default)]
     pub cause_id: String,
     at_unix_ms: u128,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub control_stop: Option<control_scope::StopEvent>,
 }
 impl Marker {
     fn new(source: &str, session_id: &str) -> Self {
@@ -39,6 +41,7 @@ impl Marker {
                     .as_nanos(),
                 CAUSE_SERIAL.fetch_add(1, Ordering::SeqCst)
             ),
+            control_stop: None,
             at_unix_ms: SystemTime::now()
                 .duration_since(UNIX_EPOCH)
                 .unwrap_or_default()
@@ -112,6 +115,7 @@ fn load(path: &Path) -> R<Option<Marker>> {
     {
         return Err("Unknown takeover marker schema/source; refusing automatic recovery".into());
     }
+    if let Some(event) = &marker.control_stop { event.validate()?; }
     Ok(Some(marker))
 }
 impl Latch {
@@ -176,12 +180,29 @@ impl Latch {
         }
         // A new real Escape (including the same source) is a new stop, not an
         // idempotent setter: retain its current event identity/session/time.
+        let pending = self.reason.control_stop.clone();
         self.reason = Marker::new(source, session_id);
+        self.reason.control_stop = pending;
         self.marker_active = true; // current refusal remains visible on I/O error
         self.store()?;
         Ok(true)
     }
+    pub fn retain_control_stop(&mut self, event: control_scope::StopEvent) -> R<()> {
+        event.validate()?;
+        if !self.marker_active { return Err("Cannot persist a control stop under a cleared latch".into()); }
+        if let Some(prior) = &self.reason.control_stop {
+            if !prior.acknowledged && prior.event_id != event.event_id
+                || prior.event_id == event.event_id && !event.is_monotonic_update_of(prior) {
+                return Err("Cannot replace pending control owner/event or regress delivery ACK".into());
+            }
+        }
+        self.reason.control_stop = Some(event);
+        self.store()
+    }
     pub fn clear(&mut self) -> R<()> {
+        if self.reason.control_stop.as_ref().is_some_and(|event| !event.acknowledged) {
+            return Err("Retained control stop must be delivered and acknowledged; ACK alone never authorizes resume".into());
+        }
         validate_parent(&self.path)?;
         if load(&self.path)?.is_none() {
             if !self.marker_active {
@@ -212,6 +233,66 @@ impl Latch {
 #[cfg(test)]
 mod tests {
     use super::*;
+    fn control_event() -> control_scope::StopEvent {
+        serde_json::from_value(json!({"contract_revision":1,"event_id":"control-stop-1","session_id":"actor-1","scope_id":"scope-1",
+            "source":"physical_escape","stop_generation":3,
+            "responsible":{"thread_id":"actual-thread","run_id":"actual-run","author_turn_id":"actual-turn",
+                "conversation_id":null,"parent_turn_id":null,"job_id":null},
+            "target":{"adapter":"http","authority":"actual-app-session","resource":"actual-document","revision":"observed"},
+            "operation":null,"delivered":false,"acknowledged":false})).unwrap()
+    }
+    #[test]
+    fn control_stop_owner_survives_restart_and_delivery_ack_never_clears_latch() {
+        let dir = env::temp_dir().join(format!("weasel-control-stop-persist-{}", std::process::id()));
+        private_dir(&dir).unwrap(); let path = dir.join("takeover.json");
+        let mut latch = Latch::startup(path.clone(), "actor-1").unwrap();
+        latch.set("physical_escape", "actor-1").unwrap();
+        let event = control_event(); latch.retain_control_stop(event.clone()).unwrap();
+        let mut restarted = Latch::startup(path.clone(), "actor-2").unwrap();
+        assert_eq!(restarted.reason.control_stop, Some(event.clone()));
+        assert!(restarted.clear().is_err());
+        restarted.set("physical_escape", "actor-2").unwrap();
+        assert_eq!(restarted.reason.control_stop, Some(event.clone()));
+        let mut delivered = event; delivered.delivered = true;
+        restarted.retain_control_stop(delivered.clone()).unwrap();
+        assert!(restarted.clear().is_err());
+        delivered.acknowledged = true;
+        restarted.retain_control_stop(delivered).unwrap();
+        assert!(restarted.status()["marker_active"] == true);
+        assert!(path.exists(), "notification ACK does not clear the stop marker");
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn pending_control_event_cannot_be_replaced_or_delivery_regressed() {
+        let dir = env::temp_dir().join(format!("weasel-control-stop-regression-{}", std::process::id()));
+        private_dir(&dir).unwrap(); let path = dir.join("takeover.json");
+        let mut latch = Latch::startup(path, "actor-1").unwrap();
+        let mut event = control_event(); event.delivered = true;
+        latch.retain_control_stop(event.clone()).unwrap();
+        let mut replacement = event.clone(); replacement.event_id = "different-event".into();
+        assert!(latch.retain_control_stop(replacement).is_err());
+        let mut wrong_owner = event.clone(); wrong_owner.responsible.run_id = "different-run".into();
+        assert!(latch.retain_control_stop(wrong_owner).is_err());
+        let mut altered_cause = event.clone(); altered_cause.source = "controlled_evdev_simulation".into();
+        assert!(latch.retain_control_stop(altered_cause).is_err());
+        event.delivered = false;
+        assert!(latch.retain_control_stop(event).is_err());
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn malformed_persisted_control_owner_refuses_startup_without_overwriting_marker() {
+        let dir = env::temp_dir().join(format!("weasel-control-stop-invalid-{}", std::process::id()));
+        private_dir(&dir).unwrap(); let path = dir.join("takeover.json");
+        let mut latch = Latch::startup(path.clone(), "actor-1").unwrap();
+        latch.retain_control_stop(control_event()).unwrap();
+        let mut payload: Value = serde_json::from_slice(&fs::read(&path).unwrap()).unwrap();
+        payload["control_stop"]["responsible"]["author_turn_id"] = json!("");
+        let bytes = serde_json::to_vec(&payload).unwrap(); fs::write(&path, &bytes).unwrap();
+        assert!(Latch::startup(path.clone(), "actor-2").is_err());
+        assert_eq!(fs::read(&path).unwrap(), bytes);
+        fs::remove_dir_all(dir).unwrap();
+    }
+
     #[test]
     fn status_separates_active_cause_from_cleared_history_without_erasing_persisted_reason() {
         let dir = env::temp_dir().join(format!(

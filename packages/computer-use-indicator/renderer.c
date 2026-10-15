@@ -187,7 +187,7 @@ int main(int argc, char **argv) {
         if (errno || !end || *end || value < -100000 || value > 100000) return 2;
         *values[i] = (int)value;
     }
-    if (expected.width < 320 || expected.height < 200) return 2;
+    if (expected.width < 1 || expected.height < 1) return 2;
     /* Never fall back to X11 or let the compositor select an output. */
     g_setenv("GDK_BACKEND", "wayland", TRUE);
     if (!gtk_init_check(NULL, NULL) || !gtk_layer_is_supported()) {

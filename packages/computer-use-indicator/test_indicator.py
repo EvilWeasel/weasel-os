@@ -53,7 +53,10 @@ class StatusDeadline(unittest.TestCase):
 
 class IndicatorLifecycle(unittest.TestCase):
     def setUp(self):
-        self.temp = tempfile.TemporaryDirectory()
+        # Nix TMPDIR can be long enough that the nested control socket exceeds
+        # Linux's 107-byte AF_UNIX pathname limit. Keep this private fixture
+        # under the sandbox's short /tmp, like the real /run/user/... runtime.
+        self.temp = tempfile.TemporaryDirectory(prefix="wi-", dir="/tmp")
         self.runtime = Path(self.temp.name)
         self.actor_dir = self.runtime / "weasel-computer-use"
         self.actor_dir.mkdir(mode=0o700)
@@ -84,10 +87,13 @@ class IndicatorLifecycle(unittest.TestCase):
             f"#!{sys.executable}\n"
             "import json, os, pathlib, sys, time\n"
             f"pathlib.Path({str(self.render_started)!r}).write_text(str(os.getpid()))\n"
+            f"pathlib.Path({str(self.render_started)!r}+'-'+sys.argv[1]).write_text(str(os.getpid()))\n"
             "for line in sys.stdin:\n"
             f" with pathlib.Path({str(self.renderer_log)!r}).open('a') as log: log.write(json.dumps({{'at':time.monotonic(),'line':line.strip()}})+'\\n')\n"
             " if line == 'v1 begin\\n':\n"
-            "  print(json.dumps({'revision':1,'event':'ready','task_id':sys.argv[2],'output':sys.argv[1],'surfaces':5}),flush=True)\n"
+            "  if os.environ.get('FIXTURE_DELAY_OUTPUT') == sys.argv[1]: time.sleep(0.3)\n"
+            "  output = 'wrong-output' if os.environ.get('FIXTURE_WRONG_OUTPUT') == sys.argv[1] else sys.argv[1]\n"
+            "  print(json.dumps({'revision':1,'event':'ready','task_id':sys.argv[2],'output':output,'surfaces':5}),flush=True)\n"
             " elif line == 'v1 end\\n': break\n"
         )
         self.renderer.chmod(0o700)
@@ -222,14 +228,19 @@ class IndicatorLifecycle(unittest.TestCase):
 
     def ready(self, process):
         deadline = time.monotonic() + 2
+        observed = []
+        stderr = ""
         while time.monotonic() < deadline:
             if select.select([process.stdout], [], [], 0.1)[0]:
                 line = process.stdout.readline()
+                if line:
+                    observed.append(line.strip())
                 if line and json.loads(line).get("event") == "ready":
-                    return
+                    return json.loads(line)
             if process.poll() is not None:
+                stderr = process.stderr.read()
                 break
-        self.fail("fixture indicator was not ready")
+        self.fail(f"fixture indicator was not ready: events={observed!r}, stderr={stderr!r}")
 
     def ended(self, process):
         stdout, stderr = process.communicate(timeout=2)
@@ -241,6 +252,61 @@ class IndicatorLifecycle(unittest.TestCase):
         self.receipt_runs.append({"observed_process_end_monotonic":time.monotonic(), "events":events, "renderer_protocol":self.protocol(), "actor_requests":copy.deepcopy(self.actor_requests), "returncode":process.returncode})
         self.assertTrue(all(type(x.get("monotonic")) in (float, int) for x in events))
         return ended
+
+    def three_displays(self):
+        self.niri_state.update({
+            "DP-5": {"logical": {"x":5360,"y":0,"width":1706,"height":960,"scale":1.5}},
+            "eDP-1": {"logical": {"x":0,"y":0,"width":1920,"height":1080,"scale":2}},
+            "DP-disabled": {"logical": None},
+        })
+        self.niri_state_path.write_text(json.dumps(self.niri_state))
+
+    def test_aggregate_ready_waits_for_every_connected_display(self):
+        self.three_displays()
+        self.env["FIXTURE_DELAY_OUTPUT"] = "DP-5"
+        started = time.monotonic()
+        process = self.launch()
+        ready = self.ready(process)
+        self.assertEqual(ready["outputs"], ["DP-5", "DP-6", "eDP-1"])
+        self.assertEqual(ready["surfaces"], 15)
+        self.assertEqual(ready["display_policy"], "all_connected_enabled")
+        self.assertGreaterEqual(time.monotonic() - started, 0.3)
+        process.terminate()
+        self.assertTrue(self.ended(process)["renderer_exit_confirmed"])
+        for output in ready["outputs"]:
+            pid = int(Path(str(self.render_started) + "-" + output).read_text())
+            with self.assertRaises(ProcessLookupError):
+                os.kill(pid, 0)
+
+    def test_one_wrong_renderer_identity_never_reports_aggregate_ready(self):
+        self.three_displays()
+        self.env["FIXTURE_WRONG_OUTPUT"] = "DP-5"
+        process = self.launch()
+        self.assertEqual(self.ended(process)["reason"], "capability_unavailable")
+        self.assertFalse(any(event.get("event") == "ready" for event in self.last_events))
+
+    def test_nonanchor_output_unplug_ends_the_whole_display_scope(self):
+        self.three_displays()
+        process = self.launch()
+        self.ready(process)
+        del self.niri_state["DP-5"]
+        self.niri_state_path.write_text(json.dumps(self.niri_state))
+        self.assertEqual(self.ended(process)["reason"], "output_geometry_changed")
+        self.assertEqual(self.task_scopes, {})
+
+    def test_new_output_requires_new_aggregate_readiness(self):
+        process = self.launch()
+        self.ready(process)
+        self.three_displays()
+        self.assertEqual(self.ended(process)["reason"], "output_geometry_changed")
+
+    def test_nonanchor_malformed_geometry_refuses_before_renderer_start(self):
+        self.three_displays()
+        self.niri_state["DP-5"]["logical"]["width"] = 0
+        self.niri_state_path.write_text(json.dumps(self.niri_state))
+        process = self.launch()
+        self.assertEqual(self.ended(process)["reason"], "capability_unavailable")
+        self.assertFalse(self.render_started.exists())
 
     def test_lost_begin_ack_cleanup_uses_exact_owner_and_removes_committed_scope(self):
         self.drop_begin_ack_once = True

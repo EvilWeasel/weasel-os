@@ -214,19 +214,37 @@ class LifecycleProbe:
             self.stream.close()
 
 
-def selected_geometry(output):
+def connected_geometries():
+    """One snapshot covers all enabled outputs; malformed inventory fails closed."""
     niri = os.environ.get("WEASEL_INDICATOR_NIRI", "niri")
     result = subprocess.run([niri, "msg", "--json", "outputs"], capture_output=True, timeout=1, check=True)
     outputs = json.loads(result.stdout)
-    if not isinstance(outputs, dict) or output not in outputs:
-        raise CapabilityError("selected Niri output unavailable")
-    logical = outputs[output].get("logical")
-    if not isinstance(logical, dict):
-        raise CapabilityError("selected Niri output is disabled")
-    geometry = tuple(logical.get(key) for key in ("x", "y", "width", "height"))
-    if any(type(value) is not int for value in geometry) or geometry[2] < 320 or geometry[3] < 200:
-        raise CapabilityError("selected output logical geometry unavailable")
-    return geometry, logical
+    if not isinstance(outputs, dict) or not outputs:
+        raise CapabilityError("Niri output inventory unavailable")
+    connected = {}
+    for name, entry in outputs.items():
+        if not isinstance(name, str) or not IDENTIFIER.fullmatch(name) or not isinstance(entry, dict):
+            raise CapabilityError("invalid Niri output inventory entry")
+        logical = entry.get("logical")
+        if logical is None:
+            continue  # connected but disabled: no drawable surface
+        if not isinstance(logical, dict):
+            raise CapabilityError("invalid output logical geometry")
+        geometry = tuple(logical.get(key) for key in ("x", "y", "width", "height"))
+        if (any(type(value) is not int or not -(2**31) <= value < 2**31 for value in geometry)
+                or geometry[2] < 1 or geometry[3] < 1):
+            raise CapabilityError("output logical geometry unavailable")
+        connected[name] = (geometry, logical)
+    if not connected:
+        raise CapabilityError("no enabled Niri outputs")
+    return connected
+
+
+def selected_geometry(output):
+    connected = connected_geometries()
+    if output not in connected:
+        raise CapabilityError("selected Niri output unavailable or disabled")
+    return connected[output]
 
 
 def status_stop_reason(status, initial):
@@ -266,18 +284,20 @@ def run(args):
         raise CapabilityError("actor must be resumed and idle before indicator begin")
     if initial.get("actor_release_confirmed") is not True:
         raise CapabilityError("actor release is unconfirmed")
-    geometry, logical = selected_geometry(args.output)
+    connected = connected_geometries()
+    if args.output not in connected:
+        raise CapabilityError("selected Niri output unavailable or disabled")
+    geometry, logical = connected[args.output]
     if task_socket.exists() or lease_path.exists():
         raise CapabilityError("task indicator already exists; no stale owner is replaced")
     renderer_path = os.environ.get("WEASEL_INDICATOR_RENDERER")
     if not renderer_path:
         raise CapabilityError("packaged indicator renderer unavailable")
     directory = runtime_dir()
-    output_token = hashlib.sha256(args.output.encode()).hexdigest()[:20]
-    lock_path = directory / f"output-{output_token}.lock"
-    lock_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+    lock_fds = []
     server = None
-    renderer = None
+    renderers = {}
+    ready_outputs = set()
     selector = selectors.DefaultSelector()
     reason = "initialization_failed"
     started = time.monotonic()
@@ -295,13 +315,19 @@ def run(args):
         "owner_pid": owner_pid, "owner_start_ticks": owner_ticks,
         "actor_session_id": initial["session_id"], "actor_epoch": initial["epoch"],
         "started_monotonic": started, "deadline_monotonic": deadline,
-        "geometry": geometry, "control_socket": str(task_socket),
+        "geometry": geometry, "outputs": {name: shape[0] for name, shape in connected.items()},
+        "display_policy": "all_connected_enabled", "control_socket": str(task_socket),
     }
     try:
-        try:
-            fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
-        except BlockingIOError as error:
-            raise CapabilityError("selected output has another indicator owner") from error
+        for name in sorted(connected):
+            output_token = hashlib.sha256(name.encode()).hexdigest()[:20]
+            lock_path = directory / f"output-{output_token}.lock"
+            lock_fd = os.open(lock_path, os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW, 0o600)
+            lock_fds.append(lock_fd)
+            try:
+                fcntl.flock(lock_fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            except BlockingIOError as error:
+                raise CapabilityError("connected output has another indicator owner") from error
         server = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         server.bind(str(task_socket))
         os.chmod(task_socket, 0o600)
@@ -313,12 +339,14 @@ def run(args):
         owned_lease_identity = os.fstat(lease_fd).st_ino
         with os.fdopen(lease_fd, "w") as lease:
             json.dump(metadata, lease, ensure_ascii=False)
-        renderer = subprocess.Popen(
-            [renderer_path, args.output, args.task_id, *(str(value) for value in geometry)],
-            stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
-            text=True, bufsize=1,
-        )
-        selector.register(renderer.stdout, selectors.EVENT_READ, "renderer")
+        for name, (rectangle, _logical) in sorted(connected.items()):
+            renderer = subprocess.Popen(
+                [renderer_path, name, args.task_id, *(str(value) for value in rectangle)],
+                stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL,
+                text=True, bufsize=1,
+            )
+            renderers[name] = renderer
+            selector.register(renderer.stdout, selectors.EVENT_READ, ("renderer", name))
         if args.stdin_control:
             os.set_blocking(sys.stdin.fileno(), False)
             selector.register(sys.stdin, selectors.EVENT_READ, "stdin")
@@ -328,8 +356,9 @@ def run(args):
         # Finally must still attempt exact-owner cleanup in that ambiguous case.
         scope_begin_attempted = True
         desktop_lifecycle(actor_socket, args.task_id, "begin", initial, scope_token)
-        renderer.stdin.write("v1 begin\n")
-        renderer.stdin.flush()
+        for renderer in renderers.values():
+            renderer.stdin.write("v1 begin\n")
+            renderer.stdin.flush()
         emit("starting", task_id=args.task_id, output=args.output, pid=os.getpid(), geometry=geometry)
         next_poll = next_heartbeat = started
         next_geometry = started + 1
@@ -348,7 +377,7 @@ def run(args):
             if not ready and now - started > 4:
                 reason = "renderer_readiness_timeout"
                 break
-            if renderer.poll() is not None:
+            if any(renderer.poll() is not None for renderer in renderers.values()):
                 reason = "renderer_exited"
                 break
             try:
@@ -376,7 +405,7 @@ def run(args):
                             request = read_line(client, 4096)
                             valid = uid == os.getuid() and request.get("revision") == REVISION and request.get("task_id") == args.task_id
                             event = request.get("event")
-                            response = {"ok": valid and event in ("status", "end"), "task_id": args.task_id, "ready": ready}
+                            response = {"ok": valid and event in ("status", "end"), "task_id": args.task_id, "ready": ready, "outputs": sorted(ready_outputs) if ready else []}
                             client.sendall(json.dumps(response).encode() + b"\n")
                             if valid and event == "end":
                                 reason = "explicit_end"
@@ -390,7 +419,9 @@ def run(args):
                         fresh_status = key.data.advance(_mask)
                     except (OSError, ValueError, CapabilityError) as error:
                         probe_error = error
-                elif key.data == "renderer":
+                elif isinstance(key.data, tuple) and key.data[0] == "renderer":
+                    name = key.data[1]
+                    renderer = renderers[name]
                     line = renderer.stdout.readline()
                     if not line or len(line) > 4096:
                         reason = "renderer_pipe_closed"
@@ -398,10 +429,18 @@ def run(args):
                         continue
                     event = json.loads(line)
                     if event.get("revision") == REVISION and event.get("event") == "ready":
-                        if event.get("task_id") != args.task_id or event.get("output") != args.output:
+                        if (event.get("task_id") != args.task_id or event.get("output") != name
+                                or event.get("surfaces") != 5):
                             raise CapabilityError("renderer identity differs from owned task")
-                        ready = True
-                        emit("ready", task_id=args.task_id, output=args.output, surfaces=event.get("surfaces"), geometry=geometry)
+                        ready_outputs.add(name)
+                        if not ready and ready_outputs == set(connected):
+                            # Recheck one complete inventory before publishing aggregate READY.
+                            if connected_geometries() != connected:
+                                raise CapabilityError("display inventory changed before aggregate READY")
+                            ready = True
+                            emit("ready", task_id=args.task_id, output=args.output,
+                                 outputs=sorted(ready_outputs), display_policy="all_connected_enabled",
+                                 surfaces=5 * len(ready_outputs), geometry=geometry)
                     elif event.get("event") == "ended":
                         reason = "renderer_" + str(event.get("reason", "ended"))
                         stop_signal[0] = 0
@@ -461,8 +500,7 @@ def run(args):
                 probe = LifecycleProbe(selector, actor_socket, args.task_id, initial, scope_token)
                 last_valid_at = None  # no renewal while authority is unknown
             if probe is None and now >= next_geometry:
-                new_geometry, new_logical = selected_geometry(args.output)
-                if new_geometry != geometry or new_logical != logical:
+                if connected_geometries() != connected:
                     reason = "output_geometry_changed"
                     break
                 next_geometry = time.monotonic() + 1
@@ -474,8 +512,9 @@ def run(args):
                 reason = "maximum_runtime_expired"
                 break
             if probe is None and last_valid_at is not None and now - last_valid_at <= STATUS_FRESH_SECONDS and now >= next_heartbeat:
-                renderer.stdin.write("v1 heartbeat\n")
-                renderer.stdin.flush()
+                for renderer in renderers.values():
+                    renderer.stdin.write("v1 heartbeat\n")
+                    renderer.stdin.flush()
                 next_heartbeat = now + 1
         return 0 if reason in ("explicit_end", "owner_signal", "actor_cancel_epoch_changed", "actor_takeover_latched") else 1
     except (OSError, subprocess.SubprocessError, ValueError, CapabilityError) as error:
@@ -498,7 +537,7 @@ def run(args):
                 # idle/ended task when exact ownership cleanup was uncertain.
                 emit("task_scope_end_unconfirmed", task_id=args.task_id, session_id=initial["session_id"], epoch=initial["epoch"], fail_closed=True)
         # Closing the owned pipe hides the renderer even if writing end fails.
-        if renderer:
+        for renderer in renderers.values():
             try:
                 renderer.stdin.write("v1 end\n")
                 renderer.stdin.flush()
@@ -527,12 +566,13 @@ def run(args):
                     path.unlink()
             except FileNotFoundError:
                 pass
-        os.close(lock_fd)
+        for lock_fd in lock_fds:
+            os.close(lock_fd)
         for signum, previous in old_signals.items():
             signal.signal(signum, previous)
         emit(
             "ended", task_id=args.task_id, output=args.output, reason=reason,
-            renderer_exit_confirmed=renderer is None or renderer.poll() is not None,
+            renderer_exit_confirmed=all(renderer.poll() is not None for renderer in renderers.values()),
             cleanup_ms=round((time.monotonic() - cleanup_started) * 1000, 2),
             elapsed_ms=round((time.monotonic() - started) * 1000, 2),
         )

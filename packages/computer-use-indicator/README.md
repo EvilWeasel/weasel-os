@@ -9,9 +9,12 @@ the Rust capture/input core does not gain a GTK dependency or another Cargo tree
 The indicator has four solid blue 4-logical-pixel edge surfaces and a compact top
 label: **Computer Use · Esc zum Abbrechen**. All five surfaces request the overlay
 layer, explicitly disable keyboard focus, use empty input regions, and reserve no
-workspace. They target one explicitly selected output, including full-screen
-windows. The intended live target on this laptop is `DP-6`; the user's T3 monitor
-is not automatically selected.
+workspace. A single helper owns one renderer per connected enabled Niri output,
+including full-screen windows. `--output` remains the task's anchor identity;
+it no longer limits indicator coverage. Disabled outputs have no drawable surface.
+READY is aggregate: it is emitted only after all five surfaces on every output
+have mapped and the full output inventory has been revalidated. Its `outputs`
+list and total `surfaces` count describe that exact inventory.
 
 This implementation needs live Niri validation. Successful compilation, fixture
 tests and the renderer's `ready` event do not prove visible edges, click-through,
@@ -54,8 +57,10 @@ weasel-computer-use-indicator status --task-id demo-luna-r1
 
 Only the exact task ID and same-user Unix peer can control the session. Private
 mode-0600 task socket/lease files are under
-`$XDG_RUNTIME_DIR/weasel-computer-use/indicators`. One indicator owner per output
-is enforced. An existing task identity is never silently replaced. Metadata
+`$XDG_RUNTIME_DIR/weasel-computer-use/indicators`. One indicator owner per connected output
+is enforced through locks acquired in sorted output order. Any output addition,
+removal or geometry change ends the whole presentation scope; a new complete
+READY is required before further admitted control. An existing task identity is never silently replaced. Metadata
 contains only task/process/actor identities, timing, target geometry and the
 private control reference. It contains no credentials or app/window content.
 
@@ -155,6 +160,44 @@ it; the bounded retry does not redefine such release/capability uncertainty.
 Root must still prove the real monitor rendering, click-through and task Stop
 including a model-thinking gap from ordinary T3/Codex sessions.
 
+## Narrow package delivery
+
+Package version `0.1.1` includes the revision-3 actor client and runs both the
+C monitor matcher and the Python lifecycle fixtures in its Nix `checkPhase`.
+The helper/renderer control protocol remains revision 1; that is separate from
+the actor's `lifecycle_revision=3`, `complete=true` requirement.
+
+Build this package on the existing Namespace `namespace-profile-ci-builder`
+runner from the exact reviewed candidate commit, without a host-system build:
+
+```sh
+nix build --impure --no-link --print-out-paths --expr '
+  let
+    flake = builtins.getFlake (toString ./.);
+    pkgs = import flake.inputs.nixpkgs { system = "x86_64-linux"; };
+  in pkgs.callPackage ./packages/computer-use-indicator { }
+' > indicator.store-path
+```
+
+Retain the commit, locked input hashes, build/check log, exact output path and
+closure transport checksum with the CI artifact. Export the complete closure
+on that runner using `nix-store --export` and its `--query --requisites` list;
+Integration imports those verified bytes on the laptop. This package does not
+need a NixOS switch, actor restart, microphone service or local compilation.
+The current `namespace.yml` workflow has only both-host evaluation/build and
+storage-probe inputs; it does not export this targeted closure. A workflow
+dispatch acknowledgement is therefore not evidence of package delivery.
+
+Integration must give its sole desktop worker the qualified output's absolute
+`bin/weasel-computer-use-indicator` path and verify that exact executable. A
+different `command -v` result still identifies the old installed package and
+must be reported as such. Before input, the worker must observe a real READY
+event on the selected output using the current desktop skill. Fixture success
+alone does not establish READY, rendering, input readiness or permission to
+clear a physical Escape/explicit takeover. Keep the existing package path for
+rollback; selecting another indicator binary must never restart or resume the
+actor. End the owned helper normally before any binary selection change.
+
 Primary API references:
 [GTK layer-shell](https://github.com/wmww/gtk-layer-shell),
 [layer-shell API](https://wmww.github.io/gtk-layer-shell/),
@@ -162,3 +205,10 @@ Primary API references:
 GTK3 layer-shell is maintained; it was selected to reuse this laptop's available
 small presentation stack. A future Rust/voice application can replace this
 renderer while preserving the task/lease boundary.
+
+The all-display helper does not authenticate T3 thread/run/turn identities or
+provide an external dispatch permit. Its aggregate presentation READY must be
+joined to the shared actor/host control contract before advertising cross-adapter
+control readiness. Existing actor lifecycle revision 3 alone does not implement
+that contract. The maximum presentation lifetime and heartbeat timeout only end
+presentation; they never authorize resume or clear a stop.

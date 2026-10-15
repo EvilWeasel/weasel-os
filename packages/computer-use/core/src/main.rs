@@ -71,6 +71,432 @@ fn remaining_timeout(max: Duration) -> Duration {
     })
 }
 
+
+// Shared state core only. No model-callable host registration/dispatch endpoint
+// exists until T3 supplies authenticated live run/author-turn context.
+mod control_scope {
+    use super::*;
+    pub(super) const REVISION: u32 = 1;
+    fn identifier(value: &str) -> bool {
+        !value.is_empty() && value.len() <= 512 && !value.chars().any(char::is_control)
+    }
+    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub(super) struct Responsible {
+        pub thread_id: String,
+        pub run_id: String,
+        pub author_turn_id: String,
+        pub conversation_id: Option<String>,
+        pub parent_turn_id: Option<String>,
+        pub job_id: Option<String>,
+    }
+    impl Responsible {
+        pub fn validate(&self) -> R<()> {
+            if [&self.thread_id, &self.run_id, &self.author_turn_id].into_iter().all(|s| identifier(s))
+                && [&self.conversation_id, &self.parent_turn_id, &self.job_id].into_iter()
+                    .all(|s| s.as_ref().map_or(true, |v| identifier(v))) { Ok(()) }
+            else { Err("Missing or invalid trusted responsible identity".into()) }
+        }
+    }
+    // Deliberately not Deserialize, nor constructible through actor JSON args.
+    // A production constructor requires the future authenticated T3 host binder.
+    pub(super) struct TrustedOwner(Responsible);
+    pub(super) struct ExplicitContinuation { decision_id: String, session_id: String, stopped_generation: u64 }
+    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub(super) struct Target {
+        pub adapter: String,
+        pub authority: String,
+        pub resource: String,
+        pub revision: String,
+    }
+    impl Target {
+        fn validate(&self) -> R<()> {
+            if [&self.adapter, &self.authority, &self.resource, &self.revision]
+                .into_iter().all(|s| identifier(s)) { Ok(()) }
+            else { Err("Exact adapter target binding is required".into()) }
+        }
+    }
+    #[derive(Clone, Debug, PartialEq, Eq)]
+    pub(super) struct Binding {
+        session_id: String, scope_id: String, token: String,
+        stop_generation: u64, target_generation: u64,
+    }
+    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(rename_all = "snake_case")]
+    pub(super) enum Disposition { NotDispatched, PossiblyDispatched, Completed }
+    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub(super) struct OperationReceipt {
+        action_id: String, target: Target, disposition: Disposition,
+        cancel_supported: bool, cancel_attempted: bool, cancel_outcome: Option<String>,
+    }
+    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+    #[serde(deny_unknown_fields)]
+    pub(super) struct StopEvent {
+        pub contract_revision: u32,
+        pub event_id: String,
+        pub session_id: String,
+        pub scope_id: String,
+        pub source: String,
+        pub stop_generation: u64,
+        pub responsible: Responsible,
+        pub target: Target,
+        pub operation: Option<OperationReceipt>,
+        pub delivered: bool,
+        pub acknowledged: bool,
+    }
+    impl StopEvent {
+        pub fn is_monotonic_update_of(&self, prior: &Self) -> bool {
+            let operation_monotonic = match (&prior.operation, &self.operation) {
+                (None, None) => true,
+                (Some(old), Some(new)) => old.action_id == new.action_id && old.target == new.target
+                    && old.cancel_supported == new.cancel_supported && (!old.cancel_attempted || new.cancel_attempted)
+                    && match (&old.disposition, &new.disposition) {
+                        (Disposition::NotDispatched, Disposition::NotDispatched)
+                        | (Disposition::PossiblyDispatched, Disposition::PossiblyDispatched)
+                        | (Disposition::PossiblyDispatched, Disposition::Completed)
+                        | (Disposition::Completed, Disposition::Completed) => true,
+                        _ => false,
+                    },
+                _ => false,
+            };
+            self.contract_revision == prior.contract_revision && self.event_id == prior.event_id
+                && self.session_id == prior.session_id && self.scope_id == prior.scope_id && self.source == prior.source
+                && self.stop_generation == prior.stop_generation && self.responsible == prior.responsible
+                && self.target == prior.target && (!prior.delivered || self.delivered)
+                && (!prior.acknowledged || self.acknowledged) && operation_monotonic
+        }
+        pub fn validate(&self) -> R<()> {
+            self.responsible.validate()?;
+            self.target.validate()?;
+            if self.contract_revision != REVISION || !identifier(&self.event_id) || !identifier(&self.session_id) || !identifier(&self.scope_id)
+                || self.stop_generation == 0 || !matches!(self.source.as_str(), "physical_escape" | "explicit_desktop_takeover" | "controlled_evdev_simulation")
+                || self.acknowledged && !self.delivered {
+                return Err("Invalid retained control stop event".into());
+            }
+            if let Some(operation) = &self.operation {
+                operation.target.validate()?;
+                if !identifier(&operation.action_id) || operation.target != self.target
+                    || operation.cancel_attempted && !operation.cancel_supported
+                    || operation.cancel_outcome.is_some() && !operation.cancel_attempted {
+                    return Err("Invalid retained operation disposition".into());
+                }
+            }
+            Ok(())
+        }
+    }
+    struct Scope { binding: Binding, responsible: Responsible, target: Target, ready: Option<Value> }
+    pub(super) struct Fence {
+        session_id: String, stop_generation: u64, target_generation: u64,
+        stopped: bool, scope: Option<Scope>, operation: Option<OperationReceipt>,
+        used_scopes: HashSet<String>, used_actions: HashSet<String>,
+        pub pending_stop: Option<StopEvent>,
+    }
+    impl Fence {
+        pub fn new(session_id: String) -> Self {
+            Self { session_id, stop_generation: 1, target_generation: 0, stopped: true,
+                scope: None, operation: None, used_scopes: HashSet::new(), used_actions: HashSet::new(), pending_stop: None }
+        }
+        pub fn restore_stop(&mut self, event: StopEvent) -> R<()> {
+            event.validate()?;
+            // Never revive a scope or carry its private token across restart.
+            self.stop_generation = self.stop_generation.max(event.stop_generation);
+            self.used_scopes.insert(event.scope_id.clone());
+            if let Some(operation) = &event.operation { self.used_actions.insert(operation.action_id.clone()); }
+            self.pending_stop = Some(event);
+            self.stopped = true;
+            Ok(())
+        }
+        pub fn begin(&mut self, owner: &TrustedOwner, permission: &ExplicitContinuation,
+            scope_id: &str, token: &str, target: Target) -> R<Binding> {
+            owner.0.validate()?;
+            target.validate()?;
+            if !identifier(scope_id) || !identifier(token) || !identifier(&permission.decision_id)
+                || permission.session_id != self.session_id || permission.stopped_generation != self.stop_generation
+                || self.scope.is_some() || self.operation.is_some()
+                || self.pending_stop.as_ref().is_some_and(|event| !event.acknowledged)
+                || self.used_scopes.contains(scope_id) {
+                return Err("Fresh explicit decision, released prior operation and unused scope required".into());
+            }
+            self.used_scopes.insert(scope_id.into());
+            self.stop_generation = self.stop_generation.checked_add(1).ok_or("Stop generation exhausted")?;
+            let binding = Binding { session_id: self.session_id.clone(), scope_id: scope_id.into(), token: token.into(),
+                stop_generation: self.stop_generation, target_generation: self.target_generation };
+            self.scope = Some(Scope { binding: binding.clone(), responsible: owner.0.clone(), target, ready: None });
+            self.stopped = false;
+            Ok(binding)
+        }
+        fn check(&self, binding: &Binding) -> R<()> {
+            if self.stopped || binding.session_id != self.session_id || binding.stop_generation != self.stop_generation
+                || !self.scope.as_ref().is_some_and(|scope| scope.binding.scope_id == binding.scope_id && scope.binding.token == binding.token) {
+                return Err("Control scope stopped, stale or not owned".into());
+            }
+            Ok(())
+        }
+        fn display_inventory(outputs: &Value) -> R<Value> {
+            let inventory = outputs.as_object().ok_or("Output inventory unavailable")?;
+            let mut enabled = serde_json::Map::new();
+            for (name, entry) in inventory {
+                if entry.get("logical") == Some(&Value::Null) { continue; }
+                launch::allowed_output(name, outputs)?;
+                enabled.insert(name.clone(), entry["logical"].clone());
+            }
+            if enabled.is_empty() { return Err("No enabled output for aggregate READY".into()); }
+            Ok(Value::Object(enabled))
+        }
+        // Trusted presentation binder only; model assertions are not renderer evidence.
+        pub fn indicator_ready(&mut self, binding: &Binding, mapped: &Value, current: &Value) -> R<()> {
+            self.check(binding)?;
+            let actual = Self::display_inventory(current)?;
+            if *mapped != actual { return Err("All-display renderer READY coverage differs from current inventory".into()); }
+            self.scope.as_mut().ok_or("Scope unavailable")?.ready = Some(actual);
+            Ok(())
+        }
+        pub fn target_changed(&mut self, generation: u64) { self.target_generation = self.target_generation.max(generation); }
+        pub fn reground(&self, binding: &Binding, exact: &Target) -> R<Binding> {
+            self.check(binding)?;
+            if &self.scope.as_ref().ok_or("Scope unavailable")?.target != exact { return Err("Wrong control target".into()); }
+            let mut fresh = binding.clone(); fresh.target_generation = self.target_generation; Ok(fresh)
+        }
+        pub fn admit(&mut self, binding: &Binding, target: &Target, action_id: &str,
+            outputs: &Value, cancel_supported: bool) -> R<()> {
+            self.check(binding)?;
+            let scope = self.scope.as_ref().ok_or("Scope unavailable")?;
+            if binding.target_generation != self.target_generation { return Err("Target stale; reobserve without stopping scope".into()); }
+            if target != &scope.target || scope.ready.as_ref() != Some(&Self::display_inventory(outputs)?) {
+                return Err("Exact target or aggregate display readiness changed".into());
+            }
+            if self.operation.is_some() || !identifier(action_id) || !self.used_actions.insert(action_id.into()) {
+                return Err("Only one admitted operation and no action replay are permitted".into());
+            }
+            self.operation = Some(OperationReceipt { action_id: action_id.into(), target: target.clone(),
+                disposition: Disposition::NotDispatched, cancel_supported, cancel_attempted: false, cancel_outcome: None });
+            Ok(())
+        }
+        // State transition at an actual trusted adapter send boundary. This is
+        // NOT an external precheck token and cannot authorize an unfenced send.
+        pub fn crossing_send_boundary(&mut self, binding: &Binding, action_id: &str, target: &Target, outputs: &Value) -> R<()> {
+            self.check(binding)?;
+            let scope = self.scope.as_ref().ok_or("Scope unavailable")?;
+            if target != &scope.target || scope.ready.as_ref() != Some(&Self::display_inventory(outputs)?) {
+                return Err("Target or all-display readiness changed at send boundary".into());
+            }
+            if binding.target_generation != self.target_generation { return Err("Target stale before dispatch".into()); }
+            let operation = self.operation.as_mut().ok_or("No admitted operation")?;
+            if operation.action_id != action_id || operation.disposition != Disposition::NotDispatched {
+                return Err("Operation already sent, foreign or uncertain; no retry".into());
+            }
+            operation.disposition = Disposition::PossiblyDispatched;
+            Ok(())
+        }
+        pub fn complete(&mut self, binding: &Binding, action_id: &str) -> R<()> {
+            self.check_cleanup_owner(binding)?;
+            let operation = self.operation.as_mut().ok_or("No admitted operation")?;
+            if operation.action_id != action_id || operation.disposition != Disposition::PossiblyDispatched {
+                return Err("No matching in-flight operation".into());
+            }
+            operation.disposition = Disposition::Completed;
+            if let Some(event) = self.pending_stop.as_mut() { event.operation = Some(operation.clone()); }
+            Ok(())
+        }
+        pub fn stop(&mut self, source: &str) -> R<Option<StopEvent>> {
+            if !matches!(source, "physical_escape" | "explicit_desktop_takeover" | "controlled_evdev_simulation") {
+                return Err("Unsupported stop provenance".into());
+            }
+            self.stopped = true;
+            self.stop_generation = self.stop_generation.checked_add(1).ok_or("Stop generation exhausted")?;
+            if self.pending_stop.as_ref().is_some_and(|event| !event.acknowledged) {
+                return Ok(self.pending_stop.clone()); // stable event identity until acknowledged
+            }
+            if let Some(scope) = &self.scope {
+                self.pending_stop = Some(StopEvent { contract_revision: REVISION, event_id: format!("{}:control-stop:{}", self.session_id, self.stop_generation),
+                    session_id: self.session_id.clone(), scope_id: scope.binding.scope_id.clone(), source: source.into(),
+                    stop_generation: self.stop_generation, responsible: scope.responsible.clone(), target: scope.target.clone(),
+                    operation: self.operation.clone(), delivered: false, acknowledged: false });
+            }
+            Ok(self.pending_stop.clone())
+        }
+        pub fn delivered(&mut self, event_id: &str, owner: &TrustedOwner) -> R<()> {
+            let event = self.pending_stop.as_mut().ok_or("No retained stop event")?;
+            if event.event_id != event_id || event.responsible != owner.0 { return Err("Wrong stop delivery owner/event".into()); }
+            event.delivered = true; Ok(())
+        }
+        pub fn acknowledge(&mut self, event_id: &str, owner: &TrustedOwner) -> R<()> {
+            let event = self.pending_stop.as_mut().ok_or("No retained stop event")?;
+            if event.event_id != event_id || event.responsible != owner.0 || !event.delivered {
+                return Err("Stop must be delivered to the exact responsible turn before ACK".into());
+            }
+            event.acknowledged = true; Ok(()) // never changes stop/scope/operation
+        }
+        fn check_cleanup_owner(&self, binding: &Binding) -> R<()> {
+            let owned = &self.scope.as_ref().ok_or("No owned scope")?.binding;
+            if owned.session_id != binding.session_id || owned.scope_id != binding.scope_id
+                || owned.token != binding.token || owned.stop_generation != binding.stop_generation {
+                return Err("Foreign scope cleanup".into());
+            }
+            Ok(())
+        }
+        pub fn cancel_result(&mut self, binding: &Binding, action_id: &str, outcome: &str) -> R<()> {
+            self.check_cleanup_owner(binding)?;
+            let operation = self.operation.as_mut().ok_or("No admitted operation")?;
+            if operation.action_id != action_id || !operation.cancel_supported
+                || operation.disposition != Disposition::PossiblyDispatched || !identifier(outcome) {
+                return Err("No matching cancellable in-flight operation".into());
+            }
+            operation.cancel_attempted = true;
+            operation.cancel_outcome = Some(outcome.into());
+            if let Some(event) = self.pending_stop.as_mut() { event.operation = Some(operation.clone()); }
+            Ok(()) // cancellation acknowledgement does not assert completion/rollback
+        }
+        pub fn active(&self) -> bool { self.scope.is_some() && !self.stopped }
+        pub fn end(&mut self, binding: &Binding) -> R<()> {
+            self.check_cleanup_owner(binding)?;
+            if self.operation.as_ref().is_some_and(|operation| operation.disposition == Disposition::PossiblyDispatched) {
+                return Err("In-flight outcome remains uncertain; cleanup cannot claim rollback/release".into());
+            }
+            self.scope = None; self.operation = None; Ok(()) // stopped latch survives cleanup
+        }
+    }
+
+    #[cfg(test)]
+    mod tests {
+        use super::*;
+        fn owner() -> TrustedOwner {
+            TrustedOwner(Responsible { thread_id: "actual-thread".into(), run_id: "actual-run".into(),
+                author_turn_id: "actual-author-turn".into(), conversation_id: None, parent_turn_id: None, job_id: None })
+        }
+        fn target() -> Target { Target { adapter: "semantic-http".into(), authority: "actual-app-session".into(),
+            resource: "actual-document".into(), revision: "observed-revision".into() } }
+        fn outputs() -> Value { json!({"DP-5":{"logical":{"x":0,"y":0,"width":800,"height":600}},
+            "eDP-1":{"logical":{"x":800,"y":0,"width":1536,"height":960}}}) }
+        fn fixture() -> (Fence, Binding) {
+            let mut fence = Fence::new("actor-session".into());
+            let permission = ExplicitContinuation { decision_id: "actual-user-decision".into(), session_id: "actor-session".into(), stopped_generation: 1 };
+            let binding = fence.begin(&owner(), &permission, "scope-1", "private-capability", target()).unwrap();
+            (fence, binding)
+        }
+        fn ready(fence: &mut Fence, binding: &Binding) {
+            let inventory = outputs();
+            let mapped = Fence::display_inventory(&inventory).unwrap();
+            fence.indicator_ready(binding, &mapped, &inventory).unwrap();
+        }
+        #[test]
+        fn aggregate_ready_and_exact_target_required_before_one_operation() {
+            let (mut fence, binding) = fixture();
+            assert!(fence.admit(&binding, &target(), "action", &outputs(), false).is_err());
+            assert!(fence.indicator_ready(&binding, &json!({}), &outputs()).is_err());
+            ready(&mut fence, &binding);
+            let mut foreign = target(); foreign.authority = "foreign-session".into();
+            assert!(fence.admit(&binding, &foreign, "action", &outputs(), false).is_err());
+            fence.admit(&binding, &target(), "action", &outputs(), false).unwrap();
+            assert!(fence.admit(&binding, &target(), "other-action", &outputs(), false).is_err());
+            assert!(fence.crossing_send_boundary(&binding, "foreign-action", &target(), &outputs()).is_err());
+            fence.crossing_send_boundary(&binding, "action", &target(), &outputs()).unwrap();
+            assert!(fence.crossing_send_boundary(&binding, "action", &target(), &outputs()).is_err(), "no send replay");
+        }
+        #[test]
+        fn ordinary_input_only_stales_target_not_scope_or_stop_generation() {
+            let (mut fence, binding) = fixture(); ready(&mut fence, &binding);
+            let generation = fence.stop_generation;
+            fence.target_changed(1);
+            assert!(fence.active()); assert!(!fence.stopped); assert!(fence.pending_stop.is_none());
+            assert_eq!(fence.stop_generation, generation);
+            assert!(fence.admit(&binding, &target(), "action", &outputs(), false).is_err());
+            let fresh = fence.reground(&binding, &target()).unwrap();
+            fence.admit(&fresh, &target(), "action", &outputs(), false).unwrap();
+            fence.crossing_send_boundary(&fresh, "action", &target(), &outputs()).unwrap();
+            fence.complete(&fresh, "action").unwrap();
+            fence.end(&fresh).unwrap();
+        }
+        #[test]
+        fn physical_stop_fences_waiting_action_retains_owner_and_ack_never_resumes() {
+            let (mut fence, binding) = fixture(); ready(&mut fence, &binding);
+            fence.admit(&binding, &target(), "waiting", &outputs(), false).unwrap();
+            let event = fence.stop("physical_escape").unwrap().unwrap();
+            assert_eq!(event.responsible, owner().0);
+            assert_eq!(event.operation.as_ref().unwrap().disposition, Disposition::NotDispatched);
+            assert!(fence.crossing_send_boundary(&binding, "waiting", &target(), &outputs()).is_err());
+            assert!(fence.acknowledge(&event.event_id, &owner()).is_err());
+            let mut foreign = owner(); foreign.0.run_id = "foreign-run".into();
+            assert!(fence.delivered(&event.event_id, &foreign).is_err());
+            fence.delivered(&event.event_id, &owner()).unwrap();
+            fence.acknowledge(&event.event_id, &owner()).unwrap();
+            assert!(fence.stopped);
+            assert!(fence.crossing_send_boundary(&binding, "waiting", &target(), &outputs()).is_err());
+            fence.end(&binding).unwrap(); assert!(fence.stopped);
+            let stale = ExplicitContinuation { decision_id: "new-decision".into(), session_id: "actor-session".into(), stopped_generation: binding.stop_generation };
+            assert!(fence.begin(&owner(), &stale, "new-scope", "new-token", target()).is_err());
+            let decision = ExplicitContinuation { decision_id: "new-decision".into(), session_id: "actor-session".into(), stopped_generation: fence.stop_generation };
+            assert!(fence.begin(&owner(), &decision, "scope-1", "new-token", target()).is_err());
+            fence.begin(&owner(), &decision, "new-scope", "new-token", target()).unwrap();
+            assert!(fence.crossing_send_boundary(&binding, "waiting", &target(), &outputs()).is_err());
+        }
+        #[test]
+        fn already_sent_is_uncertain_until_actual_receipt_not_cancellation_ack() {
+            let (mut fence, binding) = fixture(); ready(&mut fence, &binding);
+            fence.admit(&binding, &target(), "sent", &outputs(), true).unwrap();
+            fence.crossing_send_boundary(&binding, "sent", &target(), &outputs()).unwrap();
+            let event = fence.stop("physical_escape").unwrap().unwrap();
+            assert_eq!(event.operation.unwrap().disposition, Disposition::PossiblyDispatched);
+            fence.cancel_result(&binding, "sent", "cancel_request_accepted_outcome_unknown").unwrap();
+            assert_eq!(fence.pending_stop.as_ref().unwrap().operation.as_ref().unwrap().disposition, Disposition::PossiblyDispatched);
+            assert!(fence.end(&binding).is_err());
+            let mut wrong = binding.clone(); wrong.token = "wrong".into();
+            assert!(fence.complete(&wrong, "sent").is_err());
+            fence.complete(&binding, "sent").unwrap();
+            assert_eq!(fence.pending_stop.as_ref().unwrap().operation.as_ref().unwrap().disposition, Disposition::Completed);
+            fence.end(&binding).unwrap(); assert!(fence.stopped);
+        }
+        #[test]
+        fn hotplug_invalidates_ready_without_aborting_scope() {
+            let (mut fence, binding) = fixture(); ready(&mut fence, &binding);
+            let changed = json!({"DP-5":{"logical":{"x":0,"y":0,"width":800,"height":600}}});
+            assert!(fence.admit(&binding, &target(), "action", &changed, false).is_err());
+            assert!(fence.active());
+            let mapped = Fence::display_inventory(&changed).unwrap();
+            fence.indicator_ready(&binding, &mapped, &changed).unwrap();
+            fence.admit(&binding, &target(), "action", &changed, false).unwrap();
+            assert!(fence.crossing_send_boundary(&binding, "action", &target(), &outputs()).is_err(), "coverage changed after admission");
+            fence.crossing_send_boundary(&binding, "action", &target(), &changed).unwrap();
+            assert!(fence.cancel_result(&binding, "action", "unsupported").is_err());
+        }
+        #[test]
+        fn repeated_stop_dedupes_notification_and_restart_never_revives_owner_scope() {
+            let (mut fence, binding) = fixture(); ready(&mut fence, &binding);
+            let first = fence.stop("physical_escape").unwrap().unwrap();
+            let again = fence.stop("physical_escape").unwrap().unwrap();
+            assert_eq!(first.event_id, again.event_id);
+            let bytes = serde_json::to_vec(&again).unwrap();
+            assert!(!String::from_utf8(bytes.clone()).unwrap().contains("private-capability"));
+            let restored: StopEvent = serde_json::from_slice(&bytes).unwrap();
+            let mut restarted = Fence::new("new-actor-session".into());
+            restarted.restore_stop(restored).unwrap();
+            assert!(restarted.stopped); assert!(!restarted.active());
+            let old_session_permission = ExplicitContinuation { decision_id: "actual-user-decision".into(),
+                session_id: "actor-session".into(), stopped_generation: restarted.stop_generation };
+            assert!(restarted.begin(&owner(), &old_session_permission, "fresh-id", "fresh-token", target()).is_err());
+            assert_eq!(restarted.pending_stop.unwrap().responsible, owner().0);
+        }
+        #[test]
+        fn unsupported_host_bridge_is_truthfully_unavailable() {
+            let capability = capability();
+            assert_eq!(capability["available"], false);
+            assert_eq!(capability["trusted_host_context_available"], false);
+            assert_eq!(capability["supported_transports"], json!([]));
+            let mut malformed = owner(); malformed.0.author_turn_id.clear();
+            assert!(malformed.0.validate().is_err());
+        }
+    }
+    pub(super) fn capability() -> Value {
+        json!({"contract_revision":REVISION,"state_core":true,"available":false,
+            "trusted_host_context_available":false,"responsible_turn_delivery_available":false,
+            "external_dispatch_bridge_available":false,"supported_transports":[],
+            "reason":"Authenticated live T3 run/author-turn binding and durable delivery bridge are not implemented; no shared-control endpoint is enabled",
+            "ack_clears_stop":false,"automatic_resume":false})
+    }
+}
+
 #[derive(Clone)]
 struct Observation {
     id: String,
@@ -143,6 +569,7 @@ struct State {
     task_scopes: Mutex<HashMap<String, TaskScope>>,
     task_scope_ids: Mutex<HashSet<String>>,
     task_scope_gate: Mutex<()>,
+    control_scope: Mutex<control_scope::Fence>,
     rearm_warning: Mutex<Option<RearmWarning>>,
     last_result: Mutex<Value>,
     observations: Mutex<HashMap<String, Observation>>,
@@ -414,7 +841,8 @@ fn physical_activity(state: &State, escape: bool, simulation: bool) {
         state.last_human_ms.store(now.max(1), Ordering::SeqCst);
         // A normal mouse/key event invalidates old targets and stops any batch
         // bound to that generation. It never cancels the task or persists stop.
-        state.input_policy.activity();
+        let target_generation = state.input_policy.activity();
+        if let Ok(mut control) = state.control_scope.lock() { control.target_changed(target_generation); }
         state.reference_cache.invalidate();
         return;
     }
@@ -459,6 +887,7 @@ fn physical_activity(state: &State, escape: bool, simulation: bool) {
     let task_live = active_live
         || state.queued.load(Ordering::SeqCst) != 0
         || scope_live
+        || state.control_scope.lock().map_or(true, |control| control.active())
         || state.rearm_warning.lock().map_or(true, |warning| {
             warning.as_ref().is_some_and(|pending| pending.expires > Instant::now())
         });
@@ -482,9 +911,16 @@ fn physical_activity(state: &State, escape: bool, simulation: bool) {
     } else {
         "physical_escape"
     };
+    let shared_stop = state.control_scope.lock().ok()
+        .and_then(|mut control| control.stop(source).ok().flatten());
     match state.takeover_marker.lock() {
         Ok(mut marker) => match marker.set(source, &state.session_id) {
             Ok(changed) => {
+                if let Some(event) = shared_stop {
+                    if let Err(error) = marker.retain_control_stop(event) {
+                        record(state, "control_stop_persistence_failed", json!({"error":error,"input_remains_latched":true}));
+                    }
+                }
                 record(
                     state,
                     if newly_latched || changed {
@@ -1061,7 +1497,7 @@ fn preflight(obs: &Observation, action: &Action) -> R<()> {
         _ => {}
     }
     if action.launch().is_some() {
-        launch::allowed_output(&obs.output)?;
+        launch::validate_output_geometry(&obs.output, &obs.output_geometry)?;
         if obs.focus_output.as_deref() != Some(obs.output.as_str()) {
             return Err("Launch requires the observed focused output; no spawn".into());
         }
@@ -1312,8 +1748,8 @@ fn observe_inner_guarded(state: &State, args: &Value, actor_held: bool, allowed_
             })
         })
         .ok_or("No enabled Niri output")?;
+    launch::allowed_output(&name, &outputs)?;
     if allowed_output_only {
-        launch::allowed_output(&name)?;
         let focused_output = workspaces.as_array().and_then(|ws| ws.iter().find(|w| w["is_focused"] == true))
             .and_then(|w| w["output"].as_str());
         if focused_output != Some(name.as_str()) {
@@ -1358,7 +1794,7 @@ fn observe_inner_guarded(state: &State, args: &Value, actor_held: bool, allowed_
     } else {
         image.clone()
     };
-    let data = json!({"schema":1,"observation_id":id,"epoch":epoch,"input_generation":input_generation,"input_policy":state.input_policy.status(state.last_human_ms.load(Ordering::SeqCst)),"global_keyboard":global_keyboard_capability(),"observed_unix_ms":SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis(),"monotonic_ms":state.started.elapsed().as_secs_f64()*1000.0,"monotonic_system_ms":system_monotonic_ms(),"expires_after_ms":60000,"desktop":"niri-wayland","focused_window":focus,"windows":windows,"workspaces":workspaces,"outputs":outputs,"capture":{"output":name,"path":image,"mime_type":"image/png","image_width":width,"image_height":height,"scale":1,"coordinate_frame":"output-local screenshot pixels; origin top-left; dimensions are actual PNG dimensions and may differ by rounding from Niri logical size","output_logical":geometry},"capabilities":{"capture":true,"window_focus":true,"window_close_request":close_window_capability(),"desktop_launch":launch::capability(),"pointer":"wlr_virtual_pointer_v2","keyboard":{"shortcuts":"app shortcuts: persistent canonical German evdev Wayland keyboard; keymap refreshed before every chord. key_scope=compositor or chords containing Super/meta/logo use an owned Linux uinput device so Niri compositor bindings can process them; permission/monitor/device-open failures refuse before any batch input. Device creation is a capability side effect; open/write acknowledgement is not UI success","unicode_text":{"auto":"plain clipboard for known Electron app IDs or >1000characters; wtype for shorter text in other apps","keyboard_limit_characters":1000,"max_text_utf8_bytes":65536,"electron_keyboard":"known unreliable due physical DomCode and supplementary Unicode; explicit override requires app-specific proof"}},"clipboard":{"backend":"Rust wlr-data-control helper with an owned user scope","plain_text_restore":"best effort; source ownership checked, no atomic selection CAS; skipped after cancel/takeover","rich_or_nontext_restore":"supported bounded MIME payloads including HTML, COMPOUND_TEXT and original Chromium metadata; no portal handles/password hints","rich_preserve_request":"snapshot same offer before replacement; unknown/oversized/sensitive formats refuse","ignored_transport_mimes":["SAVE_TARGETS","GTK_TEXT_BUFFER_CONTENTS"],"holder_lifetime":"separate user scope; source replacement or graphical session shutdown","potential_change_reported_on_failure":true},"semantic_tree":"desktop_semantic: read-only Cua application/PID tree; unique window inventory mapping does not attest node window scope; Cua bounds are not screenshot coordinates","takeover":"physical Escape aborts only a live queued/preparing/running action or indicator-owned task scope; idle Escape only invalidates observations. Active Escape cancels the task, drops queued work and persists physical_escape; re-arm requires a new explicit task and a 2-second Escape-abortable warning. Explicit takeover remains a separate persistent stop."},"timing_ms":{"capture":capture_start.elapsed().as_secs_f64()*1000.0,"observe_total":start.elapsed().as_secs_f64()*1000.0}});
+    let data = json!({"schema":1,"observation_id":id,"epoch":epoch,"input_generation":input_generation,"input_policy":state.input_policy.status(state.last_human_ms.load(Ordering::SeqCst)),"global_keyboard":global_keyboard_capability(),"observed_unix_ms":SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis(),"monotonic_ms":state.started.elapsed().as_secs_f64()*1000.0,"monotonic_system_ms":system_monotonic_ms(),"expires_after_ms":60000,"desktop":"niri-wayland","focused_window":focus,"windows":windows,"workspaces":workspaces,"outputs":outputs,"capture":{"output":name,"path":image,"mime_type":"image/png","image_width":width,"image_height":height,"scale":1,"coordinate_frame":"output-local screenshot pixels; origin top-left; dimensions are actual PNG dimensions and may differ by rounding from Niri logical size","output_logical":geometry},"capabilities":{"capture":true,"window_focus":true,"window_close_request":close_window_capability(),"desktop_launch":launch::capability(Some(&outputs)),"pointer":"wlr_virtual_pointer_v2","keyboard":{"shortcuts":"app shortcuts: persistent canonical German evdev Wayland keyboard; keymap refreshed before every chord. key_scope=compositor or chords containing Super/meta/logo use an owned Linux uinput device so Niri compositor bindings can process them; permission/monitor/device-open failures refuse before any batch input. Device creation is a capability side effect; open/write acknowledgement is not UI success","unicode_text":{"auto":"plain clipboard for known Electron app IDs or >1000characters; wtype for shorter text in other apps","keyboard_limit_characters":1000,"max_text_utf8_bytes":65536,"electron_keyboard":"known unreliable due physical DomCode and supplementary Unicode; explicit override requires app-specific proof"}},"clipboard":{"backend":"Rust wlr-data-control helper with an owned user scope","plain_text_restore":"best effort; source ownership checked, no atomic selection CAS; skipped after cancel/takeover","rich_or_nontext_restore":"supported bounded MIME payloads including HTML, COMPOUND_TEXT and original Chromium metadata; no portal handles/password hints","rich_preserve_request":"snapshot same offer before replacement; unknown/oversized/sensitive formats refuse","ignored_transport_mimes":["SAVE_TARGETS","GTK_TEXT_BUFFER_CONTENTS"],"holder_lifetime":"separate user scope; source replacement or graphical session shutdown","potential_change_reported_on_failure":true},"semantic_tree":"desktop_semantic: read-only Cua application/PID tree; unique window inventory mapping does not attest node window scope; Cua bounds are not screenshot coordinates","takeover":"physical Escape aborts only a live queued/preparing/running action or indicator-owned task scope; idle Escape only invalidates observations. Active Escape cancels the task, drops queued work and persists physical_escape; re-arm requires a new explicit task and a 2-second Escape-abortable warning. Explicit takeover remains a separate persistent stop."},"timing_ms":{"capture":capture_start.elapsed().as_secs_f64()*1000.0,"observe_total":start.elapsed().as_secs_f64()*1000.0}});
     check_epoch(state, Some(epoch))?;
     if focused(&niri_epoch(state, "windows", Some(epoch))?)
         .as_ref()
@@ -1836,7 +2272,7 @@ fn semantic_target(state: &State, obs: &Observation, handle: &str) -> R<Semantic
 }
 
 fn validate_launch_inventory(obs: &Observation, windows: &Value, workspaces: &Value, outputs: &Value) -> R<()> {
-    launch::allowed_output(&obs.output)?;
+    launch::allowed_output(&obs.output, outputs)?;
     if obs.focus_output.as_deref() != Some(obs.output.as_str())
         || focused(windows).as_ref().map(identity) != obs.focused_window.as_ref().map(identity) {
         return Err("Launch focus identity/output changed; no spawn, reobserve".into());
@@ -3324,7 +3760,9 @@ fn handle(state: &State, tool: &str, args: &Value, epoch: u64) -> R<Value> {
             data["resume_input_readiness"] = readiness;
             data["rearm_warning"] = rearm_warning_status(state);
             data["window_close_request"] = close_window_capability();
-            data["desktop_launch"] = launch::capability();
+            let outputs = niri(state, "outputs").ok();
+            data["desktop_launch"] = launch::capability(outputs.as_ref());
+            data["shared_control"] = control_scope::capability();
             Ok(text_result(data))
         }
         "desktop_windows" => Ok(text_result(
@@ -3856,7 +4294,7 @@ fn tools() -> Value {
       {"name":"desktop_observe","description":"Capture one actual laptop output via grim at scale1, plus Niri identities. Startup capture_not_attempted=true is expected and permits this first read-only observation. Input always requires accepted fresh observation and action_ready; prior successful capture is not a prerequisite for authorized startup resume. Optional crop uses full-output screenshot pixels x/y/width/height; action x/y then use local pixels of the displayed crop. Core translates crop origin; NEVER add compositor output origin. Actual PNG size can differ from Niri logical size by rounding. Observation expires in60seconds; identity/geometry and fresh target-region guards still run. Observe after focus/workspace/layout changes. include_image=false returns private PNG reference only.","inputSchema":{"type":"object","properties":{"output":{"type":"string"},"include_image":{"type":"boolean"},"crop":crop}}},
       {"name":"desktop_semantic","description":"Read fresh Cua AT-SPI elements for a Niri window. Maps only unique actual PID+title; synthetic Cua IDs are never guessed. Query filters returned elements. Accessibility bounds are app-local and NOT screenshot coordinates; do not directly click them without calibrated mapping. Limited/root-only trees require visual fallback.","inputSchema":{"type":"object","properties":{"window_id":{"type":"integer"},"query":{"type":"string"},"max_elements":{"type":"integer"},"max_depth":{"type":"integer"}},"required":["window_id"]}},
       {"name":"desktop_semantic_direct","description":"Read exact-window AT-SPI labels/tree even during ordinary physical activity or held controls. Returns original/current input generation and explicit input/action readiness. Non-actionable or incomplete snapshots issue no handles (focus/click/set_value=false); obtain a fresh complete snapshot after controls release. Only daemon-owned handles from actionable complete snapshots may be used with desktop_act semantic_set_value, semantic_click or standalone semantic_focus. focusable/FOCUSED flags attest element keyboard focus separately from Niri window focus; semantic_focus requires fresh complete semantics and verifies FOCUSED on the same exact object before returning focus_verified. Reobserve and requery semantics before later keyboard input. No raw object/index/Cua tokens and no pixel fallback. Native GTK candidates need live acceptance; missing/incomplete bridges use visual typed actions.","inputSchema":{"type":"object","properties":{"window_id":{"type":"integer"},"query":{"type":"string"},"max_elements":{"type":"integer"},"max_depth":{"type":"integer"},"include_text_selection":{"type":"boolean","description":"Opt-in bounded selection readback for at most one showing enabled FOCUSED unprotected Text object; unicode codepoint [start,end). Explicit available/unsupported/error, no input authority; check fresh generation, complete tree and text identity separately."}},"required":["window_id"]}},
-      {"name":"desktop_act","description":"Standalone launch_app(app:zed|chrome), editor_open_project(project:jarvis) and editor_open_file(project:jarvis,relative_path) spawn only pinned isolated apps inside this actor on observed active DP-6/eDP-1. OS spawn ACK is not UI success; uncertain spawn requires verification, no auto retry. Single-writer typed desktop actions against fresh observation. With a live task indicator, every call must include that exact task_id; old, ended or mismatched task identities are refused, while multiple batches in the same live scope are allowed. Rejects changed focus/geometry/scaling or changed pixels near pointer targets. x/y are local to displayed screenshot/crop. Every move/click/scroll/drag requires the displayed view to be at most1200 pixels on each axis; an oversized view rejects the whole batch before any input, queue admission or device preparation. Capture a fresh target crop and use its crop-local coordinates. Full images remain usable for overview, focus, keys and semantics. Focus must be standalone. close_window(window_id) is standalone with the same top-level window_id, exact fresh focused target/title/output; caller proves task ownership and safe saved state. Explicit close request acknowledgement is not window disappearance; inspect fresh inventory and any save modal. No PID kill or blind cleanup. Unknown or misplaced fields for an action kind reject the whole batch before input; restore_clipboard belongs only to paste, while type always preserves the prior selection. By default observe_after=true returns a new after_observation ID and image in this same response after dispatch/release and a bounded80ms defaultsettle wait; settle_ms=0..1000 can adjust. Use it for the next act and inspect expected result. A slow/unchanged frame needs another observation/semantic check, not repetition of toggle input. include_image=false omits its image. Acknowledgement is not UI success. Type text_method=auto uses clipboard for known Electron IDs (code/T3) and >1000-character text, keyboard for shorter text in other apps; explicit keyboard/clipboard are available. Electron wtype Unicode is unreliable on this laptop. Clipboard preserves supported text/rich app payloads and original Chromium provenance in bounded RAM from one offer, normalizes duplicate MIME names, omits SAVE_TARGETS and SAME_APP GTK_TEXT_BUFFER_CONTENTS transport markers, preserves serialized GTK rich text, and keeps a separate source holder across actor restarts. Unsupported/sensitive/oversized formats refuse before replacement. Own-source check runs after layout/keymap/window validation and before the first paste modifier press; ownership can still change between reply and input because Wayland has no atomic selection-check-and-paste. No restore after takeover/cancel/ownership loss. Scroll dx/dy are discrete wheel steps (integer -100..100), not pixels; positive dx moves right and positive dy moves down. Smooth-scroll animation needs another fresh observation/settle check before reusing visual targets. Keys are modifiers first e.g.[ctrl,l],[Return]. Explicit key_scope=compositor and Super/meta/logo chords use an owned persistent direct-uinput device because this Niri25.11 Wayland virtual keyboard bypasses compositor bindings; Ctrl/app chords retain the Wayland transport. A fresh proxy check requires backend routing_revision=2 and binds session/epoch/observation before forwarding a global batch; an older backend is refused. Missing permission/takeover monitor/compositor device-open evidence refuses the complete batch before input. Creating the own device is a capability side effect. A kernel input acknowledgement does not verify Niri/UI acceptance; inspect the fresh result. No automatic input fallback. Direct semantic_set_value(handle_id,text,expected_text optional) replaces exact editable contents; semantic_click(handle_id,action_name from direct tree) invokes only AT-SPI named action. Both freshly revalidate context and have no input fallback. Standalone semantic_focus(handle_id) uses Component.GrabFocus, then repeats exact object/window/context validation and freshly queries FOCUSED; acceptance alone is not focus_verified. It sends no keyboard input or fallback. Reobserve and requery the exact focused object before keyboard input. Batch stable edits/shortcuts when intermediate states cannot invalidate later targets; changed-target actions need fresh observation.","inputSchema":{"type":"object","properties":{"observation_id":{"type":"string"},"window_id":{"type":"integer"},"task_id":{"type":"string"},"timeout_ms":{"type":"integer","minimum":100,"maximum":120000,"description":"Whole batch deadline; release cleanup follows timeout."},"observe_after":{"type":"boolean","default":true},"include_image":{"type":"boolean","default":true},"settle_ms":{"type":"integer","default":80,"minimum":0,"maximum":1000,"description":"Post-action wait before capture; reobserve slow states, never replay blindly."},"actions":{"type":"array","items":action,"minItems":1,"maxItems":32}},"required":["observation_id","actions","task_id"]}},
+      {"name":"desktop_act","description":"Standalone launch_app(app:zed|chrome), editor_open_project(project:jarvis) and editor_open_file(project:jarvis,relative_path) spawn only pinned isolated apps inside this actor on any observed active connected Niri output with valid logical geometry. OS spawn ACK is not UI success; uncertain spawn requires verification, no auto retry. Single-writer typed desktop actions against fresh observation. With a live task indicator, every call must include that exact task_id; old, ended or mismatched task identities are refused, while multiple batches in the same live scope are allowed. Rejects changed focus/geometry/scaling or changed pixels near pointer targets. x/y are local to displayed screenshot/crop. Every move/click/scroll/drag requires the displayed view to be at most1200 pixels on each axis; an oversized view rejects the whole batch before any input, queue admission or device preparation. Capture a fresh target crop and use its crop-local coordinates. Full images remain usable for overview, focus, keys and semantics. Focus must be standalone. close_window(window_id) is standalone with the same top-level window_id, exact fresh focused target/title/output; caller proves task ownership and safe saved state. Explicit close request acknowledgement is not window disappearance; inspect fresh inventory and any save modal. No PID kill or blind cleanup. Unknown or misplaced fields for an action kind reject the whole batch before input; restore_clipboard belongs only to paste, while type always preserves the prior selection. By default observe_after=true returns a new after_observation ID and image in this same response after dispatch/release and a bounded80ms defaultsettle wait; settle_ms=0..1000 can adjust. Use it for the next act and inspect expected result. A slow/unchanged frame needs another observation/semantic check, not repetition of toggle input. include_image=false omits its image. Acknowledgement is not UI success. Type text_method=auto uses clipboard for known Electron IDs (code/T3) and >1000-character text, keyboard for shorter text in other apps; explicit keyboard/clipboard are available. Electron wtype Unicode is unreliable on this laptop. Clipboard preserves supported text/rich app payloads and original Chromium provenance in bounded RAM from one offer, normalizes duplicate MIME names, omits SAVE_TARGETS and SAME_APP GTK_TEXT_BUFFER_CONTENTS transport markers, preserves serialized GTK rich text, and keeps a separate source holder across actor restarts. Unsupported/sensitive/oversized formats refuse before replacement. Own-source check runs after layout/keymap/window validation and before the first paste modifier press; ownership can still change between reply and input because Wayland has no atomic selection-check-and-paste. No restore after takeover/cancel/ownership loss. Scroll dx/dy are discrete wheel steps (integer -100..100), not pixels; positive dx moves right and positive dy moves down. Smooth-scroll animation needs another fresh observation/settle check before reusing visual targets. Keys are modifiers first e.g.[ctrl,l],[Return]. Explicit key_scope=compositor and Super/meta/logo chords use an owned persistent direct-uinput device because this Niri25.11 Wayland virtual keyboard bypasses compositor bindings; Ctrl/app chords retain the Wayland transport. A fresh proxy check requires backend routing_revision=2 and binds session/epoch/observation before forwarding a global batch; an older backend is refused. Missing permission/takeover monitor/compositor device-open evidence refuses the complete batch before input. Creating the own device is a capability side effect. A kernel input acknowledgement does not verify Niri/UI acceptance; inspect the fresh result. No automatic input fallback. Direct semantic_set_value(handle_id,text,expected_text optional) replaces exact editable contents; semantic_click(handle_id,action_name from direct tree) invokes only AT-SPI named action. Both freshly revalidate context and have no input fallback. Standalone semantic_focus(handle_id) uses Component.GrabFocus, then repeats exact object/window/context validation and freshly queries FOCUSED; acceptance alone is not focus_verified. It sends no keyboard input or fallback. Reobserve and requery the exact focused object before keyboard input. Batch stable edits/shortcuts when intermediate states cannot invalidate later targets; changed-target actions need fresh observation.","inputSchema":{"type":"object","properties":{"observation_id":{"type":"string"},"window_id":{"type":"integer"},"task_id":{"type":"string"},"timeout_ms":{"type":"integer","minimum":100,"maximum":120000,"description":"Whole batch deadline; release cleanup follows timeout."},"observe_after":{"type":"boolean","default":true},"include_image":{"type":"boolean","default":true},"settle_ms":{"type":"integer","default":80,"minimum":0,"maximum":1000,"description":"Post-action wait before capture; reobserve slow states, never replay blindly."},"actions":{"type":"array","items":action,"minItems":1,"maxItems":32}},"required":["observation_id","actions","task_id"]}},
       {"name":"desktop_cancel","description":"Priority epoch cancellation independent of actor lock. Pending batches stop; held buttons release. Already-dispatched effects remain. Wait for desktop_status active=null and actor_release_confirmed=true for full release.","inputSchema":{"type":"object","properties":{}}},
       {"name":"desktop_takeover","description":"Explicit human desktop takeover, persists its cause across backend restarts and latches refusal of future actions and cancels queued/active automation. Physical Escape aborts only queued/preparing/running work or a live task-indicator scope; idle Escape only invalidates stale observations. Ordinary input invalidates stale observations and releases a conflicting batch without latching takeover. Wait active=null and actor_release_confirmed=true for full release. desktop_resume then fresh observation is required.","inputSchema":{"type":"object","properties":{}}},
       {"name":"desktop_recover_release","description":"Explicit bounded recovery of unconfirmed release/receipt on existing owned actuators only. Refuses if writer busy, active task or queue nonempty. Sends only releases of owned held buttons/keys and receipt sync, no press/move/device creation/action replay, no epoch/latch/cause reset, no automatic resume. May finalize effects of already-held input. Default1500ms, maximum2000ms shared budget. Failure remains unconfirmed; original last_result preserved. Success invalidates old observations/semantic handles and requires fresh capture; inspect status queue and follow human return-of-control policy before resume.","inputSchema":{"type":"object","properties":{"timeout_ms":{"type":"integer","minimum":200,"maximum":2000,"default":1500}},"additionalProperties":false}},
@@ -4166,6 +4604,8 @@ fn serve(socket: &Path) -> R<()> {
             .as_nanos()
     );
     let takeover_marker = takeover::Latch::startup(global_dir.join("takeover.json"), &session_id)?;
+    let mut shared_control = control_scope::Fence::new(session_id.clone());
+    if let Some(event) = takeover_marker.reason.control_stop.clone() { shared_control.restore_stop(event)?; }
     let state = Arc::new(State {
         started: Instant::now(),
         session_id,
@@ -4185,6 +4625,7 @@ fn serve(socket: &Path) -> R<()> {
         task_scopes: Mutex::new(HashMap::new()),
         task_scope_ids: Mutex::new(HashSet::new()),
         task_scope_gate: Mutex::new(()),
+        control_scope: Mutex::new(shared_control),
         rearm_warning: Mutex::new(None),
         last_result: Mutex::new(Value::Null),
         observations: Mutex::new(HashMap::new()),
@@ -4443,6 +4884,7 @@ mod regression {
             task_scopes: Mutex::new(HashMap::new()),
             task_scope_ids: Mutex::new(HashSet::new()),
             task_scope_gate: Mutex::new(()),
+        control_scope: Mutex::new(control_scope::Fence::new("unbound-host-context".into())),
             rearm_warning: Mutex::new(None),
             last_result: Mutex::new(Value::Null),
             observations: Mutex::new(HashMap::new()),
@@ -4545,6 +4987,7 @@ mod regression {
             task_scopes: Mutex::new(HashMap::new()),
             task_scope_ids: Mutex::new(HashSet::new()),
             task_scope_gate: Mutex::new(()),
+        control_scope: Mutex::new(control_scope::Fence::new("unbound-host-context".into())),
             rearm_warning: Mutex::new(None),
             last_result: Mutex::new(Value::Null),
             observations: Mutex::new(HashMap::new()),
@@ -5163,6 +5606,7 @@ mod release_recovery_tests {
                 task_scopes: Mutex::new(HashMap::new()),
                 task_scope_ids: Mutex::new(HashSet::new()),
                 task_scope_gate: Mutex::new(()),
+        control_scope: Mutex::new(control_scope::Fence::new("unbound-host-context".into())),
                 rearm_warning: Mutex::new(None),
                 last_result: Mutex::new(
                     json!({"status":"failed","error":"original timeout preserved"}),
@@ -7839,6 +8283,29 @@ mod launch_contract_tests {
         (state, dir, captured, windows, workspaces, outputs)
     }
     #[test]
+    fn newly_connected_output_passes_same_launch_gate_and_unplug_or_focus_change_refuses() {
+        let (state, dir, mut captured, windows, mut workspaces, _) = fixture("launch-new-output");
+        captured.output = "DP-5".into();
+        captured.focus_output = Some("DP-5".into());
+        workspaces[0]["output"] = json!("DP-5");
+        workspaces[1]["output"] = json!("DP-6");
+        let outputs = json!({"DP-5":{"logical":captured.output_geometry}});
+        state.observations.lock().unwrap().insert(captured.id.clone(), captured.clone());
+        preflight(&captured, &Action::LaunchApp { app: launch::App::Chrome }).unwrap();
+        let effects = AtomicUsize::new(0);
+        let mut receipt = launch::Receipt::default();
+        launch::dispatch(&mut receipt,
+            || validate_launch_state_with_inventory(&state, &captured, 77, || Ok((windows.clone(), workspaces.clone(), outputs.clone()))),
+            |gate, receipt| { gate()?; effects.fetch_add(1, Ordering::SeqCst); receipt.commit(123); Ok(()) }).unwrap();
+        assert_eq!(effects.load(Ordering::SeqCst), 1);
+        assert!(receipt.spawn_committed);
+        assert!(validate_launch_inventory(&captured, &windows, &workspaces, &json!({})).is_err());
+        workspaces[0]["output"] = json!("DP-6");
+        assert!(validate_launch_inventory(&captured, &windows, &workspaces, &outputs).is_err());
+        assert_eq!(state.capture_attempts.load(Ordering::SeqCst), 0);
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
     fn closed_shapes_reject_foreign_apps_projects_arguments_and_mixed_batches() {
         for request in [
             json!({"kind":"launch_app","app":"terminal"}),
@@ -7855,7 +8322,7 @@ mod launch_contract_tests {
         fs::remove_dir_all(dir).unwrap();
     }
     #[test]
-    fn fake_inventory_gate_rejects_stop_stale_held_forbidden_and_replaced_targets_without_effects() {
+    fn fake_inventory_gate_rejects_stop_stale_held_invalid_and_replaced_targets_without_effects() {
         for failure in ["stop","epoch","generation","held","unretained","expired","monitor","output","workspace","identity","geometry"] {
             let (state, dir, mut captured, mut windows, mut workspaces, mut outputs) = fixture(failure);
             let reserved = windows[1].clone();

@@ -25,9 +25,27 @@ pub enum Request<'a> {
     File(Project, &'a str),
 }
 
-pub fn allowed_output(output: &str) -> R<()> {
-    if matches!(output, "DP-6" | "eDP-1") { Ok(()) }
-    else { Err("Launch/post-focus capture requires DP-6 or eDP-1; protected outputs are unavailable".into()) }
+// Output admission follows the current compositor inventory, never connector names.
+// Cached geometry may be checked at preflight; live membership is checked again
+// immediately before launch and before ordinary/post-focus capture.
+pub fn validate_output_geometry(output: &str, geometry: &Value) -> R<()> {
+    if output.is_empty() || output.len() > 256
+        || output.chars().any(|c| c.is_control() || c.is_whitespace() || matches!(c, '/' | '\\')) {
+        return Err("Invalid Niri output name".into());
+    }
+    let coordinate = |key: &str| geometry[key].as_i64().is_some_and(|n| i32::try_from(n).is_ok());
+    let dimension = |key: &str| geometry[key].as_u64().is_some_and(|n| n > 0 && n <= i32::MAX as u64);
+    let scale_valid = geometry.get("scale").map_or(true, |v| v.as_f64().is_some_and(|n| n.is_finite() && n > 0.0));
+    if !geometry.is_object() || !coordinate("x") || !coordinate("y")
+        || !dimension("width") || !dimension("height") || !scale_valid {
+        return Err("Requested Niri output has invalid logical geometry".into());
+    }
+    Ok(())
+}
+pub fn allowed_output(output: &str, outputs: &Value) -> R<()> {
+    let entry = outputs.as_object().and_then(|inventory| inventory.get(output))
+        .ok_or("Requested output is not in the current Niri output inventory")?;
+    validate_output_geometry(output, &entry["logical"])
 }
 pub fn relative_path(path: &str) -> R<()> {
     // Zed interprets ':' as a line/column suffix, so it cannot be a filename here.
@@ -59,8 +77,12 @@ fn project_path(root: &Path, relative: Option<&str>) -> R<PathBuf> {
 fn executable(path: &str) -> bool {
     fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
 }
-pub fn capability() -> Value {
-    json!({"revision":REVISION,"implemented":true,"standalone":true,"apps":["zed","chrome"],"projects":["jarvis"],"outputs":["DP-6","eDP-1"],"pinned_binaries_present":{"zed":executable(ZED)&&executable(ZED_APP),"chrome":executable(CHROME)},"isolation":"fresh private user-data-dir per action; Zed --new --foreground, Chrome --new-window","spawn_ack_is_ui_success":false,"uncertain_after_spawn_requires_verification":true,"automatic_retry":false,"live_isolation_attested":false})
+pub fn capability(outputs: Option<&Value>) -> Value {
+    let available = outputs.and_then(Value::as_object);
+    let names = available.map(|inventory| inventory.iter()
+        .filter(|(name, entry)| validate_output_geometry(name, &entry["logical"]).is_ok())
+        .map(|(name, _)| name.clone()).collect::<Vec<_>>()).unwrap_or_default();
+    json!({"revision":REVISION,"implemented":true,"standalone":true,"apps":["zed","chrome"],"projects":["jarvis"],"outputs":names,"output_policy":"all_connected_enabled_niri_outputs","output_policy_revision":2,"output_inventory_available":available.is_some(),"pinned_binaries_present":{"zed":executable(ZED)&&executable(ZED_APP),"chrome":executable(CHROME)},"isolation":"fresh private user-data-dir per action; Zed --new --foreground, Chrome --new-window","spawn_ack_is_ui_success":false,"uncertain_after_spawn_requires_verification":true,"automatic_retry":false,"live_isolation_attested":false})
 }
 pub struct Plan { pub program: &'static str, pub args: Vec<String> }
 impl Plan {
@@ -150,6 +172,53 @@ pub fn dispatch(
 mod tests {
     use super::*;
     use std::{sync::{Arc, Barrier, atomic::{AtomicBool, AtomicUsize, Ordering}}, thread};
+
+    #[test]
+    fn live_inventory_admits_new_connectors_and_rejects_removed_or_disabled_outputs() {
+        let geometry = json!({"x":-1706,"y":0,"width":1706,"height":960,"scale":1.5});
+        let mut outputs = json!({"DP-5":{"logical":geometry},"HDMI-A-1":{"logical":geometry},"disabled":{"logical":null}});
+        assert!(allowed_output("DP-5", &outputs).is_ok());
+        assert!(allowed_output("HDMI-A-1", &outputs).is_ok());
+        for name in ["", "missing", "disabled", "../DP-5", "DP-5\n"] {
+            assert!(allowed_output(name, &outputs).is_err(), "{name:?}");
+        }
+        outputs.as_object_mut().unwrap().remove("DP-5");
+        assert!(allowed_output("DP-5", &outputs).is_err());
+        assert!(allowed_output("HDMI-A-1", &Value::Null).is_err());
+    }
+    #[test]
+    fn invalid_geometry_is_never_capture_or_launch_admission() {
+        let valid = json!({"x":0,"y":0,"width":800,"height":600,"scale":1.25});
+        for (key, value) in [
+            ("x", json!(0.5)), ("y", Value::Null), ("x", json!(2147483648_i64)),
+            ("width", json!(0)), ("height", json!(-1)), ("width", json!(1.5)),
+            ("height", json!(2147483648_u64)), ("scale", json!(0)), ("scale", json!("1.5")),
+        ] {
+            let mut geometry = valid.clone();
+            geometry[key] = value;
+            assert!(allowed_output("DP-5", &json!({"DP-5":{"logical":geometry}})).is_err(), "{key}");
+        }
+        for geometry in [Value::Null, json!({}), json!({"protected":true})] {
+            assert!(validate_output_geometry("DP-5", &geometry).is_err());
+        }
+        for name in ["", "DP 5", "DP/5", "DP\\5", "DP\n5"] {
+            assert!(validate_output_geometry(name, &valid).is_err());
+        }
+    }
+    #[test]
+    fn capability_reports_only_current_valid_outputs_and_unavailable_inventory_truthfully() {
+        let geometry = json!({"x":0,"y":0,"width":800,"height":600});
+        let outputs = json!({"DP-5":{"logical":geometry},"new-connector":{"logical":geometry},"disabled":{"logical":null},"invalid":{"logical":{}}});
+        let status = capability(Some(&outputs));
+        assert_eq!(status["output_policy"], "all_connected_enabled_niri_outputs");
+        assert_eq!(status["output_inventory_available"], true);
+        assert_eq!(status["outputs"], json!(["DP-5", "new-connector"]));
+        for absent in [None, Some(&Value::Null)] {
+            let status = capability(absent);
+            assert_eq!(status["outputs"], json!([]));
+            assert_eq!(status["output_inventory_available"], false);
+        }
+    }
 
     #[test]
     fn fake_executor_barriers_stop_before_commit_and_never_retry_after_commit() {
