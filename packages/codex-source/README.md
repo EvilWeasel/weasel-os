@@ -1,8 +1,10 @@
 # Codex with scoped MCP cancellation
 
-The laptop and its Codex ACP adapter use the same source-built Codex 0.162.0.
+The declarative laptop candidate and its Codex ACP adapter build the same
+source-built Codex 0.162.1. The installed version changes only after Root's
+qualified provider selection and a new client process.
 `default.nix` pins upstream commit
-`c1382380de69521303b416720a52f42d51af6248`, the locked Cargo dependencies,
+`092d3acd6bec3e3a14bdc7e7a2810ab628ab759d`, the locked Cargo dependencies,
 Rust 1.95.0 from the immutable Nixpkgs revision in `toolchain.nix`, and upstream's matching
 V8 pointer-compression/sandbox archive and binding. Both `codex` and
 `codex-code-mode-host` come from that build. No authentication is replaced.
@@ -69,7 +71,7 @@ intentional. See the [Cargo profile documentation](https://doc.rust-lang.org/car
 On a future upstream update, inspect the new SDK's waiter/drop cancellation
 behavior and both call paths before rebasing or removing the patch. Keep the
 source, Cargo lock, Rust toolchain pin and matching V8 assets together. The reference
-sources are [the pinned Codex revision](https://github.com/openai/codex/tree/c1382380de69521303b416720a52f42d51af6248)
+sources are [the pinned Codex revision](https://github.com/openai/codex/tree/092d3acd6bec3e3a14bdc7e7a2810ab628ab759d)
 and [its pinned MCP SDK](https://github.com/modelcontextprotocol/rust-sdk/tree/3e636cab26c013eca5131103c03d20237f12c4df).
 
 The daily updater reads the official latest release as a review hint and keeps
@@ -79,3 +81,18 @@ npm binary. Other reviewed batch updates remain available and verify the
 candidate's selected source derivation, actual Home Manager CLI/ACP links and
 the ACP wrapper's unique `CODEX_PATH` export, including when the Codex output
 itself did not change. The initial dated rebase review is 10 October 2026.
+
+The 15 October provider-only candidate advances to upstream `rust-v0.162.1`.
+Both existing patch files apply with `--fuzz=0` and remain byte-for-byte
+unchanged. The upstream Cargo.lock remains SHA-256
+`49fe417bcafe3f69f1f6636e23274f90d37e75e388127a76888c39001a4f8117`;
+Rust 1.95.0, V8 150.4.0, the vendoring hash and all four regression groups remain
+unchanged. Patch application and evaluation are source evidence only. Namespace
+must run the package build, checks and install checks before Root selects it.
+The original selected 0.162.0/Claude 2.1.223 baseline remains reproducible from
+provider checkpoint `63fe072cff266da0b7252a58e9e5659f1493cc0c`; qualify and retain
+that baseline closure for initial bootstrap/rollback rather than treating the
+new candidate as the machine's prior selection. The provider launcher refuses
+an uninitialized selector, and the helper checks that first baseline against
+the actual existing executable paths. No running client is replaced by source
+changes or preparation; Integration owns the fresh-process acceptance boundary.
