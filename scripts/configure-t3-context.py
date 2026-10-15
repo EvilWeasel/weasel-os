@@ -56,8 +56,11 @@ and the exact `parallel-cli search` or `parallel-cli extract` prefix). Validate
 the saved JSON receipt. Preserve working OAuth; do not copy API keys, loosen
 global sandboxing, add credits, or create monitors automatically.
 
-For every project developed with this owner, use Namespace GitHub Actions runners
-(`namespace-profile-ci-builder`) for compilation, packaging and full test suites.
+For the current morrowbyte projects, use Blacksmith GitHub Actions runners
+(`blacksmith-8vcpu-ubuntu-2404` by default) for compilation, packaging and full
+test suites. The owner's 2026-10-15 migration supersedes Namespace-only guidance
+for these projects. Preserve documented platform exceptions and historical
+source-only provenance workflows. Other projects retain their existing backend.
 Do not move build pressure back to the laptop or Hephaestus. Local read-only
 inspection and bounded syntax checks are allowed. Main GitHub identity is
 EvilWeasel; current shared project organization is morrowbyte. Preserve private
