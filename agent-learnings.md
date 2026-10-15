@@ -1365,3 +1365,7 @@ Root independently observed NoNewPrivs 0 and /run/wrappers/bin/sudo -n id -u ret
 ## 2026-10-14 — Overnight CI storage diagnosis
 - Both full Namespace host builds evaluated successfully but exhausted the 50-GB Nix cache during realization (desktop substitution alone: 41.8 GiB unpacked, before temporary/output space). Cache-backed evaluation remains enabled; full builds use the runner filesystem instead. Added a bounded storage-only dispatch to measure capacity before retrying compilation, with no purchased storage or laptop fallback.
 - Verification: actionlint and both unchanged host drvPath evaluations; remote probe pending. Original failed run 38484408376 retained.
+
+## 2026-10-15 — Proton Mail Bridge for the laptop
+- Added `protonmail-bridge-gui` beside the existing Proton Mail desktop package in the laptop profile. No credentials are part of the flake.
+- Verification: nixfmt, Nix parse, diff check and locked laptop toplevel drvPath evaluation succeeded. The exact selected Bridge 3.24.2 closure was already present locally; GUI launch and account login are separate acceptance steps. Full system activation is not implied.

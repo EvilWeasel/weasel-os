@@ -66,6 +66,7 @@
       teams-for-linux
       slack
       protonmail-desktop
+      protonmail-bridge-gui
       python3
       python3Packages.pip
       snapper
