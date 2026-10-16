@@ -455,9 +455,9 @@ part of this contract checkpoint. Hosted actor tests and indicator fixtures,
 then separately authorized runtime/visual acceptance, are required before
 claiming the shared contract implemented.
 
-### Shared-control state core, revision 1 (host bridge unavailable)
+### Shared-control state core (host bridge unavailable)
 
-The inline `core/src/main.rs::control_scope` module now implements typed state
+The `core/src/shared_control.rs` module (aliased as `control_scope`) implements typed state
 transitions: `Fence::begin(TrustedOwner, ExplicitContinuation, scope_id, token,
 Target) -> Binding`, `indicator_ready(Binding, mapped, current)`,
 `admit(Binding, Target, action_id, outputs, cancel_supported)`,
@@ -468,7 +468,7 @@ Target) -> Binding`, `indicator_ready(Binding, mapped, current)`,
 remote dispatch permits**. Private trusted owner/explicit continuation types
 have no production JSON constructors. A model cannot register a trusted owner.
 
-`desktop_status.shared_control` exposes revision 1 with `available=false`, no
+`desktop_status.shared_control` exposes revision 2 with `available=false`, no
 supported transports, and explicit unavailable trusted-host, dispatch-bridge and
 responsible-turn-delivery fields. Existing lifecycle revision 3 is not silently
 upgraded. The state core separates stop generation from target invalidation,
@@ -495,3 +495,159 @@ through its existing `ThreadManagementService.dispatch` steering path with exact
 target run and inactive rejection. Queue acceptance alone is not stop delivery
 or acknowledgement. Consumer adapters must not build against provisional wire
 signatures or bypass this missing bridge.
+
+### Jarvis browser-click platform kernel, revision 2
+
+This source checkpoint extracts the historical e9ad state core into
+`core/src/shared_control.rs`. It adds an actual **private Rust callback kernel**;
+it does not add a public MCP action, HTTP endpoint, native browser adapter or
+trusted-owner JSON constructor. `shared_control.available` stays false with
+empty supported transports until the real producer/channel/native probe exists.
+The hosted e9ad 183-Rust/32-indicator result is historical evidence, not a test
+result for this new source. Indicator source is unchanged.
+
+The source-callable boundary is:
+
+```text
+Controller::dispatch_browser_click(
+  &self, owner: &TrustedOwner, scope: &Binding,
+  command: &BrowserClickCommand, cancel: Arc<AtomicBool>,
+  execute: impl FnOnce(&mut BrowserSendBoundary) -> R<()>
+) -> R<BrowserDispatchResult>
+
+BrowserSendBoundary::send_native(
+  &mut self, current: NativeBrowserSnapshot, cancel_supported: bool,
+  send: impl FnOnce(&SendFence) -> NativeSendOutcome
+) -> R<()>
+```
+
+`BrowserClickCommand` retains assigned job/action/capability/operation/revision,
+Jarvis-local `author_session_id`, conversation/parent-turn/tool-call identity,
+the exact prepared candidate and ActionContext. These remain separate from
+`TrustedOwner`: local Pi/App attribution never becomes T3 authority. Scope tokens
+are not returned in dispatch receipts or stored in stop metadata. The canonical
+T3 native attribution additionally includes environment, attempt/root, provider
+instance/session/thread, native turn/call and runtime incarnation. Copied fields
+are attribution only: the private trusted owner has no production constructor.
+
+Browser targets retain adapter/surface/element, numeric target generation,
+context/observation and opaque registry-generation token. A native observation
+must additionally bind connection incarnation, native session/CDP target, frame,
+document and remote object. The native snapshot has no public fields/JSON
+constructor; no production probe currently issues it. Missing evidence refuses
+before invoking any send callback. A numeric surface generation is insufficient.
+
+The authenticated host must hold its canonical owner/policy critical section
+around the synchronous `execute` callback until actual crossing acknowledgement.
+It must revalidate the original private owner at that point, not obtain a
+precheck token and later send independently. The platform performs no inverse
+callback to acquire the host lock. Its one writer gate also covers existing
+physical/semantic actor batches and release recovery. Waiting browser commands
+are reserved with their immutable identity before the host callback; a physical
+ESC fences the independent atomic signal without waiting for actor state locks
+or a remote response. Normal human activity only stales target grounding in
+this kernel and does not stop the owned scope. Legacy public batch/resume rules
+remain separate and do not silently gain this contract.
+
+Immediately adjacent to native dispatch, the kernel rechecks scope/generations,
+fresh exact native target and aggregate display readiness, then records
+`PossiblyDispatched` before entering the actual send callback. No callback means
+`NotDispatched`; lost/uncertain replies remain possibly sent. `Completed` is a
+transport receipt requiring independent verification. Unsupported cancellation
+and cancellation acknowledgement never imply rollback. An unknown operation
+keeps the writer reservation until a real outcome/owned cleanup resolves it.
+Action identity is consumed even on pre-send rejection; no automatic replay.
+
+A stopped event retains the original owner/job/native-call, exact command and
+original operation disposition. Later completion/cancellation information is
+separate `latest_operation`; it cannot rewrite the original stop identity.
+`cleanup_binding(original_owner, event_id)` produces a private cleanup capability
+that requires neither current-run capture nor transfer to a newer run.
+`Controller::record_durable_delivery(cleanup, DurableDeliveryProof, persist)`
+records the exact original canonical cancel command/outcome and durable
+acceptance identity; it returns its private `StopAckBinding` only after the
+platform persistence callback succeeds.
+`Controller::acknowledge_retained(StopAckBinding, persist)` authenticates that
+same original identity/outcome and persists ACK; it cannot begin, send, clear a
+latch or resume. `DurableDeliveryProof` has no production JSON constructor:
+Jarvis App's in-memory CommandAck or cooperative cancel watch is not such proof.
+
+Current producer gaps are source-backed and block product availability:
+
+- T3 source 42f0c36 has real `RunExecutionService` native capture through
+  `TrustedAppControlInvocation` and `CodexAdapterV2`, but only for Observatory.
+  It has no actor consumer/channel injection. PM535's inherited duplex transport
+  remains a proposal, not an implemented spawn/authentication seam.
+- Jarvis source b3ef8fe (reviewed d6a2093) uses PiAssistantAuthor -> PiWorker
+  stdin/stdout JSONL `host.call` -> PiAuthorTools. Its registered App author/turn
+  does not carry a T3 native owner. This route needs a real authenticated
+  issuer-domain/producer decision and private capability injection; neither
+  model arguments nor runtime UID can manufacture it.
+- Jarvis `targets.rs`/`cdp_browser_adapter.rs` provide page candidates, surface
+  generation and ephemeral object references, but no supported fresh native
+  frame/document/connection probe propagated to the platform. Existing owner
+  leases cover only their allocated work; this kernel does not widen them.
+- Jarvis CancelJob/cancel_author_job is cooperative/in-memory; responsible-agent
+  durable physical-stop notification/acceptance and its authenticated delivery
+  channel are still missing. The platform owns retained-event/ACK semantics,
+  but cannot infer acceptance from App ACK or socket write.
+
+Eleven new fake-native callback regressions cover correlation/replay, missing
+producers, frame/document/object/registry changes, ordinary input, pre-cancel,
+waiting ESC, priority stop during blocked remote response, original cleanup ACK
+after run end/restart, conflicting outcomes, shared writer ownership and failed
+persistence. They do not prove real host authority, CDP, native-vs-synthetic ESC
+or fresh-process transport bootstrap. Compilation and full tests remain hosted
+Blacksmith work of the existing Integration owner; runtime/visual acceptance
+needs its separate authorized lane.
+
+The callback result separates crossing from long completion: `NativeSendOutcome::Crossed`
+returns a `BrowserDispatchResult` containing the correlated `receipt` and an
+opaque `pending` completion capability. The host releases its canonical lock
+after this bounded crossing acknowledgement; it must not await a long network
+response inside that lock. `Controller::complete_browser_operation(pending,
+NativeCompletion, persist)` later accepts only that original capability and
+command, including after the live run is terminal. Completion metadata does not
+repeat a send or authorize a new scope. Stop ACK and later outcome updates retain
+the original stop command/disposition separately. Identical completed replies
+return the original receipt; conflicting replies refuse.
+
+A bounded in-memory receipt ledger returns the same original disposition for
+identical action/owner/scope/command replay without invoking the callback. A
+conflicting body or binding refuses; exhaustion refuses before new effects. This
+is a receipt ledger, not a pending-work queue or automatic retry mechanism.
+After process restart old live scope/capabilities never revive. A new-process
+authenticated cleanup bootstrap is still unimplemented and is not proven by
+same-process restart fixtures.
+
+Cancellation fences precede fallible bookkeeping: `desktop_cancel` and
+`desktop_takeover` advance the legacy epoch and trip the shared atomic stop
+before shared-state/task-scope locks. Takeover also sets its latch first. A
+poisoned lock reports failure after fencing, never a successful durable stop ACK.
+Two hosted-only regression tests cover poisoned shared and task-scope locks for
+both commands; no local test execution is implied.
+
+PM541 partitions the product issuer from T3 native capture: Jarvis PiWorker's
+registered host session/turn/tool-call must establish its own authenticated
+host-origin issuer and private spawn/dispatch capability. This checkpoint has
+no production Pi acceptance seam. `NativeExecution` is native-route attribution,
+not a way to synthesize T3 IDs for Pi. Issuer authentication, incarnation,
+revocation, exact call/body/job correlation and restart cleanup bootstrap remain
+unimplemented. No owner is accepted from JSONL model arguments or process UID.
+The existing `takeover::Latch::retain_control_stop` store retains original stop
+metadata; it is not a recipient notification inbox. No durable recipient
+acceptance API exists here. A future acceptance proof must bind the original
+event/command/outcome and recipient identity, survive author termination and
+persist before ACK success; App CommandAck and socket-write success do not prove
+that acceptance. No new store or public wire is introduced by this checkpoint.
+
+PM546 correction: delivery/ACK updates are staged under the controller state lock,
+persisted, then published; failed persistence leaves prior metadata unchanged.
+The takeover marker also restores only optimistic control-stop metadata on a
+store failure, retaining its stop latch and persistence error. Failed delivery
+or ACK cannot unlock explicit continuation after cleanup. Physical Escape now
+advances the legacy epoch before bookkeeping locks, including while idle; idle
+Escape invalidates old epochs/targets without creating a persistent takeover.
+New source fixtures cover held-lock fencing, failed-store state invariance and
+blocked continuation, followed by exact successful persistence. They remain
+hosted-only verification; no runtime acceptance is inferred.

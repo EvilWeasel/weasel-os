@@ -78,7 +78,7 @@ jobs:
 
   actor:
     if: vars.CI_ENABLED == 'true' && github.event_name == 'workflow_dispatch' && inputs.actor_only
-    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-8vcpu-ubuntu-2404' }}
+    runs-on: blacksmith-8vcpu-ubuntu-2404
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4

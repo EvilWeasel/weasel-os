@@ -74,428 +74,8 @@ fn remaining_timeout(max: Duration) -> Duration {
 
 // Shared state core only. No model-callable host registration/dispatch endpoint
 // exists until T3 supplies authenticated live run/author-turn context.
-mod control_scope {
-    use super::*;
-    pub(super) const REVISION: u32 = 1;
-    fn identifier(value: &str) -> bool {
-        !value.is_empty() && value.len() <= 512 && !value.chars().any(char::is_control)
-    }
-    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-    #[serde(deny_unknown_fields)]
-    pub(super) struct Responsible {
-        pub thread_id: String,
-        pub run_id: String,
-        pub author_turn_id: String,
-        pub conversation_id: Option<String>,
-        pub parent_turn_id: Option<String>,
-        pub job_id: Option<String>,
-    }
-    impl Responsible {
-        pub fn validate(&self) -> R<()> {
-            if [&self.thread_id, &self.run_id, &self.author_turn_id].into_iter().all(|s| identifier(s))
-                && [&self.conversation_id, &self.parent_turn_id, &self.job_id].into_iter()
-                    .all(|s| s.as_ref().map_or(true, |v| identifier(v))) { Ok(()) }
-            else { Err("Missing or invalid trusted responsible identity".into()) }
-        }
-    }
-    // Deliberately not Deserialize, nor constructible through actor JSON args.
-    // A production constructor requires the future authenticated T3 host binder.
-    pub(super) struct TrustedOwner(Responsible);
-    pub(super) struct ExplicitContinuation { decision_id: String, session_id: String, stopped_generation: u64 }
-    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-    #[serde(deny_unknown_fields)]
-    pub(super) struct Target {
-        pub adapter: String,
-        pub authority: String,
-        pub resource: String,
-        pub revision: String,
-    }
-    impl Target {
-        fn validate(&self) -> R<()> {
-            if [&self.adapter, &self.authority, &self.resource, &self.revision]
-                .into_iter().all(|s| identifier(s)) { Ok(()) }
-            else { Err("Exact adapter target binding is required".into()) }
-        }
-    }
-    #[derive(Clone, Debug, PartialEq, Eq)]
-    pub(super) struct Binding {
-        session_id: String, scope_id: String, token: String,
-        stop_generation: u64, target_generation: u64,
-    }
-    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-    #[serde(rename_all = "snake_case")]
-    pub(super) enum Disposition { NotDispatched, PossiblyDispatched, Completed }
-    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-    #[serde(deny_unknown_fields)]
-    pub(super) struct OperationReceipt {
-        action_id: String, target: Target, disposition: Disposition,
-        cancel_supported: bool, cancel_attempted: bool, cancel_outcome: Option<String>,
-    }
-    #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-    #[serde(deny_unknown_fields)]
-    pub(super) struct StopEvent {
-        pub contract_revision: u32,
-        pub event_id: String,
-        pub session_id: String,
-        pub scope_id: String,
-        pub source: String,
-        pub stop_generation: u64,
-        pub responsible: Responsible,
-        pub target: Target,
-        pub operation: Option<OperationReceipt>,
-        pub delivered: bool,
-        pub acknowledged: bool,
-    }
-    impl StopEvent {
-        pub fn is_monotonic_update_of(&self, prior: &Self) -> bool {
-            let operation_monotonic = match (&prior.operation, &self.operation) {
-                (None, None) => true,
-                (Some(old), Some(new)) => old.action_id == new.action_id && old.target == new.target
-                    && old.cancel_supported == new.cancel_supported && (!old.cancel_attempted || new.cancel_attempted)
-                    && match (&old.disposition, &new.disposition) {
-                        (Disposition::NotDispatched, Disposition::NotDispatched)
-                        | (Disposition::PossiblyDispatched, Disposition::PossiblyDispatched)
-                        | (Disposition::PossiblyDispatched, Disposition::Completed)
-                        | (Disposition::Completed, Disposition::Completed) => true,
-                        _ => false,
-                    },
-                _ => false,
-            };
-            self.contract_revision == prior.contract_revision && self.event_id == prior.event_id
-                && self.session_id == prior.session_id && self.scope_id == prior.scope_id && self.source == prior.source
-                && self.stop_generation == prior.stop_generation && self.responsible == prior.responsible
-                && self.target == prior.target && (!prior.delivered || self.delivered)
-                && (!prior.acknowledged || self.acknowledged) && operation_monotonic
-        }
-        pub fn validate(&self) -> R<()> {
-            self.responsible.validate()?;
-            self.target.validate()?;
-            if self.contract_revision != REVISION || !identifier(&self.event_id) || !identifier(&self.session_id) || !identifier(&self.scope_id)
-                || self.stop_generation == 0 || !matches!(self.source.as_str(), "physical_escape" | "explicit_desktop_takeover" | "controlled_evdev_simulation")
-                || self.acknowledged && !self.delivered {
-                return Err("Invalid retained control stop event".into());
-            }
-            if let Some(operation) = &self.operation {
-                operation.target.validate()?;
-                if !identifier(&operation.action_id) || operation.target != self.target
-                    || operation.cancel_attempted && !operation.cancel_supported
-                    || operation.cancel_outcome.is_some() && !operation.cancel_attempted {
-                    return Err("Invalid retained operation disposition".into());
-                }
-            }
-            Ok(())
-        }
-    }
-    struct Scope { binding: Binding, responsible: Responsible, target: Target, ready: Option<Value> }
-    pub(super) struct Fence {
-        session_id: String, stop_generation: u64, target_generation: u64,
-        stopped: bool, scope: Option<Scope>, operation: Option<OperationReceipt>,
-        used_scopes: HashSet<String>, used_actions: HashSet<String>,
-        pub pending_stop: Option<StopEvent>,
-    }
-    impl Fence {
-        pub fn new(session_id: String) -> Self {
-            Self { session_id, stop_generation: 1, target_generation: 0, stopped: true,
-                scope: None, operation: None, used_scopes: HashSet::new(), used_actions: HashSet::new(), pending_stop: None }
-        }
-        pub fn restore_stop(&mut self, event: StopEvent) -> R<()> {
-            event.validate()?;
-            // Never revive a scope or carry its private token across restart.
-            self.stop_generation = self.stop_generation.max(event.stop_generation);
-            self.used_scopes.insert(event.scope_id.clone());
-            if let Some(operation) = &event.operation { self.used_actions.insert(operation.action_id.clone()); }
-            self.pending_stop = Some(event);
-            self.stopped = true;
-            Ok(())
-        }
-        pub fn begin(&mut self, owner: &TrustedOwner, permission: &ExplicitContinuation,
-            scope_id: &str, token: &str, target: Target) -> R<Binding> {
-            owner.0.validate()?;
-            target.validate()?;
-            if !identifier(scope_id) || !identifier(token) || !identifier(&permission.decision_id)
-                || permission.session_id != self.session_id || permission.stopped_generation != self.stop_generation
-                || self.scope.is_some() || self.operation.is_some()
-                || self.pending_stop.as_ref().is_some_and(|event| !event.acknowledged)
-                || self.used_scopes.contains(scope_id) {
-                return Err("Fresh explicit decision, released prior operation and unused scope required".into());
-            }
-            self.used_scopes.insert(scope_id.into());
-            self.stop_generation = self.stop_generation.checked_add(1).ok_or("Stop generation exhausted")?;
-            let binding = Binding { session_id: self.session_id.clone(), scope_id: scope_id.into(), token: token.into(),
-                stop_generation: self.stop_generation, target_generation: self.target_generation };
-            self.scope = Some(Scope { binding: binding.clone(), responsible: owner.0.clone(), target, ready: None });
-            self.stopped = false;
-            Ok(binding)
-        }
-        fn check(&self, binding: &Binding) -> R<()> {
-            if self.stopped || binding.session_id != self.session_id || binding.stop_generation != self.stop_generation
-                || !self.scope.as_ref().is_some_and(|scope| scope.binding.scope_id == binding.scope_id && scope.binding.token == binding.token) {
-                return Err("Control scope stopped, stale or not owned".into());
-            }
-            Ok(())
-        }
-        fn display_inventory(outputs: &Value) -> R<Value> {
-            let inventory = outputs.as_object().ok_or("Output inventory unavailable")?;
-            let mut enabled = serde_json::Map::new();
-            for (name, entry) in inventory {
-                if entry.get("logical") == Some(&Value::Null) { continue; }
-                launch::allowed_output(name, outputs)?;
-                enabled.insert(name.clone(), entry["logical"].clone());
-            }
-            if enabled.is_empty() { return Err("No enabled output for aggregate READY".into()); }
-            Ok(Value::Object(enabled))
-        }
-        // Trusted presentation binder only; model assertions are not renderer evidence.
-        pub fn indicator_ready(&mut self, binding: &Binding, mapped: &Value, current: &Value) -> R<()> {
-            self.check(binding)?;
-            let actual = Self::display_inventory(current)?;
-            if *mapped != actual { return Err("All-display renderer READY coverage differs from current inventory".into()); }
-            self.scope.as_mut().ok_or("Scope unavailable")?.ready = Some(actual);
-            Ok(())
-        }
-        pub fn target_changed(&mut self, generation: u64) { self.target_generation = self.target_generation.max(generation); }
-        pub fn reground(&self, binding: &Binding, exact: &Target) -> R<Binding> {
-            self.check(binding)?;
-            if &self.scope.as_ref().ok_or("Scope unavailable")?.target != exact { return Err("Wrong control target".into()); }
-            let mut fresh = binding.clone(); fresh.target_generation = self.target_generation; Ok(fresh)
-        }
-        pub fn admit(&mut self, binding: &Binding, target: &Target, action_id: &str,
-            outputs: &Value, cancel_supported: bool) -> R<()> {
-            self.check(binding)?;
-            let scope = self.scope.as_ref().ok_or("Scope unavailable")?;
-            if binding.target_generation != self.target_generation { return Err("Target stale; reobserve without stopping scope".into()); }
-            if target != &scope.target || scope.ready.as_ref() != Some(&Self::display_inventory(outputs)?) {
-                return Err("Exact target or aggregate display readiness changed".into());
-            }
-            if self.operation.is_some() || !identifier(action_id) || !self.used_actions.insert(action_id.into()) {
-                return Err("Only one admitted operation and no action replay are permitted".into());
-            }
-            self.operation = Some(OperationReceipt { action_id: action_id.into(), target: target.clone(),
-                disposition: Disposition::NotDispatched, cancel_supported, cancel_attempted: false, cancel_outcome: None });
-            Ok(())
-        }
-        // State transition at an actual trusted adapter send boundary. This is
-        // NOT an external precheck token and cannot authorize an unfenced send.
-        pub fn crossing_send_boundary(&mut self, binding: &Binding, action_id: &str, target: &Target, outputs: &Value) -> R<()> {
-            self.check(binding)?;
-            let scope = self.scope.as_ref().ok_or("Scope unavailable")?;
-            if target != &scope.target || scope.ready.as_ref() != Some(&Self::display_inventory(outputs)?) {
-                return Err("Target or all-display readiness changed at send boundary".into());
-            }
-            if binding.target_generation != self.target_generation { return Err("Target stale before dispatch".into()); }
-            let operation = self.operation.as_mut().ok_or("No admitted operation")?;
-            if operation.action_id != action_id || operation.disposition != Disposition::NotDispatched {
-                return Err("Operation already sent, foreign or uncertain; no retry".into());
-            }
-            operation.disposition = Disposition::PossiblyDispatched;
-            Ok(())
-        }
-        pub fn complete(&mut self, binding: &Binding, action_id: &str) -> R<()> {
-            self.check_cleanup_owner(binding)?;
-            let operation = self.operation.as_mut().ok_or("No admitted operation")?;
-            if operation.action_id != action_id || operation.disposition != Disposition::PossiblyDispatched {
-                return Err("No matching in-flight operation".into());
-            }
-            operation.disposition = Disposition::Completed;
-            if let Some(event) = self.pending_stop.as_mut() { event.operation = Some(operation.clone()); }
-            Ok(())
-        }
-        pub fn stop(&mut self, source: &str) -> R<Option<StopEvent>> {
-            if !matches!(source, "physical_escape" | "explicit_desktop_takeover" | "controlled_evdev_simulation") {
-                return Err("Unsupported stop provenance".into());
-            }
-            self.stopped = true;
-            self.stop_generation = self.stop_generation.checked_add(1).ok_or("Stop generation exhausted")?;
-            if self.pending_stop.as_ref().is_some_and(|event| !event.acknowledged) {
-                return Ok(self.pending_stop.clone()); // stable event identity until acknowledged
-            }
-            if let Some(scope) = &self.scope {
-                self.pending_stop = Some(StopEvent { contract_revision: REVISION, event_id: format!("{}:control-stop:{}", self.session_id, self.stop_generation),
-                    session_id: self.session_id.clone(), scope_id: scope.binding.scope_id.clone(), source: source.into(),
-                    stop_generation: self.stop_generation, responsible: scope.responsible.clone(), target: scope.target.clone(),
-                    operation: self.operation.clone(), delivered: false, acknowledged: false });
-            }
-            Ok(self.pending_stop.clone())
-        }
-        pub fn delivered(&mut self, event_id: &str, owner: &TrustedOwner) -> R<()> {
-            let event = self.pending_stop.as_mut().ok_or("No retained stop event")?;
-            if event.event_id != event_id || event.responsible != owner.0 { return Err("Wrong stop delivery owner/event".into()); }
-            event.delivered = true; Ok(())
-        }
-        pub fn acknowledge(&mut self, event_id: &str, owner: &TrustedOwner) -> R<()> {
-            let event = self.pending_stop.as_mut().ok_or("No retained stop event")?;
-            if event.event_id != event_id || event.responsible != owner.0 || !event.delivered {
-                return Err("Stop must be delivered to the exact responsible turn before ACK".into());
-            }
-            event.acknowledged = true; Ok(()) // never changes stop/scope/operation
-        }
-        fn check_cleanup_owner(&self, binding: &Binding) -> R<()> {
-            let owned = &self.scope.as_ref().ok_or("No owned scope")?.binding;
-            if owned.session_id != binding.session_id || owned.scope_id != binding.scope_id
-                || owned.token != binding.token || owned.stop_generation != binding.stop_generation {
-                return Err("Foreign scope cleanup".into());
-            }
-            Ok(())
-        }
-        pub fn cancel_result(&mut self, binding: &Binding, action_id: &str, outcome: &str) -> R<()> {
-            self.check_cleanup_owner(binding)?;
-            let operation = self.operation.as_mut().ok_or("No admitted operation")?;
-            if operation.action_id != action_id || !operation.cancel_supported
-                || operation.disposition != Disposition::PossiblyDispatched || !identifier(outcome) {
-                return Err("No matching cancellable in-flight operation".into());
-            }
-            operation.cancel_attempted = true;
-            operation.cancel_outcome = Some(outcome.into());
-            if let Some(event) = self.pending_stop.as_mut() { event.operation = Some(operation.clone()); }
-            Ok(()) // cancellation acknowledgement does not assert completion/rollback
-        }
-        pub fn active(&self) -> bool { self.scope.is_some() && !self.stopped }
-        pub fn end(&mut self, binding: &Binding) -> R<()> {
-            self.check_cleanup_owner(binding)?;
-            if self.operation.as_ref().is_some_and(|operation| operation.disposition == Disposition::PossiblyDispatched) {
-                return Err("In-flight outcome remains uncertain; cleanup cannot claim rollback/release".into());
-            }
-            self.scope = None; self.operation = None; Ok(()) // stopped latch survives cleanup
-        }
-    }
-
-    #[cfg(test)]
-    mod tests {
-        use super::*;
-        fn owner() -> TrustedOwner {
-            TrustedOwner(Responsible { thread_id: "actual-thread".into(), run_id: "actual-run".into(),
-                author_turn_id: "actual-author-turn".into(), conversation_id: None, parent_turn_id: None, job_id: None })
-        }
-        fn target() -> Target { Target { adapter: "semantic-http".into(), authority: "actual-app-session".into(),
-            resource: "actual-document".into(), revision: "observed-revision".into() } }
-        fn outputs() -> Value { json!({"DP-5":{"logical":{"x":0,"y":0,"width":800,"height":600}},
-            "eDP-1":{"logical":{"x":800,"y":0,"width":1536,"height":960}}}) }
-        fn fixture() -> (Fence, Binding) {
-            let mut fence = Fence::new("actor-session".into());
-            let permission = ExplicitContinuation { decision_id: "actual-user-decision".into(), session_id: "actor-session".into(), stopped_generation: 1 };
-            let binding = fence.begin(&owner(), &permission, "scope-1", "private-capability", target()).unwrap();
-            (fence, binding)
-        }
-        fn ready(fence: &mut Fence, binding: &Binding) {
-            let inventory = outputs();
-            let mapped = Fence::display_inventory(&inventory).unwrap();
-            fence.indicator_ready(binding, &mapped, &inventory).unwrap();
-        }
-        #[test]
-        fn aggregate_ready_and_exact_target_required_before_one_operation() {
-            let (mut fence, binding) = fixture();
-            assert!(fence.admit(&binding, &target(), "action", &outputs(), false).is_err());
-            assert!(fence.indicator_ready(&binding, &json!({}), &outputs()).is_err());
-            ready(&mut fence, &binding);
-            let mut foreign = target(); foreign.authority = "foreign-session".into();
-            assert!(fence.admit(&binding, &foreign, "action", &outputs(), false).is_err());
-            fence.admit(&binding, &target(), "action", &outputs(), false).unwrap();
-            assert!(fence.admit(&binding, &target(), "other-action", &outputs(), false).is_err());
-            assert!(fence.crossing_send_boundary(&binding, "foreign-action", &target(), &outputs()).is_err());
-            fence.crossing_send_boundary(&binding, "action", &target(), &outputs()).unwrap();
-            assert!(fence.crossing_send_boundary(&binding, "action", &target(), &outputs()).is_err(), "no send replay");
-        }
-        #[test]
-        fn ordinary_input_only_stales_target_not_scope_or_stop_generation() {
-            let (mut fence, binding) = fixture(); ready(&mut fence, &binding);
-            let generation = fence.stop_generation;
-            fence.target_changed(1);
-            assert!(fence.active()); assert!(!fence.stopped); assert!(fence.pending_stop.is_none());
-            assert_eq!(fence.stop_generation, generation);
-            assert!(fence.admit(&binding, &target(), "action", &outputs(), false).is_err());
-            let fresh = fence.reground(&binding, &target()).unwrap();
-            fence.admit(&fresh, &target(), "action", &outputs(), false).unwrap();
-            fence.crossing_send_boundary(&fresh, "action", &target(), &outputs()).unwrap();
-            fence.complete(&fresh, "action").unwrap();
-            fence.end(&fresh).unwrap();
-        }
-        #[test]
-        fn physical_stop_fences_waiting_action_retains_owner_and_ack_never_resumes() {
-            let (mut fence, binding) = fixture(); ready(&mut fence, &binding);
-            fence.admit(&binding, &target(), "waiting", &outputs(), false).unwrap();
-            let event = fence.stop("physical_escape").unwrap().unwrap();
-            assert_eq!(event.responsible, owner().0);
-            assert_eq!(event.operation.as_ref().unwrap().disposition, Disposition::NotDispatched);
-            assert!(fence.crossing_send_boundary(&binding, "waiting", &target(), &outputs()).is_err());
-            assert!(fence.acknowledge(&event.event_id, &owner()).is_err());
-            let mut foreign = owner(); foreign.0.run_id = "foreign-run".into();
-            assert!(fence.delivered(&event.event_id, &foreign).is_err());
-            fence.delivered(&event.event_id, &owner()).unwrap();
-            fence.acknowledge(&event.event_id, &owner()).unwrap();
-            assert!(fence.stopped);
-            assert!(fence.crossing_send_boundary(&binding, "waiting", &target(), &outputs()).is_err());
-            fence.end(&binding).unwrap(); assert!(fence.stopped);
-            let stale = ExplicitContinuation { decision_id: "new-decision".into(), session_id: "actor-session".into(), stopped_generation: binding.stop_generation };
-            assert!(fence.begin(&owner(), &stale, "new-scope", "new-token", target()).is_err());
-            let decision = ExplicitContinuation { decision_id: "new-decision".into(), session_id: "actor-session".into(), stopped_generation: fence.stop_generation };
-            assert!(fence.begin(&owner(), &decision, "scope-1", "new-token", target()).is_err());
-            fence.begin(&owner(), &decision, "new-scope", "new-token", target()).unwrap();
-            assert!(fence.crossing_send_boundary(&binding, "waiting", &target(), &outputs()).is_err());
-        }
-        #[test]
-        fn already_sent_is_uncertain_until_actual_receipt_not_cancellation_ack() {
-            let (mut fence, binding) = fixture(); ready(&mut fence, &binding);
-            fence.admit(&binding, &target(), "sent", &outputs(), true).unwrap();
-            fence.crossing_send_boundary(&binding, "sent", &target(), &outputs()).unwrap();
-            let event = fence.stop("physical_escape").unwrap().unwrap();
-            assert_eq!(event.operation.unwrap().disposition, Disposition::PossiblyDispatched);
-            fence.cancel_result(&binding, "sent", "cancel_request_accepted_outcome_unknown").unwrap();
-            assert_eq!(fence.pending_stop.as_ref().unwrap().operation.as_ref().unwrap().disposition, Disposition::PossiblyDispatched);
-            assert!(fence.end(&binding).is_err());
-            let mut wrong = binding.clone(); wrong.token = "wrong".into();
-            assert!(fence.complete(&wrong, "sent").is_err());
-            fence.complete(&binding, "sent").unwrap();
-            assert_eq!(fence.pending_stop.as_ref().unwrap().operation.as_ref().unwrap().disposition, Disposition::Completed);
-            fence.end(&binding).unwrap(); assert!(fence.stopped);
-        }
-        #[test]
-        fn hotplug_invalidates_ready_without_aborting_scope() {
-            let (mut fence, binding) = fixture(); ready(&mut fence, &binding);
-            let changed = json!({"DP-5":{"logical":{"x":0,"y":0,"width":800,"height":600}}});
-            assert!(fence.admit(&binding, &target(), "action", &changed, false).is_err());
-            assert!(fence.active());
-            let mapped = Fence::display_inventory(&changed).unwrap();
-            fence.indicator_ready(&binding, &mapped, &changed).unwrap();
-            fence.admit(&binding, &target(), "action", &changed, false).unwrap();
-            assert!(fence.crossing_send_boundary(&binding, "action", &target(), &outputs()).is_err(), "coverage changed after admission");
-            fence.crossing_send_boundary(&binding, "action", &target(), &changed).unwrap();
-            assert!(fence.cancel_result(&binding, "action", "unsupported").is_err());
-        }
-        #[test]
-        fn repeated_stop_dedupes_notification_and_restart_never_revives_owner_scope() {
-            let (mut fence, binding) = fixture(); ready(&mut fence, &binding);
-            let first = fence.stop("physical_escape").unwrap().unwrap();
-            let again = fence.stop("physical_escape").unwrap().unwrap();
-            assert_eq!(first.event_id, again.event_id);
-            let bytes = serde_json::to_vec(&again).unwrap();
-            assert!(!String::from_utf8(bytes.clone()).unwrap().contains("private-capability"));
-            let restored: StopEvent = serde_json::from_slice(&bytes).unwrap();
-            let mut restarted = Fence::new("new-actor-session".into());
-            restarted.restore_stop(restored).unwrap();
-            assert!(restarted.stopped); assert!(!restarted.active());
-            let old_session_permission = ExplicitContinuation { decision_id: "actual-user-decision".into(),
-                session_id: "actor-session".into(), stopped_generation: restarted.stop_generation };
-            assert!(restarted.begin(&owner(), &old_session_permission, "fresh-id", "fresh-token", target()).is_err());
-            assert_eq!(restarted.pending_stop.unwrap().responsible, owner().0);
-        }
-        #[test]
-        fn unsupported_host_bridge_is_truthfully_unavailable() {
-            let capability = capability();
-            assert_eq!(capability["available"], false);
-            assert_eq!(capability["trusted_host_context_available"], false);
-            assert_eq!(capability["supported_transports"], json!([]));
-            let mut malformed = owner(); malformed.0.author_turn_id.clear();
-            assert!(malformed.0.validate().is_err());
-        }
-    }
-    pub(super) fn capability() -> Value {
-        json!({"contract_revision":REVISION,"state_core":true,"available":false,
-            "trusted_host_context_available":false,"responsible_turn_delivery_available":false,
-            "external_dispatch_bridge_available":false,"supported_transports":[],
-            "reason":"Authenticated live T3 run/author-turn binding and durable delivery bridge are not implemented; no shared-control endpoint is enabled",
-            "ack_clears_stop":false,"automatic_resume":false})
-    }
-}
+#[path = "shared_control.rs"]
+mod control_scope;
 
 #[derive(Clone)]
 struct Observation {
@@ -569,7 +149,7 @@ struct State {
     task_scopes: Mutex<HashMap<String, TaskScope>>,
     task_scope_ids: Mutex<HashSet<String>>,
     task_scope_gate: Mutex<()>,
-    control_scope: Mutex<control_scope::Fence>,
+    control_scope: control_scope::Controller,
     rearm_warning: Mutex<Option<RearmWarning>>,
     last_result: Mutex<Value>,
     observations: Mutex<HashMap<String, Observation>>,
@@ -842,10 +422,22 @@ fn physical_activity(state: &State, escape: bool, simulation: bool) {
         // A normal mouse/key event invalidates old targets and stops any batch
         // bound to that generation. It never cancels the task or persists stop.
         let target_generation = state.input_policy.activity();
-        if let Ok(mut control) = state.control_scope.lock() { control.target_changed(target_generation); }
+        state.control_scope.target_changed(target_generation);
         state.reference_cache.invalidate();
         return;
     }
+    // Shared remote effects are fenced before taking task/state locks or waiting
+    // for host/network completion. Retain this ownership fact for persistence.
+    let shared_scope_live = state.control_scope.request_stop_if_live();
+    // Even idle Escape invalidates old epochs/observations, but only the later
+    // live-task decision may persist a takeover. No bookkeeping lock precedes
+    // the legacy fence; old physical and semantic batches stop immediately.
+    let epoch = state.epoch.fetch_add(1, Ordering::SeqCst).wrapping_add(1);
+    let now = state.started.elapsed().as_millis() as u64;
+    state.last_human_ms.store(now.max(1), Ordering::SeqCst);
+    let target_generation = state.input_policy.activity();
+    state.control_scope.target_changed(target_generation);
+    state.reference_cache.invalidate();
     // Serialize Escape with task/scope admission and queued->active handoff.
     // An Escape outside a live Computer Use task still invalidates observations,
     // but cannot create a persistent stop for a later unrelated task.
@@ -854,12 +446,7 @@ fn physical_activity(state: &State, escape: bool, simulation: bool) {
         Err(_) => {
             // Scope state is unknown after poisoning; fail closed for Escape
             // while preserving the ordinary invalidation behavior.
-            let now = state.started.elapsed().as_millis() as u64;
-            state.last_human_ms.store(now.max(1), Ordering::SeqCst);
-            state.input_policy.activity();
-            state.reference_cache.invalidate();
             state.takeover.store(true, Ordering::SeqCst);
-            state.epoch.fetch_add(1, Ordering::SeqCst);
             if let Ok(mut marker) = state.takeover_marker.lock() {
                 let _ = marker.set(
                     if simulation { "controlled_evdev_simulation" } else { "physical_escape" },
@@ -869,10 +456,6 @@ fn physical_activity(state: &State, escape: bool, simulation: bool) {
             return;
         }
     };
-    let now = state.started.elapsed().as_millis() as u64;
-    state.last_human_ms.store(now.max(1), Ordering::SeqCst);
-    state.input_policy.activity();
-    state.reference_cache.invalidate();
     let active_live = match state.active.lock() {
         Ok(active) => !active.is_null(),
         Err(_) => true,
@@ -887,6 +470,7 @@ fn physical_activity(state: &State, escape: bool, simulation: bool) {
     let task_live = active_live
         || state.queued.load(Ordering::SeqCst) != 0
         || scope_live
+        || shared_scope_live
         || state.control_scope.lock().map_or(true, |control| control.active())
         || state.rearm_warning.lock().map_or(true, |warning| {
             warning.as_ref().is_some_and(|pending| pending.expires > Instant::now())
@@ -904,15 +488,19 @@ fn physical_activity(state: &State, escape: bool, simulation: bool) {
         *warning = None;
     }
     let newly_latched = !state.takeover.swap(true, Ordering::SeqCst);
-    // Persist only after the priority cancellation is visible to every writer.
-    let epoch = state.epoch.fetch_add(1, Ordering::SeqCst) + 1;
+    // Both fences were visible before any bookkeeping; persist the live stop.
     let source = if simulation {
         "controlled_evdev_simulation"
     } else {
         "physical_escape"
     };
-    let shared_stop = state.control_scope.lock().ok()
-        .and_then(|mut control| control.stop(source).ok().flatten());
+    let shared_stop = match state.control_scope.lock() {
+        Ok(mut control) => match control.stop(source) {
+            Ok(event) => event,
+            Err(error) => { record(state, "control_stop_state_failed", json!({"error":error,"input_remains_latched":true})); None }
+        },
+        Err(_) => { record(state, "control_stop_state_failed", json!({"error":"Shared control state poisoned","input_remains_latched":true})); None }
+    };
     match state.takeover_marker.lock() {
         Ok(mut marker) => match marker.set(source, &state.session_id) {
             Ok(changed) => {
@@ -2790,6 +2378,19 @@ fn act_inner(state: &State, args: &Value, epoch: u64) -> R<Value> {
     );
     state.queued.fetch_add(1, Ordering::SeqCst);
     drop(admission_gate);
+    // The same gate serializes physical, semantic and trusted browser sends.
+    // Queue waiting remains epoch/cancel aware and cannot outlive physical ESC.
+    let _shared_writer = loop {
+        if let Err(error) = check_epoch(state, Some(epoch)) {
+            state.queued.fetch_sub(1, Ordering::SeqCst);
+            return Err(error);
+        }
+        match state.control_scope.try_writer() {
+            Ok(writer) => break writer,
+            Err(std::sync::TryLockError::WouldBlock) => thread::sleep(Duration::from_millis(5)),
+            Err(_) => { state.queued.fetch_sub(1, Ordering::SeqCst); return Err("Shared writer gate poisoned".into()); }
+        }
+    };
     let mut ptr = loop {
         if let Err(e) = check_epoch(state, Some(epoch)) {
             state.queued.fetch_sub(1, Ordering::SeqCst);
@@ -3394,6 +2995,8 @@ struct ReleaseRecoveryArgs {
 }
 
 fn recover_release(state: &State, args: &Value) -> R<Value> {
+    if state.control_scope.operation_active() { return Err("Shared browser operation unresolved; no overlapping release recovery".into()); }
+    let _shared_writer = state.control_scope.try_writer().map_err(|_| "Shared writer busy; no overlapping release recovery")?;
     let start = Instant::now();
     let parsed: ReleaseRecoveryArgs = serde_json::from_value(args.clone())
         .map_err(|e| format!("Invalid release recovery arguments: {e}"))?;
@@ -3672,6 +3275,7 @@ fn indicator_lifecycle(state: &State, args: &Value) -> R<Value> {
             || !state.release_confirmed.load(Ordering::SeqCst)
             || !state.active.lock().map_err(|_| "Active task poisoned")?.is_null()
             || state.queued.load(Ordering::SeqCst) != 0
+            || state.control_scope.operation_active()
         {
             return Err("Task scope requires an unlatched, idle, released actor; it cannot resume a stopped task".into());
         }
@@ -3722,7 +3326,7 @@ fn indicator_lifecycle(state: &State, args: &Value) -> R<Value> {
         return Err("Indicator lifecycle event must be status, begin, or end".into());
     }
     let active = state.active.lock().map_err(|_| "Active state poisoned")?;
-    let actor_active = !active.is_null();
+    let actor_active = !active.is_null() || state.control_scope.operation_active();
     let release_confirmed = state.release_confirmed.load(Ordering::SeqCst);
     let queued = state.queued.load(Ordering::SeqCst);
     let task_scope_active = task_id.is_some_and(|task_id| {
@@ -3763,6 +3367,11 @@ fn handle(state: &State, tool: &str, args: &Value, epoch: u64) -> R<Value> {
             let outputs = niri(state, "outputs").ok();
             data["desktop_launch"] = launch::capability(outputs.as_ref());
             data["shared_control"] = control_scope::capability();
+            let shared_active = state.control_scope.active_summary();
+            if !shared_active.is_null() {
+                if data["active"].is_null() { data["active"] = shared_active; }
+                data["actor_release_confirmed"] = json!(false);
+            }
             Ok(text_result(data))
         }
         "desktop_windows" => Ok(text_result(
@@ -3774,12 +3383,30 @@ fn handle(state: &State, tool: &str, args: &Value, epoch: u64) -> R<Value> {
         "desktop_act" => act(state, args, epoch),
         "desktop_recover_release" => recover_release(state, args),
         "desktop_cancel" | "desktop_takeover" => {
-            let _scope_gate = state.task_scope_gate.lock().map_err(|_| "Task scope gate poisoned")?;
+            // Fence both legacy and shared sends before ANY fallible lock or
+            // persistence. Poisoned bookkeeping must never prevent cancellation.
+            let start = Instant::now();
             if tool == "desktop_takeover" {
                 state.takeover.store(true, Ordering::SeqCst);
             }
-            let start = Instant::now();
-            let next = state.epoch.fetch_add(1, Ordering::SeqCst) + 1;
+            let next = state.epoch.fetch_add(1, Ordering::SeqCst).wrapping_add(1);
+            let shared_result = state.control_scope.request_stop().and_then(|_| {
+                let mut scope = state.control_scope.lock().map_err(|_| "Shared control state poisoned")?;
+                if tool == "desktop_takeover" {
+                    scope.stop("explicit_desktop_takeover")
+                } else {
+                    scope.cancel_scope();
+                    Ok(None)
+                }
+            });
+            let (shared_stop, shared_error) = match shared_result {
+                Ok(event) => (event, None),
+                Err(error) => {
+                    record(state, "shared_control_stop_state_failed", json!({"error":error,"epoch":next,"send_fenced":true}));
+                    (None, Some(error))
+                }
+            };
+            let _scope_gate = state.task_scope_gate.lock().map_err(|_| "Task scope gate poisoned; cancellation already fenced")?;
             state.task_scopes.lock().map_err(|_| "Task scopes poisoned")?.clear();
             *state.rearm_warning.lock().map_err(|_| "Re-arm warning state poisoned")? = None;
             state.reference_cache.invalidate();
@@ -3798,6 +3425,9 @@ fn handle(state: &State, tool: &str, args: &Value, epoch: u64) -> R<Value> {
                     return Err(format!("Desktop takeover latched and pending work canceled, but its marker could not be persisted: {error}. Every backend startup still requires explicit resume."));
                 }
             }
+            if let Some(event) = shared_stop {
+                state.takeover_marker.lock().map_err(|_| "Takeover marker state poisoned")?.retain_control_stop(event)?;
+            }
             let active = state
                 .active
                 .lock()
@@ -3808,6 +3438,9 @@ fn handle(state: &State, tool: &str, args: &Value, epoch: u64) -> R<Value> {
                 tool,
                 json!({"epoch":next,"ack_ms":start.elapsed().as_secs_f64()*1000.0}),
             );
+            if let Some(error) = shared_error {
+                return Err(format!("Desktop cancellation fenced at epoch {next}, but shared stop bookkeeping failed: {error}. Shared admission remains stopped; release and durable delivery are not confirmed."));
+            }
             Ok(text_result(
                 json!({"schema":1,"status":"cancel_acknowledged","epoch":next,"active_at_ack":active,"ack_ms":start.elapsed().as_secs_f64()*1000.0,"actor_fully_released":false,"note":"Epoch changed immediately. Active actor releases buttons and returns canceled; inspect desktop_status until active=null and actor_release_confirmed=true before assuming desktop is free. Already-dispatched effects cannot be rolled back."}),
             ))
@@ -4625,7 +4258,7 @@ fn serve(socket: &Path) -> R<()> {
         task_scopes: Mutex::new(HashMap::new()),
         task_scope_ids: Mutex::new(HashSet::new()),
         task_scope_gate: Mutex::new(()),
-        control_scope: Mutex::new(shared_control),
+        control_scope: control_scope::Controller::new(shared_control),
         rearm_warning: Mutex::new(None),
         last_result: Mutex::new(Value::Null),
         observations: Mutex::new(HashMap::new()),
@@ -4884,7 +4517,7 @@ mod regression {
             task_scopes: Mutex::new(HashMap::new()),
             task_scope_ids: Mutex::new(HashSet::new()),
             task_scope_gate: Mutex::new(()),
-        control_scope: Mutex::new(control_scope::Fence::new("unbound-host-context".into())),
+        control_scope: control_scope::Controller::new(control_scope::Fence::new("unbound-host-context".into())),
             rearm_warning: Mutex::new(None),
             last_result: Mutex::new(Value::Null),
             observations: Mutex::new(HashMap::new()),
@@ -4987,7 +4620,7 @@ mod regression {
             task_scopes: Mutex::new(HashMap::new()),
             task_scope_ids: Mutex::new(HashSet::new()),
             task_scope_gate: Mutex::new(()),
-        control_scope: Mutex::new(control_scope::Fence::new("unbound-host-context".into())),
+        control_scope: control_scope::Controller::new(control_scope::Fence::new("unbound-host-context".into())),
             rearm_warning: Mutex::new(None),
             last_result: Mutex::new(Value::Null),
             observations: Mutex::new(HashMap::new()),
@@ -5606,7 +5239,7 @@ mod release_recovery_tests {
                 task_scopes: Mutex::new(HashMap::new()),
                 task_scope_ids: Mutex::new(HashSet::new()),
                 task_scope_gate: Mutex::new(()),
-        control_scope: Mutex::new(control_scope::Fence::new("unbound-host-context".into())),
+        control_scope: control_scope::Controller::new(control_scope::Fence::new("unbound-host-context".into())),
                 rearm_warning: Mutex::new(None),
                 last_result: Mutex::new(
                     json!({"status":"failed","error":"original timeout preserved"}),
@@ -6324,7 +5957,7 @@ mod release_recovery_tests {
         let generation = state.input_policy.generation();
         physical_activity(&state, true, false);
         assert!(!state.takeover.load(Ordering::SeqCst));
-        assert_eq!(state.epoch.load(Ordering::SeqCst), epoch);
+        assert_eq!(state.epoch.load(Ordering::SeqCst), epoch.wrapping_add(1));
         assert_eq!(state.input_policy.generation(), generation + 1);
         assert!(!dir.join("takeover.json").exists());
         assert!(state.active.lock().unwrap().is_null());
@@ -8393,5 +8026,81 @@ mod launch_contract_tests {
         assert!(act_inner(&state, &json!({"observation_id":captured.id,"actions":[{"kind":"launch_app","app":"zed"}]}), 77).unwrap_err().contains("release/receipt"));
         assert_eq!(state.queued.load(Ordering::SeqCst), 0);
         fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod immediate_stop_fence_tests {
+    use super::*;
+
+    #[test]
+    fn physical_escape_fences_legacy_before_blocked_bookkeeping() {
+        for shared_lock in [false, true] {
+            let (state, dir) = release_recovery_tests::cooperative_fixture(
+                &format!("escape-bookkeeping-{shared_lock}"));
+            *state.active.lock().unwrap() = json!({"fixture":"active-legacy-action"});
+            let before = state.epoch.load(Ordering::SeqCst);
+            let scope_guard = (!shared_lock).then(|| state.task_scope_gate.lock().unwrap());
+            let shared_guard = shared_lock.then(|| state.control_scope.lock().unwrap());
+            let (started_tx, started_rx) = std::sync::mpsc::channel();
+            let (done_tx, done_rx) = std::sync::mpsc::channel();
+            let worker_state = state.clone();
+            let worker = thread::spawn(move || {
+                started_tx.send(()).unwrap();
+                physical_activity(&worker_state, true, false);
+                done_tx.send(()).unwrap();
+            });
+            started_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+            let deadline = Instant::now() + Duration::from_secs(2);
+            while state.epoch.load(Ordering::SeqCst) == before {
+                assert!(Instant::now() < deadline, "ESC waited for bookkeeping before fencing legacy sends");
+                thread::yield_now();
+            }
+            assert!(check_epoch(&state, Some(before)).is_err());
+            assert!(done_rx.try_recv().is_err(), "held bookkeeping must still block cleanup");
+            drop(shared_guard);
+            drop(scope_guard);
+            done_rx.recv_timeout(Duration::from_secs(2)).unwrap();
+            worker.join().unwrap();
+            assert!(state.takeover.load(Ordering::SeqCst));
+            assert_eq!(state.takeover_marker.lock().unwrap().reason.source, "physical_escape");
+            fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    #[test]
+    fn poisoned_shared_state_cannot_bypass_cancel_or_takeover_fence() {
+        for tool in ["desktop_cancel", "desktop_takeover"] {
+            let (state, dir) = release_recovery_tests::cooperative_fixture(tool);
+            let poisoned = state.clone();
+            assert!(thread::spawn(move || {
+                let _guard = poisoned.control_scope.lock().unwrap();
+                panic!("fixture poisons shared bookkeeping, not the atomic fence");
+            }).join().is_err());
+            let before = state.epoch.load(Ordering::SeqCst);
+            let result = handle(&state, tool, &json!({}), before);
+            assert!(result.unwrap_err().contains("cancellation fenced"));
+            assert_eq!(state.epoch.load(Ordering::SeqCst), before.wrapping_add(1));
+            assert!(state.control_scope.try_writer().is_err());
+            assert_eq!(state.takeover.load(Ordering::SeqCst), tool == "desktop_takeover");
+            fs::remove_dir_all(dir).unwrap();
+        }
+    }
+
+    #[test]
+    fn poisoned_task_scope_gate_cannot_bypass_atomic_stop_fences() {
+        for tool in ["desktop_cancel", "desktop_takeover"] {
+            let (state, dir) = release_recovery_tests::cooperative_fixture(&format!("task-gate-{tool}"));
+            let poisoned = state.clone();
+            assert!(thread::spawn(move || {
+                let _guard = poisoned.task_scope_gate.lock().unwrap();
+                panic!("fixture poisons task scope bookkeeping");
+            }).join().is_err());
+            let before = state.epoch.load(Ordering::SeqCst);
+            assert!(handle(&state, tool, &json!({}), before).unwrap_err().contains("already fenced"));
+            assert_eq!(state.epoch.load(Ordering::SeqCst), before.wrapping_add(1));
+            assert_eq!(state.takeover.load(Ordering::SeqCst), tool == "desktop_takeover");
+            fs::remove_dir_all(dir).unwrap();
+        }
     }
 }

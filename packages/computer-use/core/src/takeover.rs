@@ -196,8 +196,15 @@ impl Latch {
                 return Err("Cannot replace pending control owner/event or regress delivery ACK".into());
             }
         }
+        let prior = self.reason.control_stop.clone();
         self.reason.control_stop = Some(event);
-        self.store()
+        if let Err(error) = self.store() {
+            // Only optimistic delivery/ACK metadata rolls back. The active
+            // stop and persistence error remain latched and visible.
+            self.reason.control_stop = prior;
+            return Err(error);
+        }
+        Ok(())
     }
     pub fn clear(&mut self) -> R<()> {
         if self.reason.control_stop.as_ref().is_some_and(|event| !event.acknowledged) {
@@ -260,6 +267,43 @@ mod tests {
         restarted.retain_control_stop(delivered).unwrap();
         assert!(restarted.status()["marker_active"] == true);
         assert!(path.exists(), "notification ACK does not clear the stop marker");
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
+    fn failed_delivery_and_ack_store_preserve_prior_metadata_and_block_clear() {
+        let dir = env::temp_dir().join(format!("weasel-control-stop-commit-{}", std::process::id()));
+        private_dir(&dir).unwrap();
+        let path = dir.join("takeover.json");
+        let mut latch = Latch::startup(path.clone(), "actor-1").unwrap();
+        let original = control_event();
+        latch.retain_control_stop(original.clone()).unwrap();
+        let disk_before = fs::read(&path).unwrap();
+        let mut delivered = original.clone();
+        delivered.delivered = true;
+        latch.path = dir.join("missing-parent").join("takeover.json");
+        assert!(latch.retain_control_stop(delivered.clone()).is_err());
+        assert_eq!(latch.reason.control_stop.as_ref(), Some(&original));
+        assert!(latch.marker_active);
+        assert!(latch.persistence_error.is_some());
+        assert_eq!(fs::read(&path).unwrap(), disk_before);
+        assert!(latch.clear().is_err());
+        latch.path = path.clone();
+        latch.retain_control_stop(delivered.clone()).unwrap();
+        let disk_delivered = fs::read(&path).unwrap();
+        let mut acknowledged = delivered.clone();
+        acknowledged.acknowledged = true;
+        latch.path = dir.join("missing-parent").join("takeover.json");
+        assert!(latch.retain_control_stop(acknowledged.clone()).is_err());
+        assert_eq!(latch.reason.control_stop.as_ref(), Some(&delivered));
+        assert!(!latch.reason.control_stop.as_ref().unwrap().acknowledged);
+        assert!(latch.clear().is_err());
+        assert_eq!(fs::read(&path).unwrap(), disk_delivered);
+        latch.path = path.clone();
+        latch.retain_control_stop(acknowledged.clone()).unwrap();
+        assert_eq!(latch.reason.control_stop.as_ref(), Some(&acknowledged));
+        assert!(latch.marker_active, "durable ACK never clears latch");
+        let restarted = Latch::startup(path, "actor-2").unwrap();
+        assert_eq!(restarted.reason.control_stop.as_ref(), Some(&acknowledged));
         fs::remove_dir_all(dir).unwrap();
     }
     #[test]
