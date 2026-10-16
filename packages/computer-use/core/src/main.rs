@@ -5697,7 +5697,15 @@ mod release_recovery_tests {
         let epoch = state.epoch.load(Ordering::SeqCst);
         physical_activity(&state, true, true);
         assert_eq!(fs::read(dir.join("takeover.json")).unwrap(), original);
-        assert_eq!(state.epoch.load(Ordering::SeqCst), epoch, "the canceled scope is not revived by a simulation event");
+        // Idle/canceled-scope Escape still invalidates old epochs before locks;
+        // the invalidation neither revives ownership nor replaces the stop cause.
+        assert_eq!(state.epoch.load(Ordering::SeqCst), epoch.wrapping_add(1));
+        assert!(state.takeover.load(Ordering::SeqCst));
+        assert!(state.task_scopes.lock().unwrap().is_empty());
+        assert!(state.active.lock().unwrap().is_null());
+        assert_eq!(state.queued.load(Ordering::SeqCst), 0);
+        assert!(check_epoch(&state, Some(epoch)).is_err());
+        assert!(!state.control_scope.lock().unwrap().active());
         let current = state.epoch.load(Ordering::SeqCst);
         handle(&state, "desktop_takeover", &json!({}), current).unwrap();
         let explicit = fs::read(dir.join("takeover.json")).unwrap();
