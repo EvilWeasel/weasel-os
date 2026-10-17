@@ -21,7 +21,7 @@ nix run .#dev
 On a remote machine, the same pattern works with a flake reference:
 
 ```bash
-nix develop github:EvilWeasel/weasel-os#dev
+nix develop github:morrowbyte/weasel-os#dev
 ```
 
 ## Leader Key

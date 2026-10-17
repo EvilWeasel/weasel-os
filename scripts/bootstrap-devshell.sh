@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo_url="${WEASEL_OS_REPO:-https://github.com/EvilWeasel/weasel-os.git}"
+repo_url="${WEASEL_OS_REPO:-https://github.com/morrowbyte/weasel-os.git}"
 branch="${WEASEL_OS_BRANCH:-main}"
 root="${WEASEL_OS_ROOT:-$HOME/weasel-os}"
 bashrc="${WEASEL_BASHRC:-$HOME/.bashrc}"

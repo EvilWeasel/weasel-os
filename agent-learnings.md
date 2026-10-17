@@ -1384,3 +1384,7 @@ Root independently observed NoNewPrivs 0 and /run/wrappers/bin/sudo -n id -u ret
 - Change: Preserve the existing Morrowbyte default and Slack URI association; remove MT Code from additional t3code associations, keeping the explicit Morrowbyte handler.
 - Pitfall/Root cause: A pre-existing uncommitted MIME association change blocked protected daily-update baseline admission. User explicitly approved its commit and removal of MT Code from this file.
 - Verification: Python ConfigParser assertions for default/additional handlers and absence of mtcode.desktop; git diff --check. No system build or activation. Nix evaluation deferred because the newly required Btrfs metadata preflight was above its 85% threshold.
+
+## 2026-10-17 — Canonical repository transfer
+
+Migrated the protected updater origin checks, dev-shell default and active setup links to `morrowbyte/weasel-os`. The previous GitHub alias resolves to the same repository ID 933863588; this preserves the trust target and all signing/snapshot/closure gates. Source changes require the normal immutable bootstrap before installed helpers change. Verification: existing preparation/activation/bootstrap tests and affected-host evaluation.
