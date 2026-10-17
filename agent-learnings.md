@@ -1379,3 +1379,8 @@ Root independently observed NoNewPrivs 0 and /run/wrappers/bin/sudo -n id -u ret
 - Verification: actionlint and diff check; shared Blacksmith acceptance run 38740107584 passed Linux x64/ARM64, Windows x64 and macOS. Per-repository Nix execution remains separately reported.
 
 - 2026-10-17: Physical Escape cancels the current Computer Use task and queue without persisting a global takeover. Idle Escape only invalidates observations; old task IDs stay closed; explicit Ctrl+Alt+Escape takeover remains persistent. Legacy Escape markers migrate to the ordinary startup gate. Updated the installed skill and explicit local command links; the focused Blacksmith workflow tests and exports the same actor/indicator closure for deployment without a laptop rebuild. Verification uses focused Escape/resume/marker regressions and locked host drvPath evaluations; preserve unrelated dirty MIME edits.
+
+### 2026-10-17 (Morrowbyte URI associations)
+- Change: Preserve the existing Morrowbyte default and Slack URI association; remove MT Code from additional t3code associations, keeping the explicit Morrowbyte handler.
+- Pitfall/Root cause: A pre-existing uncommitted MIME association change blocked protected daily-update baseline admission. User explicitly approved its commit and removal of MT Code from this file.
+- Verification: Python ConfigParser assertions for default/additional handlers and absence of mtcode.desktop; git diff --check. No system build or activation. Nix evaluation deferred because the newly required Btrfs metadata preflight was above its 85% threshold.
