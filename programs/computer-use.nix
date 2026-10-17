@@ -15,6 +15,10 @@ in
     indicator
   ];
   home.file.".codex/skills/niri-computer-use".source = ../skills/niri-computer-use;
+  # Keep explicit local commands aligned with the managed actor and its skill.
+  home.file.".local/bin/weasel-computer-use".source = "${computerUse}/bin/weasel-computer-use";
+  home.file.".local/bin/weasel-computer-use-indicator".source =
+    "${indicator}/bin/weasel-computer-use-indicator";
   # This key works independently of a busy or disconnected client.
   xdg.configFile."niri/config.kdl".text = lib.mkAfter ''
     binds {

@@ -1,0 +1,78 @@
+name: Blacksmith Computer Use
+
+on:
+  push:
+    paths:
+      - 'packages/computer-use/**'
+      - 'packages/computer-use-indicator/**'
+      - 'programs/computer-use.nix'
+      - 'hosts/nixy-laptop/home.nix'
+      - 'flake.nix'
+      - 'flake.lock'
+      - '.github/workflows/computer-use.yml'
+  pull_request:
+    paths:
+      - 'packages/computer-use/**'
+      - 'packages/computer-use-indicator/**'
+      - 'programs/computer-use.nix'
+      - 'hosts/nixy-laptop/home.nix'
+      - 'flake.nix'
+      - 'flake.lock'
+      - '.github/workflows/computer-use.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: computer-use-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  package:
+    if: vars.CI_ENABLED == 'true'
+    runs-on: ${{ vars.CI_RUNNER || 'blacksmith-8vcpu-ubuntu-2404' }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: cachix/install-nix-action@b85815f71a6de0ddee80b8a80a98d43f4bcc66c7 # v31
+        with:
+          extra_nix_config: |
+            experimental-features = nix-command flakes
+            max-jobs = 4
+            cores = 2
+      - uses: nix-community/cache-nix-action@7df957e333c1e5da7721f60227dbba6d06080569 # v7
+        with:
+          primary-key: computer-use-${{ hashFiles('flake.lock', 'packages/computer-use/**', 'packages/computer-use-indicator/**') }}
+          restore-prefixes-first-match: computer-use-
+          gc-max-store-size-linux: 8G
+          save: ${{ github.event_name != 'pull_request' }}
+      - name: Build and test the installed desktop components
+        run: |
+          nix build --impure --no-write-lock-file --no-link --print-out-paths --print-build-logs --expr '
+            let
+              flake = builtins.getFlake (toString ./.);
+              packages = flake.nixosConfigurations.nixy-laptop.config.home-manager.users.evilweasel.home.packages;
+            in builtins.filter (p: builtins.elem (p.pname or "") [ "weasel-computer-use" "weasel-computer-use-indicator" ]) packages
+          ' > package-paths.txt
+          test "$(wc -l < package-paths.txt)" -eq 2
+          git diff --exit-code -- flake.lock
+      - name: Export the tested closure for installation without rebuilding
+        run: |
+          mapfile -t roots < package-paths.txt
+          nix-store --query --requisites "${roots[@]}" > closure-paths.txt
+          mapfile -t closure < closure-paths.txt
+          nix-store --export "${closure[@]}" | zstd -T2 -6 > computer-use.nar.zst
+          sha256sum computer-use.nar.zst > SHA256SUMS
+          git rev-parse HEAD > source-commit.txt
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: computer-use-${{ github.sha }}
+          path: |
+            computer-use.nar.zst
+            SHA256SUMS
+            package-paths.txt
+            closure-paths.txt
+            source-commit.txt
+          compression-level: 0
+          retention-days: 7

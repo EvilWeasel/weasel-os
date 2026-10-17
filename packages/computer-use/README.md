@@ -16,28 +16,25 @@ task-owned indicator scope is open across model-thinking gaps. An idle Esc still
 advances the physical input generation and invalidates old observations, but
 does not latch a takeover or persist a marker. An in-scope Esc advances the
 cancel epoch immediately, stops preparation and queued actions, releases owned
-keys/buttons, and persists `physical_escape`. Completed/partial effects remain
-reported and are never replayed. A real explicit desktop takeover remains a
-separate, stronger persistent stop and has higher cause priority than a later
-Escape.
+keys/buttons, and closes the current task scope without persisting a takeover.
+Completed/partial effects remain reported and are never replayed. A real
+explicit desktop takeover remains a separate persistent stop.
 
 The indicator opens an actor-owned task scope when it begins and closes it on
 end, disconnect, stop or lease expiry. Its fixed 20-minute bound is not renewed;
-expiry only drops stale scope ownership and never resumes work. A latched
-`physical_escape` can be cleared only by a fresh, explicitly requested Computer
-Use task with a new task ID and current backend session/epoch binding. The first
-resume call returns a visible two-second `rearm_warning` and a unique
-`scope_token`; wait that interval and retry once with the same task ID and
-binding. Esc during the warning keeps or refreshes the stop. A successful
-resume binds the indicator scope to the new task before clearing the old stop;
-start the indicator with that task ID and returned `--scope-token`. Include the
-same task ID on every `desktop_act` call. A live indicator permits multiple
+expiry only drops stale scope ownership and never resumes work. After Escape,
+the agent stops the current turn's desktop work. User steering or a continuation
+request in a new turn permits a fresh task ID and indicator without a separate
+unlock prompt or warning delay. The actor retains used task IDs so the stopped
+scope cannot be reopened; the new task must obtain fresh observations. Include
+the same task ID on every `desktop_act` call. A live indicator permits multiple
 batches for its one task; stale, ended, reused or mismatched IDs are refused.
-Resume also requires released controls and
-the existing 300 ms quiet gate, and always requires a fresh observation before
-input. Explicit takeover
-and legacy persisted markers keep their existing explicit-return policy. No
-stopped task or queued action is resumed or replayed.
+Released controls and the existing 300 ms quiet gate still apply. Legacy
+persisted `physical_escape` markers migrate to the normal backend-startup gate;
+the current authorized task permits its bound startup resume. Explicit takeover
+and other legacy persisted markers retain their explicit-return policy. No
+stopped task or queued action is resumed or replayed. Turn authorization is the
+agent's responsibility; task IDs alone do not attest a user turn.
 Authoritative bounded evdev key snapshots retain only the aggregate number of
 held physical controls. Held modifiers/buttons or unknown input state temporarily
 refuse dispatch, without latching takeover; release and fresh observation allow
@@ -164,9 +161,9 @@ ignore these fields. An idle, released, already-resumed actor permits a read-onl
 no-op without changing the epoch or cached targets.
 Both action and resume MCP requests have request-scoped cancellation ownership.
 A cancellation can still arrive after a transition has completed; inspect fresh
-status rather than assuming reversal. Active physical Escape has priority over
-test, startup and explicit takeover markers, and every new accepted stop gets
-its own cause identity. A failed persistence or rollback remains a visible stop.
+status rather than assuming reversal. Physical Escape cancels work without
+downgrading an active explicit takeover. Every accepted persistent stop gets its
+own cause identity. A failed persistence or rollback remains a visible stop.
 
 For visual input, the skill treats images over 1200 pixels on either axis as
 overviews and requires a fresh crop no larger than 1200 pixels on either axis.
@@ -299,12 +296,11 @@ Physical **Esc** requests abort only during a live Computer Use task scope;
 idle Esc invalidates old observations without latching the actor.
 **Ctrl+Alt+Escape** remains a separate explicit takeover through Niri.
 Synthetic agent Escape for dialogs does not trigger physical abort. Check
-confirmed input release; completed effects persist. A latched physical Escape
-can be cleared only for a newly requested task after its 2-second warning,
-current session/epoch binding and quiet/released gates; use the returned
-`scope_token` with the indicator and the task ID with every action. An explicit
-takeover still requires the user's return of control and cannot use the
-physical-Escape re-arm path.
+confirmed input release; completed effects persist. After Escape, stop the
+current desktop task. User steering in a new turn permits a fresh task ID,
+indicator and observations without a separate unlock prompt. Quiet/released
+gates still apply, and stopped task IDs cannot reopen. An explicit takeover
+still requires the user's return of control.
 Repair only this owned backend; do not
 restart T3, the compositor or foreign clients as chaos tests.
 

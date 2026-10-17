@@ -72,27 +72,25 @@ snapshot, not permission or actor release. A recorded `capture_failed` retains
 its category until a successful fresh observation; input remains blocked until
 that observation. Resume itself does not require a previous capture.
 Every backend start initially latches input, and a
-restart preserves any prior takeover cause. Inspect
+restart preserves an explicit desktop takeover. Inspect
 `takeover_persistence.reason.source`: for `backend_startup`, a current user
 request authorizing desktop work permits an explicit `desktop_resume` once the
 actor is released and its input monitor is ready and quiet. Do not request a
 second generic permission for that already authorized work. An idle physical
 Esc invalidates old observations without creating a stop. While the
-task-owned Computer Use indicator scope is open, Esc cancels the whole task and
-persists `physical_escape`, including across backend restart. Only a newly and
-explicitly requested Computer Use task with a fresh task ID may clear that
-cause. The first current session/epoch-bound `desktop_resume` returns a visible
-2-second warning and a unique ownership token; wait the reported interval, then
-retry once with the same task ID and session/epoch binding. Start the task
-indicator with that exact task ID and returned `--scope-token`. Include the same
+task-owned Computer Use indicator scope is open, Esc cancels the current task,
+drops queued work and releases owned controls. End its indicator and inspect
+completed or partial effects; do not retry the stopped operation in that turn.
+Escape does not create a persistent takeover or require a separate permission
+question. After the user corrects or continues the task in a new turn, use a
+fresh task ID, start its indicator and obtain fresh observations. Include that
 task ID on every `desktop_act` request; multiple action batches may share the
 same live task scope, while an older, ended, reused or mismatched ID is refused.
-Esc during that warning aborts and retains the stop.
-Released controls, the quiet-input gate and a fresh observation remain
-required. A backend restart alone never
-clears the cause. `explicit_desktop_takeover` remains a separate stronger stop
-that waits for the user's return of control and cannot use the physical-Escape
-re-arm binding. Older `physical_input_activity`
+Released controls and the quiet-input gate remain required. A legacy persisted
+`physical_escape` is migrated to the ordinary backend-startup gate on upgrade;
+the current authorized task permits its bound startup resume without another
+permission question. `explicit_desktop_takeover` remains a separate stop that
+waits for the user's return of control. Older `physical_input_activity`
 markers remain preserved across upgrade and keep their explicit resume
 requirement; ordinary input under the new policy does not create them.
 Controlled evdev simulation is test evidence only.
@@ -112,7 +110,7 @@ unlatched backend can return only a read-only no-op snapshot. A stale
 binding means a new stop/cancellation or backend intervened: inspect its cause
 and honor the new return-of-control requirement, never refresh and retry
 blindly. Empty arguments are allowed only for the idempotent unlatched case.
-Active real Escape/explicit stop causes cannot be reclassified by controlled
+An active explicit takeover cannot be reclassified by controlled
 simulation, startup or legacy paths. An explicit takeover from a test shares
 the human takeover interface and has no proven task ownership; a later test
 resume must never clear a newer human stop.
@@ -359,8 +357,9 @@ than escalating clicks or counting two failed frames as an abort. True Esc,
 explicit cancellation and actual capability loss still stop promptly.
 Never replay an uncertain edit, copy, move or submission without checking its
 actual state. Keep recovery bounded and report sustained contention instead of
-fighting for focus. Physical Esc stops the task; continuation after
-`physical_escape` requires a newly requested task and its warning-bound resume.
+fighting for focus. Physical Esc stops the current task. User steering or a
+continuation request in a later turn permits a fresh Computer Use task without
+an extra Escape-unlock prompt; never replay the stopped task or its queue.
 Explicit takeover still requires the user to return control. Synthetic agent Esc
 for dialogs does not count as physical abort. Backend startup/legacy takeover
 markers remain explicit and require the current user-authorized resume.
