@@ -1394,3 +1394,8 @@ Migrated the protected updater origin checks, dev-shell default and active setup
 - A prototype's 20-minute ceiling was blocking normal long-running tasks. The indicator now follows its actual owner by default; bounded trials can still request a positive explicit runtime.
 - Preserve physical Escape, exact-owner cleanup, backend/session and output binding. These are independent of a fixed session duration.
 - Verified five focused indicator lifecycle cases: default lifetime/explicit end, explicit expiry, runtime above the former ceiling, Escape epoch and invalid owner. No physical desktop input or system activation in these checks.
+
+## 2026-10-18 — Remove trial monitor names from launch capability
+- Removed the DP-6/eDP-1 product whitelist from launch and post-launch observation. Runtime enabled-output geometry, exact focused workspace/window, task scope, cancellation and input collision checks remain. An individual physical trial can still bind its own monitor explicitly.
+- This does not generalize the existing Zed/Chrome launch prototype or provide independent input seats; those remain separate implementation work.
+- Verification: five focused launch contract tests passed (including runtime DP-5/HDMI-A-2/USB-C-1 targets and unchanged cancellation/stale-target rejection); affected laptop drv evaluation passed. No live action, actor restart or system activation.

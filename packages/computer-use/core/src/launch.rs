@@ -25,10 +25,6 @@ pub enum Request<'a> {
     File(Project, &'a str),
 }
 
-pub fn allowed_output(output: &str) -> R<()> {
-    if matches!(output, "DP-6" | "eDP-1") { Ok(()) }
-    else { Err("Launch/post-focus capture requires DP-6 or eDP-1; protected outputs are unavailable".into()) }
-}
 pub fn relative_path(path: &str) -> R<()> {
     // Zed interprets ':' as a line/column suffix, so it cannot be a filename here.
     if path.is_empty() || path.len() > 4096 || path.contains(['\0', '\\', ':'])
@@ -60,7 +56,7 @@ fn executable(path: &str) -> bool {
     fs::metadata(path).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0)
 }
 pub fn capability() -> Value {
-    json!({"revision":REVISION,"implemented":true,"standalone":true,"apps":["zed","chrome"],"projects":["jarvis"],"outputs":["DP-6","eDP-1"],"pinned_binaries_present":{"zed":executable(ZED)&&executable(ZED_APP),"chrome":executable(CHROME)},"isolation":"fresh private user-data-dir per action; Zed --new --foreground, Chrome --new-window","spawn_ack_is_ui_success":false,"uncertain_after_spawn_requires_verification":true,"automatic_retry":false,"live_isolation_attested":false})
+    json!({"revision":REVISION,"implemented":true,"standalone":true,"apps":["zed","chrome"],"projects":["jarvis"],"outputs":"runtime enabled outputs; current task target remains explicit","pinned_binaries_present":{"zed":executable(ZED)&&executable(ZED_APP),"chrome":executable(CHROME)},"isolation":"fresh private user-data-dir per action; Zed --new --foreground, Chrome --new-window","spawn_ack_is_ui_success":false,"uncertain_after_spawn_requires_verification":true,"automatic_retry":false,"live_isolation_attested":false})
 }
 pub struct Plan { pub program: &'static str, pub args: Vec<String> }
 impl Plan {
