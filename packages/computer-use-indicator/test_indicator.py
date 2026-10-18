@@ -258,6 +258,8 @@ class IndicatorLifecycle(unittest.TestCase):
     def test_thinking_gap_stays_owned_and_explicit_end_cleans(self):
         process = self.launch()
         self.ready(process)
+        lease = next((self.actor_dir / "indicators").glob("task-*.json"))
+        self.assertIsNone(json.loads(lease.read_text())["deadline_monotonic"])
         time.sleep(0.35)  # actor remains idle: lifetime is workflow, not action.
         self.assertIsNone(process.poll())
         result = subprocess.run([sys.executable, str(SOURCE / "indicator.py"), "end", "--task-id", "fixture-task"], env=self.env, capture_output=True, text=True)
@@ -329,10 +331,20 @@ class IndicatorLifecycle(unittest.TestCase):
         process.terminate()
         self.assertEqual(self.ended(process)["reason"], "owner_signal")
 
-    def test_hard_maximum_runtime(self):
+    def test_explicit_maximum_runtime(self):
         process = self.launch(extra=("--max-runtime-seconds", "1"))
         self.ready(process)
         self.assertEqual(self.ended(process)["reason"], "maximum_runtime_expired")
+
+    def test_explicit_runtime_can_exceed_old_twenty_minute_ceiling(self):
+        process = self.launch(extra=("--max-runtime-seconds", "3600"))
+        self.ready(process)
+        lease = next((self.actor_dir / "indicators").glob("task-*.json"))
+        data = json.loads(lease.read_text())
+        self.assertEqual(data["deadline_monotonic"] - data["started_monotonic"], 3600)
+        result = subprocess.run([sys.executable, str(SOURCE / "indicator.py"), "end", "--task-id", "fixture-task"], env=self.env, capture_output=True, text=True)
+        self.assertEqual(result.returncode, 0, result.stdout)
+        self.assertEqual(self.ended(process)["reason"], "explicit_end")
 
     def test_same_output_cannot_have_two_owners(self):
         first = self.launch()

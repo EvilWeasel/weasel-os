@@ -24,7 +24,6 @@ import sys
 import time
 
 REVISION = 1
-MAX_RUNTIME_SECONDS = 20 * 60
 POLL_SECONDS = 0.1
 STATUS_TIMEOUT_SECONDS = 0.3
 MAX_STATUS_BYTES = 16 * 1024
@@ -281,7 +280,7 @@ def run(args):
     selector = selectors.DefaultSelector()
     reason = "initialization_failed"
     started = time.monotonic()
-    deadline = started + args.max_runtime_seconds
+    deadline = None if args.max_runtime_seconds is None else started + args.max_runtime_seconds
     owned_socket_identity = None
     owned_lease_identity = None
     old_signals = {}
@@ -342,7 +341,7 @@ def run(args):
             if stop_signal[0] is not None:
                 reason = "owner_signal"
                 break
-            if now >= deadline:
+            if deadline is not None and now >= deadline:
                 reason = "maximum_runtime_expired"
                 break
             if not ready and now - started > 4:
@@ -360,7 +359,7 @@ def run(args):
                 break
             # Socket I/O is part of this selector, not a synchronous full-status
             # call. Local end/stdin events are processed before lifecycle data.
-            timeout = min(POLL_SECONDS, max(0, deadline - time.monotonic()))
+            timeout = POLL_SECONDS if deadline is None else min(POLL_SECONDS, max(0, deadline - time.monotonic()))
             if probe is not None:
                 timeout = min(timeout, max(0, probe.deadline - time.monotonic()))
             probe_error = None
@@ -470,7 +469,7 @@ def run(args):
                 # owner/control checks before any renewal after that wait.
                 continue
             now = time.monotonic()
-            if now >= deadline:
+            if deadline is not None and now >= deadline:
                 reason = "maximum_runtime_expired"
                 break
             if probe is None and last_valid_at is not None and now - last_valid_at <= STATUS_FRESH_SECONDS and now >= next_heartbeat:
@@ -548,7 +547,7 @@ def main():
     runner.add_argument("--owner-pid", type=int)
     runner.add_argument("--owner-start-ticks", type=int)
     runner.add_argument("--stdin-control", action="store_true", help="EOF or v1 end on stdin also ends the indicator; use a PTY/held pipe")
-    runner.add_argument("--max-runtime-seconds", type=int, default=MAX_RUNTIME_SECONDS)
+    runner.add_argument("--max-runtime-seconds", type=int, help="optional explicit lifetime bound; otherwise follows the task owner")
     for name in ("status", "end"):
         command = commands.add_parser(name)
         command.add_argument("--task-id", required=True)
@@ -558,8 +557,8 @@ def main():
     if args.command == "run":
         if not IDENTIFIER.fullmatch(args.output):
             parser.error("invalid output identifier")
-        if not 1 <= args.max_runtime_seconds <= MAX_RUNTIME_SECONDS:
-            parser.error("maximum runtime must be 1–1200 seconds")
+        if args.max_runtime_seconds is not None and not 1 <= args.max_runtime_seconds <= sys.maxsize:
+            parser.error("explicit maximum runtime must be a positive representable number of seconds")
         if args.owner_pid is not None and (args.owner_pid < 1 or args.owner_start_ticks is None):
             parser.error("explicit owner PID requires its exact --owner-start-ticks")
         if args.owner_start_ticks is not None and args.owner_pid is None:

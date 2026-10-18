@@ -122,12 +122,13 @@ reachable while the probe is pending; closing it cancels only this read socket.
 The helper ends on epoch or backend session change, takeover latch, idle
 unconfirmed release, unavailable lifecycle, owner PID/starttime change, explicit
 end, stdin EOF (when requested), SIGTERM/SIGINT/SIGHUP, target output/layout
-change, or a hard maximum of 20 minutes. Active actions may legitimately have
+change, or an explicitly requested runtime bound. Active actions may legitimately have
 unconfirmed release; that transient state does not hide the indicator. The
 renderer still expires after 4 seconds without heartbeats. There is no automatic
-resume or action replay, no replacement-backend reconnect, and no renewal beyond
-the hard runtime bound. Shorter bounds can be requested with
-`--max-runtime-seconds 1..1200`.
+resume or action replay and no replacement-backend reconnect. By default the
+indicator follows the task owner's lifetime without a fixed session timeout.
+Bounded trials can opt in with `--max-runtime-seconds SECONDS`; this does not
+change owner-death, physical Escape or backend-session handling.
 
 Lifecycle and output queries are read-only. Raw status, window titles,
 environment, command arguments and credentials are never logged. The helper's

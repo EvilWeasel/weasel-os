@@ -1388,3 +1388,9 @@ Root independently observed NoNewPrivs 0 and /run/wrappers/bin/sudo -n id -u ret
 ## 2026-10-17 — Canonical repository transfer
 
 Migrated the protected updater origin checks, dev-shell default and active setup links to `morrowbyte/weasel-os`. The previous GitHub alias resolves to the same repository ID 933863588; this preserves the trust target and all signing/snapshot/closure gates. Source changes require the normal immutable bootstrap before installed helpers change. Verification: existing preparation/activation/bootstrap tests and affected-host evaluation.
+
+## 2026-10-18 — Computer Use indicator lifetime
+
+- A prototype's 20-minute ceiling was blocking normal long-running tasks. The indicator now follows its actual owner by default; bounded trials can still request a positive explicit runtime.
+- Preserve physical Escape, exact-owner cleanup, backend/session and output binding. These are independent of a fixed session duration.
+- Verified five focused indicator lifecycle cases: default lifetime/explicit end, explicit expiry, runtime above the former ceiling, Escape epoch and invalid owner. No physical desktop input or system activation in these checks.
