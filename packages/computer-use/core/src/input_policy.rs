@@ -12,6 +12,11 @@ impl Guard {
     pub fn bind(generation: u64) -> Self {
         Self(EXPECTED_GENERATION.with(|g| g.replace(Some(generation))))
     }
+    // Direct object calls do not enter the shared keyboard/pointer input stream.
+    // Cancellation still flows through the request and task epoch checks.
+    pub fn background() -> Self {
+        Self(EXPECTED_GENERATION.with(|g| g.replace(None)))
+    }
 }
 impl Drop for Guard {
     fn drop(&mut self) {

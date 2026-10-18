@@ -1399,3 +1399,7 @@ Migrated the protected updater origin checks, dev-shell default and active setup
 - Removed the DP-6/eDP-1 product whitelist from launch and post-launch observation. Runtime enabled-output geometry, exact focused workspace/window, task scope, cancellation and input collision checks remain. An individual physical trial can still bind its own monitor explicitly.
 - This does not generalize the existing Zed/Chrome launch prototype or provide independent input seats; those remain separate implementation work.
 - Verification: five focused launch contract tests passed (including runtime DP-5/HDMI-A-2/USB-C-1 targets and unchanged cancellation/stale-target rejection); affected laptop drv evaluation passed. No live action, actor restart or system activation.
+
+## 2026-10-18 — Object-targeted background accessibility
+- Added explicit background semantics to separate direct AT-SPI click/edit from shared keyboard/pointer generation checks. Real target/window/output/context and Escape/cancellation remain checked; overlap with the actual focused target still rejects stale input. No focus/key/pointer/clipboard fallback is introduced.
+- Ten focused semantic regressions passed, including unrelated held input, target replacement/geometry, same-target collision, existing foreground generation semantics and physical Escape. Live app acceptance remains unrun; activation stays with the sole physical coordinator.

@@ -97,6 +97,7 @@ struct Crop {
 }
 #[derive(Clone)]
 struct SemanticTarget {
+    background: bool,
     at: Instant,
     epoch: u64,
     input_generation: u64,
@@ -1757,14 +1758,61 @@ fn atspi_helper(state: &State, request: Value, epoch: u64) -> R<Value> {
 fn semantic_target(state: &State, obs: &Observation, handle: &str) -> R<SemanticTarget> {
     let target=state.semantic_targets.lock().map_err(|_|"Semantic handle cache poisoned")?.get(handle).cloned().ok_or("Semantic handle unknown; call desktop_semantic_direct first. Foreign Cua/index/object tokens are not accepted.")?;
     check_epoch(state, Some(target.epoch))?;
-    state.input_policy.check(target.input_generation)?;
+    if !target.background {
+        state.input_policy.check(target.input_generation)?;
+    }
     if target.at.elapsed() > MAX_AGE {
         return Err("Semantic handle expired; call desktop_semantic_direct again".into());
     }
-    if obs.focused_window.as_ref().map(identity) != Some(identity(&target.window)) {
+    if target.background {
+        background_semantic_ready(state)?;
+        validate_background_semantic_inventory(obs, &target.window,
+            &niri_epoch(state, "windows", Some(target.epoch))?,
+            &niri_epoch(state, "workspaces", Some(target.epoch))?,
+            &niri_epoch(state, "outputs", Some(target.epoch))?,
+            !state.input_policy.matches(target.input_generation) || !state.input_policy.controls_released())?;
+    } else if obs.focused_window.as_ref().map(identity) != Some(identity(&target.window)) {
         return Err("Semantic handle belongs to another window identity/layout; focus and observe actual target, then read semantics again".into());
     }
     Ok(target)
+}
+
+fn background_semantic_ready(state: &State) -> R<()> {
+    let monitor = state.human_monitor.lock().map_err(|_| "Physical Escape monitor state poisoned")?;
+    if monitor["available"] != true || monitor["watched_devices"].as_u64().unwrap_or(0) == 0
+        || monitor["status"] == "starting" || state.takeover.load(Ordering::SeqCst) {
+        return Err("Background accessibility requires the live physical Escape monitor and no takeover".into());
+    }
+    Ok(())
+}
+
+fn validate_background_semantic_inventory(obs: &Observation, target: &Value,
+    windows: &Value, workspaces: &Value, outputs: &Value, physical_input_changed: bool) -> R<()> {
+    if obs.at.elapsed() > MAX_AGE { return Err("Background observation expired; observe again".into()); }
+    let id = target["id"].as_u64().ok_or("Background target has no window identity")?;
+    let exact = |inventory: &Value| -> R<Value> {
+        let matches = inventory.as_array().ok_or("Window inventory unavailable")?.iter()
+            .filter(|w| w["id"].as_u64() == Some(id)).collect::<Vec<_>>();
+        if matches.len() != 1 || identity(matches[0]) != identity(target)
+            || matches[0]["title"] != target["title"] {
+            return Err("Background window identity, title or layout changed; observe again".into());
+        }
+        Ok(matches[0].clone())
+    };
+    exact(&obs.windows)?;
+    let current = exact(windows)?;
+    if current["is_focused"] == true && physical_input_changed {
+        return Err("Physical input overlaps this exact target window; refresh its state before another action".into());
+    }
+    let workspace_id = current["workspace_id"].as_u64().ok_or("Background target workspace unavailable")?;
+    let matches = workspaces.as_array().ok_or("Workspace inventory unavailable")?.iter()
+        .filter(|w| w["id"].as_u64() == Some(workspace_id)).collect::<Vec<_>>();
+    if matches.len() != 1 || matches[0]["is_active"] != true
+        || matches[0]["output"].as_str() != Some(obs.output.as_str())
+        || !obs.output_geometry.is_object() || outputs[&obs.output]["logical"] != obs.output_geometry {
+        return Err("Background target's selected output, visible workspace or geometry changed; observe again".into());
+    }
+    Ok(())
 }
 
 fn validate_launch_inventory(obs: &Observation, windows: &Value, workspaces: &Value, outputs: &Value) -> R<()> {
@@ -1795,7 +1843,7 @@ fn validate_launch_state(state: &State, obs: &Observation, epoch: u64) -> R<()> 
 fn validate_launch_state_with_inventory(state: &State, obs: &Observation, epoch: u64,
     inventory: impl FnOnce() -> R<(Value, Value, Value)>) -> R<()> {
     check_epoch(state, Some(epoch))?;
-    validate_retained_observation(state, obs)?;
+    validate_retained_observation(state, obs, true)?;
     validate_focus_state(state, obs)?;
     let monitor = state.human_monitor.lock().map_err(|_| "Human monitor status poisoned")?;
     if monitor["available"] != true || monitor["watched_devices"].as_u64().unwrap_or(0) == 0 || monitor["status"] == "starting" {
@@ -2102,7 +2150,7 @@ fn execute(
             expected_text,
         } => {
             let target = semantic_target(state, obs, handle_id)?;
-            validate(state, obs, None, false)?;
+            if !target.background { validate(state, obs, None, false)?; }
             check_epoch(state, Some(epoch))?;
             *details = atspi_helper(
                 state,
@@ -2118,7 +2166,7 @@ fn execute(
             action_name,
         } => {
             let target = semantic_target(state, obs, handle_id)?;
-            validate(state, obs, None, false)?;
+            if !target.background { validate(state, obs, None, false)?; }
             check_epoch(state, Some(epoch))?;
             *details = atspi_helper(
                 state,
@@ -2131,6 +2179,7 @@ fn execute(
         }
         Action::SemanticFocus { handle_id } => {
             let target = semantic_target(state, obs, handle_id)?;
+            if target.background { return Err("Background handles never request focus; obtain foreground semantics explicitly".into()); }
             validate(state, obs, None, false)?;
             check_epoch(state, Some(epoch))?;
             *details = atspi_helper(
@@ -2247,8 +2296,14 @@ fn act_inner(state: &State, args: &Value, epoch: u64) -> R<Value> {
         .get(&parsed.observation_id)
         .cloned()
         .ok_or("Observation missing; call desktop_observe first")?;
-    let _input_guard = input_policy::Guard::bind(obs.input_generation);
-    state.input_policy.check(obs.input_generation)?;
+    let background_semantic = parsed.actions.iter().all(|action| match action {
+        Action::SemanticSetValue { handle_id, .. } | Action::SemanticClick { handle_id, .. } =>
+            state.semantic_targets.lock().is_ok_and(|targets| targets.get(handle_id).is_some_and(|t| t.background)),
+        _ => false,
+    });
+    let _input_guard = if background_semantic { input_policy::Guard::background() }
+        else { input_policy::Guard::bind(obs.input_generation) };
+    if !background_semantic { state.input_policy.check(obs.input_generation)?; }
     // Check the common pointer view before action-specific capability reads.
     // A later oversized click must return the actionable crop error even when
     // an earlier global shortcut cannot access a device on this host.
@@ -2262,7 +2317,13 @@ fn act_inner(state: &State, args: &Value, epoch: u64) -> R<Value> {
             Action::SemanticSetValue { handle_id, .. }
             | Action::SemanticClick { handle_id, .. }
             | Action::SemanticFocus { handle_id } => {
-                semantic_target(state, &obs, handle_id)?;
+                let target = semantic_target(state, &obs, handle_id)?;
+                if target.background && parsed.window_id.is_some_and(|id| Some(id) != target.window["id"].as_u64()) {
+                    return Err("Background top-level window_id differs from the exact semantic target".into());
+                }
+                if target.background && matches!(action, Action::SemanticFocus { .. }) {
+                    return Err("Background handles never request focus; obtain foreground semantics explicitly".into());
+                }
             }
             _ => {}
         }
@@ -2313,7 +2374,7 @@ fn act_inner(state: &State, args: &Value, epoch: u64) -> R<Value> {
     check_epoch(state, Some(obs.epoch))?;
     // Recovery clears cached targets without clearing/incrementing the epoch.
     // A request that cloned an observation before recovery must not reuse it.
-    validate_retained_observation(state, &obs)?;
+    validate_retained_observation(state, &obs, !background_semantic)?;
     if state.takeover.load(Ordering::SeqCst) {
         return Err("Desktop takeover is latched; pending batch rejected".into());
     }
@@ -2406,7 +2467,7 @@ fn act_inner(state: &State, args: &Value, epoch: u64) -> R<Value> {
                 }
                 validate_launch_state(state, &obs, epoch)?;
             }
-            if action.launch().is_none() && !matches!(action, Action::Focus { .. } | Action::Wait { .. }) {
+            if !background_semantic && action.launch().is_none() && !matches!(action, Action::Focus { .. } | Action::Wait { .. }) {
                 validate(state, &obs, parsed.window_id, action.pointer())?;
             }
             if action.pointer() {
@@ -2524,8 +2585,8 @@ fn act_inner(state: &State, args: &Value, epoch: u64) -> R<Value> {
         }
     }
     let canceled = state.epoch.load(Ordering::SeqCst) != epoch || own_canceled();
-    let input_conflict = !state.input_policy.matches(obs.input_generation)
-        || !state.input_policy.controls_released();
+    let input_conflict = !background_semantic && (!state.input_policy.matches(obs.input_generation)
+        || !state.input_policy.controls_released());
     if input_conflict && !canceled {
         record(
             state,
@@ -2533,7 +2594,7 @@ fn act_inner(state: &State, args: &Value, epoch: u64) -> R<Value> {
             json!({"task_id":task,"completed_actions":completed,"expected_generation":obs.input_generation,"current_generation":state.input_policy.generation(),"actor_release_confirmed":cleanup_ok,"automatic_replay":false}),
         );
     }
-    let mut data = json!({"schema":1,"task_id":task,"observation_id":obs.id,"accepted_actions":args["actions"],"status":if canceled{"canceled"}else if input_conflict{"input_conflict"}else if failure.is_some(){"failed"}else{"dispatched"},"input_conflict":input_conflict,"expected_input_generation":obs.input_generation,"input_generation":state.input_policy.generation(),"fresh_observation_required":input_conflict,"takeover_latched":state.takeover.load(Ordering::SeqCst),"automatic_replay":false,"completed_actions":completed,"requested_actions":parsed.actions.len(),"effects":effects,"error":failure,"actor_release_confirmed":cleanup_ok,"timing_ms":{"dispatch_and_release":dispatch_ms,"post_action_settle_wait":settle_wait_ms,"post_observe":after_start.elapsed().as_secs_f64()*1000.0},"total_ms":start.elapsed().as_secs_f64()*1000.0,"after_observation_error":after_error,"verification":"Input acknowledgement only. after_observation is fresh evidence to inspect, not inferred UI success. Verify the expected UI state or independent artifact before reporting success."});
+    let mut data = json!({"schema":1,"task_id":task,"observation_id":obs.id,"accepted_actions":args["actions"],"background_semantic":background_semantic,"status":if canceled{"canceled"}else if input_conflict{"input_conflict"}else if failure.is_some(){"failed"}else{"dispatched"},"input_conflict":input_conflict,"expected_input_generation":obs.input_generation,"input_generation":state.input_policy.generation(),"fresh_observation_required":input_conflict,"takeover_latched":state.takeover.load(Ordering::SeqCst),"automatic_replay":false,"completed_actions":completed,"requested_actions":parsed.actions.len(),"effects":effects,"error":failure,"actor_release_confirmed":cleanup_ok,"timing_ms":{"dispatch_and_release":dispatch_ms,"post_action_settle_wait":settle_wait_ms,"post_observe":after_start.elapsed().as_secs_f64()*1000.0},"total_ms":start.elapsed().as_secs_f64()*1000.0,"after_observation_error":after_error,"verification":"Input acknowledgement only. after_observation is fresh evidence to inspect, not inferred UI success. Verify the expected UI state or independent artifact before reporting success."});
     let mut image_blocks = Vec::new();
     if let Some(after) = after {
         if let Some(content) = after["content"].as_array() {
@@ -2708,7 +2769,7 @@ fn semantic_direct(state: &State, args: &Value) -> R<Value> {
     )
 }
 
-fn semantic_input_readiness(state: &State, input_generation: u64, complete: bool) -> Value {
+fn semantic_input_readiness(state: &State, input_generation: u64, complete: bool, background: bool) -> Value {
     let mut readiness = observation_input_readiness(state, input_generation);
     let activity = readiness
         .as_object_mut()
@@ -2716,10 +2777,21 @@ fn semantic_input_readiness(state: &State, input_generation: u64, complete: bool
         .remove("input_activity_during_capture")
         .unwrap();
     readiness["input_activity_during_snapshot"] = activity;
-    let actionable = complete && readiness["action_ready"] == true;
+    let actionable = complete && if background { background_semantic_ready(state).is_ok() && state.release_confirmed.load(Ordering::SeqCst) }
+        else { readiness["action_ready"] == true };
+    readiness["background"] = json!(background);
+    if background {
+        readiness["shared_input_ready"] = readiness["input_ready"].clone();
+        readiness["input_ready"] = json!(actionable);
+        readiness["fresh_observation_required_for_input"] = json!(!actionable);
+    }
     readiness["action_ready"] = json!(actionable);
     readiness["fresh_semantic_snapshot_required_for_input"] = json!(!actionable);
-    readiness["note"] = json!("Semantic labels remain readable during ordinary input/holds. Readiness is advisory, not input permission. Non-actionable or incomplete snapshots issue no handles; semantic input requires a new complete snapshot with released controls and unchanged original generation.");
+    readiness["note"] = if background {
+        json!("Object-targeted background click/edit uses fresh window/output and AT-SPI object/context validation instead of the shared input generation. It never requests focus, keyboard, pointer or clipboard input. Physical input overlapping the exact target, cancellation, incomplete context or an unavailable physical Escape monitor refuse dispatch.")
+    } else {
+        json!("Semantic labels remain readable during ordinary input/holds. Readiness is advisory, not input permission. Non-actionable or incomplete snapshots issue no handles; semantic input requires a new complete snapshot with released controls and unchanged original generation.")
+    };
     readiness
 }
 
@@ -2738,7 +2810,10 @@ fn semantic_snapshot_result(
     let pid = window["pid"].as_u64().ok_or("Semantic target has no PID")?;
     let title = window["title"].as_str().unwrap_or("");
     check_epoch(state, Some(epoch))?;
-    let initial_readiness = semantic_input_readiness(state, input_generation, snapshot.complete);
+    let background = args["background"].as_bool() == Some(true);
+    let initial_readiness = semantic_input_readiness(state, input_generation,
+        snapshot.complete && (!background || window["is_focused"] != true
+            || state.input_policy.check(input_generation).is_ok()), background);
     let snapshot = Arc::new(snapshot);
     let snapshot_id = format!(
         "ax-snapshot-{}-{}",
@@ -2766,7 +2841,7 @@ fn semantic_snapshot_result(
         .map_err(|_| "Semantic handle cache poisoned")?;
     if !handles.is_empty() {
         cache.retain(|_, t| {
-            t.epoch == epoch && t.input_generation == input_generation && t.at.elapsed() < MAX_AGE
+            t.epoch == epoch && (t.background || t.input_generation == input_generation) && t.at.elapsed() < MAX_AGE
         });
         if cache.len() + handles.len() > 2048 {
             cache.clear();
@@ -2779,6 +2854,7 @@ fn semantic_snapshot_result(
             cache.insert(
                 handle.clone(),
                 SemanticTarget {
+                    background,
                     at: Instant::now(),
                     epoch,
                     input_generation,
@@ -2799,7 +2875,7 @@ fn semantic_snapshot_result(
         let showing = has_state(25);
         let focusable = has_state(11);
         let focused = has_state(12);
-        let mut element = json!({"handle_id":handle,"parent_handle_id":node.parent.as_ref().and_then(|p|handles.get(p)),"depth":node.depth,"role":node.role,"label":node.name,"description":node.description,"interfaces":node.interfaces,"states":node.states,"protected":node.protected,"text_excerpt":node.text_excerpt,"action_names":node.action_names,"editable":editable,"enabled":enabled,"showing":showing,"focusable":focusable,"focused":focused,"capabilities":{"focus":handle.is_some()&&has("org.a11y.atspi.Component")&&focusable&&enabled&&showing,"set_value":handle.is_some()&&has("org.a11y.atspi.EditableText")&&editable&&enabled&&showing,"click":handle.is_some()&&!node.action_names.is_empty()&&enabled&&showing},"coordinates":"none; semantic object targeting only"});
+        let mut element = json!({"handle_id":handle,"parent_handle_id":node.parent.as_ref().and_then(|p|handles.get(p)),"depth":node.depth,"role":node.role,"label":node.name,"description":node.description,"interfaces":node.interfaces,"states":node.states,"protected":node.protected,"text_excerpt":node.text_excerpt,"action_names":node.action_names,"editable":editable,"enabled":enabled,"showing":showing,"focusable":focusable,"focused":focused,"capabilities":{"focus":!background&&handle.is_some()&&has("org.a11y.atspi.Component")&&focusable&&enabled&&showing,"set_value":handle.is_some()&&has("org.a11y.atspi.EditableText")&&editable&&enabled&&showing,"click":handle.is_some()&&!node.action_names.is_empty()&&enabled&&showing},"coordinates":"none; semantic object targeting only"});
         if let Some(selection) = &node.text_selection {
             element["text_selection"] = json!(selection);
         }
@@ -2815,12 +2891,13 @@ fn semantic_snapshot_result(
         input_generation,
         snapshot.complete,
         initial_readiness["action_ready"] == true,
+        background,
         &handles,
         &mut cache,
         &mut elements,
     )?;
     Ok(text_result(
-        json!({"schema":1,"status":if snapshot.complete{"available"}else{"limited"},"niri_window_id":id,"epoch":epoch,"input_generation":input_generation,"current_input_generation":readiness["current_input_generation"],"input_ready":readiness["input_ready"],"action_ready":readiness["action_ready"],"input_activity_during_snapshot":readiness["input_activity_during_snapshot"],"fresh_observation_required_for_input":readiness["fresh_observation_required_for_input"],"fresh_semantic_snapshot_required_for_input":readiness["fresh_semantic_snapshot_required_for_input"],"takeover_latched":readiness["takeover_latched"],"input_readiness":readiness,"pid":pid,"title":title,"semantic_snapshot_id":snapshot_id,"elements_complete":snapshot.complete,"returned_element_count":elements.len(),"total_element_count":snapshot.nodes.len(),"elements":elements,"semantic_scope":snapshot.semantic_scope,"visibility_traversal":snapshot.visibility_traversal,"traversal_diagnostics":snapshot.traversal_diagnostics,"coordinate_frame":"No pixel bounds exported; direct typed actions use daemon-owned opaque handles only. Cua tokens and raw D-Bus paths are not accepted.","expires_after_ms":60000,"note":"Labels remain readable during ordinary input or held controls. Non-actionable or incomplete snapshots issue no handles; obtain a fresh complete semantic snapshot after controls are released. Mutations freshly validate original input generation, immutable bus generation/unique owner, object role/name/description/interfaces, observed ancestry, the defined SHOWING-ancestor-chain semantic context, enabled/showing state and modal set. set_value requires expected complete prior text or a complete matching512char excerpt; exact saved artifact remains independently verified.","latency_ms":started.elapsed().as_secs_f64()*1000.0}),
+        json!({"schema":1,"status":if snapshot.complete{"available"}else{"limited"},"niri_window_id":id,"epoch":epoch,"input_generation":input_generation,"current_input_generation":readiness["current_input_generation"],"input_ready":readiness["input_ready"],"action_ready":readiness["action_ready"],"input_activity_during_snapshot":readiness["input_activity_during_snapshot"],"fresh_observation_required_for_input":readiness["fresh_observation_required_for_input"],"fresh_semantic_snapshot_required_for_input":readiness["fresh_semantic_snapshot_required_for_input"],"takeover_latched":readiness["takeover_latched"],"input_readiness":readiness,"pid":pid,"title":title,"semantic_snapshot_id":snapshot_id,"background":background,"elements_complete":snapshot.complete,"returned_element_count":elements.len(),"total_element_count":snapshot.nodes.len(),"elements":elements,"semantic_scope":snapshot.semantic_scope,"visibility_traversal":snapshot.visibility_traversal,"traversal_diagnostics":snapshot.traversal_diagnostics,"coordinate_frame":"No pixel bounds exported; direct typed actions use daemon-owned opaque handles only. Cua tokens and raw D-Bus paths are not accepted.","expires_after_ms":60000,"note":if background { "Background handles permit only object-targeted click/edit on the exact visible target window. No focus/keyboard/pointer/clipboard fallback. Fresh unique-owner/window/object/modal/context and expected text checks remain; unrelated physical input does not invalidate this route. A named app action may itself change focus; verify its result." } else { "Labels remain readable during ordinary input or held controls. Non-actionable or incomplete snapshots issue no handles; obtain a fresh complete semantic snapshot after controls are released. Mutations freshly validate original input generation, immutable bus generation/unique owner, object role/name/description/interfaces, observed ancestry, the defined SHOWING-ancestor-chain semantic context, enabled/showing state and modal set. set_value requires expected complete prior text or a complete matching512char excerpt; exact saved artifact remains independently verified." },"latency_ms":started.elapsed().as_secs_f64()*1000.0}),
     ))
 }
 
@@ -2833,13 +2910,14 @@ fn finalize_semantic_handles(
     input_generation: u64,
     complete: bool,
     initial_action_ready: bool,
+    background: bool,
     handles: &HashMap<atspi::Object, String>,
     cache: &mut HashMap<String, SemanticTarget>,
     elements: &mut [Value],
 ) -> R<Value> {
     let publication = (|| {
         check_epoch(state, Some(epoch))?;
-        let mut readiness = semantic_input_readiness(state, input_generation, complete);
+        let mut readiness = semantic_input_readiness(state, input_generation, complete, background);
         if !initial_action_ready {
             readiness["action_ready"] = json!(false);
             readiness["fresh_semantic_snapshot_required_for_input"] = json!(true);
@@ -2867,8 +2945,8 @@ fn finalize_semantic_handles(
     publication
 }
 
-fn validate_retained_observation(state: &State, obs: &Observation) -> R<()> {
-    state.input_policy.check(obs.input_generation)?;
+fn validate_retained_observation(state: &State, obs: &Observation, shared_input: bool) -> R<()> {
+    if shared_input { state.input_policy.check(obs.input_generation)?; }
     if !state
         .observations
         .lock()
@@ -3665,7 +3743,7 @@ fn tools() -> Value {
       {"name":"desktop_windows","description":"Read actual Niri windows, outputs and workspaces. Window layout may lack global app bounds; never invent bounds.","inputSchema":{"type":"object","properties":{}}},
       {"name":"desktop_observe","description":"Capture one actual laptop output via grim at scale1, plus Niri identities. Startup capture_not_attempted=true is expected and permits this first read-only observation. Input always requires accepted fresh observation and action_ready; prior successful capture is not a prerequisite for authorized startup resume. Optional crop uses full-output screenshot pixels x/y/width/height; action x/y then use local pixels of the displayed crop. Core translates crop origin; NEVER add compositor output origin. Actual PNG size can differ from Niri logical size by rounding. Observation expires in60seconds; identity/geometry and fresh target-region guards still run. Observe after focus/workspace/layout changes. include_image=false returns private PNG reference only.","inputSchema":{"type":"object","properties":{"output":{"type":"string"},"include_image":{"type":"boolean"},"crop":crop}}},
       {"name":"desktop_semantic","description":"Read fresh Cua AT-SPI elements for a Niri window. Maps only unique actual PID+title; synthetic Cua IDs are never guessed. Query filters returned elements. Accessibility bounds are app-local and NOT screenshot coordinates; do not directly click them without calibrated mapping. Limited/root-only trees require visual fallback.","inputSchema":{"type":"object","properties":{"window_id":{"type":"integer"},"query":{"type":"string"},"max_elements":{"type":"integer"},"max_depth":{"type":"integer"}},"required":["window_id"]}},
-      {"name":"desktop_semantic_direct","description":"Read exact-window AT-SPI labels/tree even during ordinary physical activity or held controls. Returns original/current input generation and explicit input/action readiness. Non-actionable or incomplete snapshots issue no handles (focus/click/set_value=false); obtain a fresh complete snapshot after controls release. Only daemon-owned handles from actionable complete snapshots may be used with desktop_act semantic_set_value, semantic_click or standalone semantic_focus. focusable/FOCUSED flags attest element keyboard focus separately from Niri window focus; semantic_focus requires fresh complete semantics and verifies FOCUSED on the same exact object before returning focus_verified. Reobserve and requery semantics before later keyboard input. No raw object/index/Cua tokens and no pixel fallback. Native GTK candidates need live acceptance; missing/incomplete bridges use visual typed actions.","inputSchema":{"type":"object","properties":{"window_id":{"type":"integer"},"query":{"type":"string"},"max_elements":{"type":"integer"},"max_depth":{"type":"integer"},"include_text_selection":{"type":"boolean","description":"Opt-in bounded selection readback for at most one showing enabled FOCUSED unprotected Text object; unicode codepoint [start,end). Explicit available/unsupported/error, no input authority; check fresh generation, complete tree and text identity separately."}},"required":["window_id"]}},
+      {"name":"desktop_semantic_direct","description":"Read exact-window AT-SPI labels/tree even during ordinary physical activity or held controls. Set background=true for direct click/set_value on a visible target without moving the pointer or requesting focus; unrelated physical input does not invalidate those handles. Original object/context, target output and Escape are still checked; an app may itself change focus after an action. Returns original/current input generation and explicit input/action readiness. Non-actionable or incomplete snapshots issue no handles (focus/click/set_value=false); obtain a fresh complete snapshot after controls release. Only daemon-owned handles from actionable complete snapshots may be used with desktop_act semantic_set_value, semantic_click or standalone semantic_focus. focusable/FOCUSED flags attest element keyboard focus separately from Niri window focus; semantic_focus requires fresh complete semantics and verifies FOCUSED on the same exact object before returning focus_verified. Reobserve and requery semantics before later keyboard input. No raw object/index/Cua tokens and no pixel fallback. Native GTK candidates need live acceptance; missing/incomplete bridges use visual typed actions.","inputSchema":{"type":"object","properties":{"window_id":{"type":"integer"},"query":{"type":"string"},"max_elements":{"type":"integer"},"max_depth":{"type":"integer"},"background":{"type":"boolean","description":"Object-targeted click/edit on a visible target window without requesting focus or moving the pointer; no pointer, clipboard, keyboard or focus fallback."},"include_text_selection":{"type":"boolean","description":"Opt-in bounded selection readback for at most one showing enabled FOCUSED unprotected Text object; unicode codepoint [start,end). Explicit available/unsupported/error, no input authority; check fresh generation, complete tree and text identity separately."}},"required":["window_id"]}},
       {"name":"desktop_act","description":"Standalone launch_app(app:zed|chrome), editor_open_project(project:jarvis) and editor_open_file(project:jarvis,relative_path) spawn pinned isolated apps on the observed active output. OS spawn ACK is not UI success; uncertain spawn requires verification, no auto retry. Single-writer typed desktop actions against fresh observation. With a live task indicator, every call must include that exact task_id; old, ended or mismatched task identities are refused, while multiple batches in the same live scope are allowed. Rejects changed focus/geometry/scaling or changed pixels near pointer targets. x/y are local to displayed screenshot/crop. Every move/click/scroll/drag requires the displayed view to be at most1200 pixels on each axis; an oversized view rejects the whole batch before any input, queue admission or device preparation. Capture a fresh target crop and use its crop-local coordinates. Full images remain usable for overview, focus, keys and semantics. Focus must be standalone. close_window(window_id) is standalone with the same top-level window_id, exact fresh focused target/title/output; caller proves task ownership and safe saved state. Explicit close request acknowledgement is not window disappearance; inspect fresh inventory and any save modal. No PID kill or blind cleanup. Unknown or misplaced fields for an action kind reject the whole batch before input; restore_clipboard belongs only to paste, while type always preserves the prior selection. By default observe_after=true returns a new after_observation ID and image in this same response after dispatch/release and a bounded80ms defaultsettle wait; settle_ms=0..1000 can adjust. Use it for the next act and inspect expected result. A slow/unchanged frame needs another observation/semantic check, not repetition of toggle input. include_image=false omits its image. Acknowledgement is not UI success. Type text_method=auto uses clipboard for known Electron IDs (code/T3) and >1000-character text, keyboard for shorter text in other apps; explicit keyboard/clipboard are available. Electron wtype Unicode is unreliable on this laptop. Clipboard preserves supported text/rich app payloads and original Chromium provenance in bounded RAM from one offer, normalizes duplicate MIME names, omits SAVE_TARGETS and SAME_APP GTK_TEXT_BUFFER_CONTENTS transport markers, preserves serialized GTK rich text, and keeps a separate source holder across actor restarts. Unsupported/sensitive/oversized formats refuse before replacement. Own-source check runs after layout/keymap/window validation and before the first paste modifier press; ownership can still change between reply and input because Wayland has no atomic selection-check-and-paste. No restore after takeover/cancel/ownership loss. Scroll dx/dy are discrete wheel steps (integer -100..100), not pixels; positive dx moves right and positive dy moves down. Smooth-scroll animation needs another fresh observation/settle check before reusing visual targets. Keys are modifiers first e.g.[ctrl,l],[Return]. Explicit key_scope=compositor and Super/meta/logo chords use an owned persistent direct-uinput device because this Niri25.11 Wayland virtual keyboard bypasses compositor bindings; Ctrl/app chords retain the Wayland transport. A fresh proxy check requires backend routing_revision=2 and binds session/epoch/observation before forwarding a global batch; an older backend is refused. Missing permission/takeover monitor/compositor device-open evidence refuses the complete batch before input. Creating the own device is a capability side effect. A kernel input acknowledgement does not verify Niri/UI acceptance; inspect the fresh result. No automatic input fallback. Direct semantic_set_value(handle_id,text,expected_text optional) replaces exact editable contents; semantic_click(handle_id,action_name from direct tree) invokes only AT-SPI named action. Both freshly revalidate context and have no input fallback. Standalone semantic_focus(handle_id) uses Component.GrabFocus, then repeats exact object/window/context validation and freshly queries FOCUSED; acceptance alone is not focus_verified. It sends no keyboard input or fallback. Reobserve and requery the exact focused object before keyboard input. Batch stable edits/shortcuts when intermediate states cannot invalidate later targets; changed-target actions need fresh observation.","inputSchema":{"type":"object","properties":{"observation_id":{"type":"string"},"window_id":{"type":"integer"},"task_id":{"type":"string"},"timeout_ms":{"type":"integer","minimum":100,"maximum":120000,"description":"Whole batch deadline; release cleanup follows timeout."},"observe_after":{"type":"boolean","default":true},"include_image":{"type":"boolean","default":true},"settle_ms":{"type":"integer","default":80,"minimum":0,"maximum":1000,"description":"Post-action wait before capture; reobserve slow states, never replay blindly."},"actions":{"type":"array","items":action,"minItems":1,"maxItems":32}},"required":["observation_id","actions","task_id"]}},
       {"name":"desktop_cancel","description":"Priority epoch cancellation independent of actor lock. Pending batches stop; held buttons release. Already-dispatched effects remain. Wait for desktop_status active=null and actor_release_confirmed=true for full release.","inputSchema":{"type":"object","properties":{}}},
       {"name":"desktop_takeover","description":"Explicit human desktop takeover, persists its cause across backend restarts and latches refusal of future actions and cancels queued/active automation. Physical Escape cancels only queued/preparing/running work or a live task-indicator scope without latching future tasks; idle Escape only invalidates stale observations. Ordinary input invalidates stale observations and releases a conflicting batch without latching takeover. Wait active=null and actor_release_confirmed=true for full release. desktop_resume then fresh observation is required.","inputSchema":{"type":"object","properties":{}}},
@@ -5908,6 +5986,7 @@ mod release_recovery_tests {
         state.semantic_targets.lock().unwrap().insert(
             "offline-handle".into(),
             SemanticTarget {
+                background: false,
                 at: Instant::now(),
                 epoch: 77,
                 input_generation: state.input_policy.generation(),
@@ -6301,6 +6380,55 @@ mod release_recovery_tests {
         fs::remove_dir_all(dir).unwrap();
     }
     #[test]
+    fn background_semantic_handles_survive_unrelated_input_but_keep_escape_and_context_guards() {
+        let (state, dir) = cooperative_fixture("background-semantic");
+        *state.human_monitor.lock().unwrap() = json!({"available":true,"watched_devices":1});
+        let mut target = semantic_readiness_window();
+        target["is_focused"] = json!(false);
+        target["workspace_id"] = json!(33);
+        let mut visual = obs(&dir);
+        visual.output = "HDMI-A-2".into();
+        visual.output_geometry = json!({"width":800,"height":600,"x":0,"y":0});
+        visual.windows = json!([target.clone(), {"id":99,"is_focused":true,"workspace_id":55}]);
+        visual.focused_window = Some(json!({"id":99,"is_focused":true,"workspace_id":55}));
+        let windows = visual.windows.clone();
+        let workspaces = json!([{"id":33,"output":"HDMI-A-2","is_active":true,"is_focused":false}]);
+        let outputs = json!({"HDMI-A-2":{"logical":visual.output_geometry}});
+        physical_activity(&state, false, false);
+        state.input_policy.update_holds(1, true);
+        let data = result_data(&semantic_snapshot_result(&state, &json!({"background":true}),
+            target.clone(), semantic_readiness_snapshot(true), 77, 0, Instant::now()).unwrap());
+        assert_eq!(data["action_ready"], true);
+        assert_eq!(data["background"], true);
+        assert_eq!(data["input_readiness"]["shared_input_ready"], false);
+        assert_eq!(data["fresh_observation_required_for_input"], false);
+        assert_eq!(data["input_activity_during_snapshot"], true);
+        assert_eq!(data["elements"][0]["capabilities"]["focus"], false);
+        assert_eq!(data["elements"][0]["capabilities"]["set_value"], true);
+        assert!(data["elements"][0]["handle_id"].is_string());
+        assert!(state.semantic_targets.lock().unwrap().values().all(|t| t.background));
+        validate_background_semantic_inventory(&visual, &target, &windows, &workspaces, &outputs, true).unwrap();
+        let _guard = input_policy::Guard::background();
+        assert!(check_epoch(&state, Some(77)).is_ok());
+        physical_activity(&state, false, false);
+        assert!(check_epoch(&state, Some(77)).is_ok());
+        let mut changed = windows.clone();
+        changed[0]["pid"] = json!(999);
+        assert!(validate_background_semantic_inventory(&visual, &target, &changed, &workspaces, &outputs, true).is_err());
+        changed = windows.clone(); changed[0]["is_focused"] = json!(true);
+        assert!(validate_background_semantic_inventory(&visual, &target, &changed, &workspaces, &outputs, true).is_err());
+        // Being focused is not a product prohibition: without overlapping
+        // physical input, the direct object action can use the same window.
+        validate_background_semantic_inventory(&visual, &target, &changed, &workspaces, &outputs, false).unwrap();
+        let mut changed_output = outputs.clone(); changed_output["HDMI-A-2"]["logical"]["width"] = json!(900);
+        assert!(validate_background_semantic_inventory(&visual, &target, &windows, &workspaces, &changed_output, true).is_err());
+        test_live_scope(&state, "background-escape");
+        physical_activity(&state, true, false);
+        assert!(check_epoch(&state, Some(77)).is_err());
+        assert_eq!(state.capture_attempts.load(Ordering::SeqCst), 0);
+        fs::remove_dir_all(dir).unwrap();
+    }
+    #[test]
     fn semantic_readiness_changed_generation_keeps_tree_but_stale_handle_act_has_zero_effects() {
         let (state, dir) = cooperative_fixture("semantic-changed-generation");
         let prior = result_data(
@@ -6492,6 +6620,7 @@ mod release_recovery_tests {
                 0,
                 true,
                 reason != "initial_not_ready",
+                false,
                 &handles,
                 &mut cache,
                 &mut elements,
@@ -6644,7 +6773,7 @@ mod release_recovery_tests {
             .lock()
             .unwrap()
             .insert(o.id.clone(), o.clone());
-        validate_retained_observation(&state, &o).unwrap();
+        validate_retained_observation(&state, &o, true).unwrap();
         let marker_before = fs::read(dir.join("takeover.json")).unwrap();
         let failed_before = state.last_result.lock().unwrap().clone();
         let result = handle(&state, "desktop_recover_release", &json!({}), 77).unwrap();
@@ -6656,7 +6785,7 @@ mod release_recovery_tests {
         assert_eq!(*state.last_result.lock().unwrap(), failed_before);
         assert!(!state.capture_available.load(Ordering::SeqCst));
         assert!(state.active.lock().unwrap().is_null());
-        assert!(validate_retained_observation(&state, &o).is_err());
+        assert!(validate_retained_observation(&state, &o, true).is_err());
         fs::remove_dir_all(dir).unwrap();
     }
     #[test]

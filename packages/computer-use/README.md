@@ -352,3 +352,20 @@ Offline Rust subprocess/deadline/capture/transport regression is reproducible
 with the locked Cargo files. Nix host builds check packaging. Real application,
 client, restart, takeover and multi-display evidence belongs to the private
 acceptance matrix and demo; builds and fixtures alone do not complete acceptance.
+
+### Direct actions while the human uses another window
+
+`desktop_semantic_direct({window_id, background:true})` requests object-targeted
+click/edit handles. Use those handles with `desktop_act` and an observation of
+the target output. These actions call AT-SPI directly; they do not request
+focus, simulate keys, move the pointer or replace the clipboard. Physical input
+in another window does not invalidate this route. Input overlapping the actual
+target window, changed window/output identity, changed semantic context, an
+unavailable Escape monitor, task cancellation or incomplete semantics still
+refuse dispatch. The existing foreground mode remains available for explicit
+focus and keyboard/pointer work. Do not mix background actions with those
+actions when independent operation is required. A named app action can itself
+change focus; verify the result instead of promising universal focus isolation.
+
+This route requires the updated actor and actual app acceptance. Source tests
+are not proof of live app behavior or independent OS input seats.
