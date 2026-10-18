@@ -3,20 +3,20 @@ name: niri-computer-use
 description: Control the actual Niri laptop desktop, existing browser windows and native apps through the local desktop MCP tools. Use for requested GUI work on this laptop.
 ---
 
-Use the `weasel_desktop` MCP tools for the real desktop. The daemon is shared
-by T3 and ordinary Codex sessions and serializes physical input. Prefer T3's
-preview tools for work explicitly targeting its managed preview browser.
+Choose the fastest reliable existing route for the requested app action:
+authorized app APIs, plugins, MCP, ACP or A2A when they can perform it directly;
+then object-targeted accessibility; then visual keyboard/pointer input. Reuse
+the app's actual integration and verify the outcome rather than introducing a
+new protocol. Prefer routes that do not request focus or take over the human's
+pointer. For real desktop input use `weasel_desktop`; for T3's managed preview
+browser prefer its preview tools.
 
-For T3 desktop execution, use an app-owned Codex child with model
-`gpt-6-luna` and medium reasoning by default. The planning/conversation model
-may remain unchanged. Discover the live provider/model catalog first; send the
-complete current task, target output, allowed files and success criteria to
-one child, without assuming it inherits this conversation. Retain its task ID.
-Only that worker owns desktop input until it finishes or confirms release.
-The parent may read status and report progress, but must not send competing
-input. Use the existing Codex authentication; do not extract OAuth tokens.
-Outside T3, use a supported Luna delegation path when available; explicitly
-report if the current client cannot provide the requested model separation.
+Reuse the feature's existing accountable agent and the model selected for its
+task. Do not create a child or force a model handoff merely because desktop
+input is needed. Delegate when explicitly requested or useful for the actual
+work, and retain the returned task identity. Exactly one existing writer owns
+physical input until it finishes or confirms release; other agents may continue
+independent source work. Use existing authentication without extracting tokens.
 
 Keep a small task-owned app set. Before starting an app, inspect current windows
 and reuse an owned instance when its current document/profile and identity match;
@@ -86,7 +86,7 @@ question. After the user corrects or continues the task in a new turn, use a
 fresh task ID, start its indicator and obtain fresh observations. Include that
 task ID on every `desktop_act` request; multiple action batches may share the
 same live task scope, while an older, ended, reused or mismatched ID is refused.
-Released controls and the quiet-input gate remain required. A legacy persisted
+Shared keyboard/pointer input still requires released controls and the quiet-input gate. Direct object-targeted background actions use their separate route below. A legacy persisted
 `physical_escape` is migrated to the ordinary backend-startup gate on upgrade;
 the current authorized task permits its bound startup resume without another
 permission question. `explicit_desktop_takeover` remains a separate stop that
@@ -170,6 +170,23 @@ levels deep. Use a targeted query at depth 24 where useful; an incomplete tree
 is a capability limitation, not evidence that the control is absent. Ground
 visual or canvas targets from the fresh image when semantic actions are absent.
 
+When the live `desktop_semantic_direct` schema exposes `background`, prefer
+`background:true` for click/edit operations that should coexist with the human's
+work. Obtain an observation of the actual target output and exact window ID.
+Use only its returned handles and named actions; `desktop_act` must retain the
+same task/output/window. An actionable background snapshot may have
+`shared_input_ready:false` or a changed global input generation: input in a
+different window does not invalidate object-targeted operations. Actual target,
+window/output/context changes, overlapping input in that target, incomplete
+semantics, Escape and cancellation remain checked. Keep the batch to background
+semantic click/edit. There is no pointer, key, clipboard or focus fallback;
+`semantic_focus` requires foreground semantics. The app can itself change focus
+after a named action, so verify the result rather than promising isolation.
+If the live schema lacks this capability, do not send an invented field or
+claim background support; use an existing app integration or coordinate the
+shared input path. Monitor selection comes from actual runtime inventory and
+the current task, never a permanent DP-6/eDP-1 whitelist.
+
 `desktop_semantic_direct` reads an exact selected AT-SPI window and returns
 opaque daemon-owned handles, roles, labels, descriptions, action names and text
 excerpts. Descriptions can identify icon-only GTK toolbar controls. Its versioned
@@ -179,8 +196,8 @@ Visibility contradictions or unknown states make the snapshot read-only.
 Labels can remain readable during ordinary input or held controls. Treat
 `available`/`limited` as tree availability and inspect `input_ready`,
 `action_ready` and `fresh_semantic_snapshot_required_for_input` separately.
-Non-actionable snapshots deliberately issue no handles. After release, obtain
-a fresh complete semantic snapshot and current visual observation before acting;
+Non-actionable snapshots deliberately issue no handles. For the foreground
+route, after release obtain a fresh complete semantic snapshot and current visual observation before acting;
 ordinary input does not require a resume. Escape and cancellation remain stops.
 Use only a complete snapshot and a showing, enabled node whose meaning matches the fresh
 UI. `semantic_set_value` replaces its complete editable buffer with a complete

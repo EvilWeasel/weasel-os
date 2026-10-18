@@ -1403,3 +1403,7 @@ Migrated the protected updater origin checks, dev-shell default and active setup
 ## 2026-10-18 — Object-targeted background accessibility
 - Added explicit background semantics to separate direct AT-SPI click/edit from shared keyboard/pointer generation checks. Real target/window/output/context and Escape/cancellation remain checked; overlap with the actual focused target still rejects stale input. No focus/key/pointer/clipboard fallback is introduced.
 - Ten focused semantic regressions passed, including unrelated held input, target replacement/geometry, same-target collision, existing foreground generation semantics and physical Escape. Live app acceptance remains unrun; activation stays with the sole physical coordinator.
+
+## 2026-10-18 — Keep desktop guidance aligned with end-to-end ownership
+- Removed unconditional extra Luna-child dispatch from the desktop skill; reuse the user's selected accountable feature owner and retain one physical writer. Prefer existing app APIs/plugins/MCP/ACP/A2A before shared-input fallback.
+- Documented live-schema-gated background AT-SPI use and runtime monitor selection. Older installed actors must not be sent invented fields. This is documentation only; no extra build or physical action was run.
